@@ -1,0 +1,158 @@
+#ifndef CLAY_H
+#define CLAY_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "hash.h"
+
+/*
+ * ClayValue - tagged union type
+ *
+ * Low bit of pointer == 1 means small integer (value >> 1).
+ * Otherwise it's a pointer to a ClayObject.
+ * Special singletons: clay_nil, clay_true, clay_false.
+ */
+typedef uintptr_t ClayValue;
+
+/* Tag checks */
+#define CLAY_TAG_INT    1
+#define CLAY_IS_INT(v)  (((v) & CLAY_TAG_INT) != 0)
+#define CLAY_IS_PTR(v)  (((v) & CLAY_TAG_INT) == 0)
+
+/* Integer tagging */
+#define CLAY_INT_MAX  (INTPTR_MAX >> 1)
+#define CLAY_INT_MIN  (INTPTR_MIN >> 1)
+
+ClayValue clay_int(intptr_t n);
+intptr_t  clay_to_int(ClayValue v);
+int       clay_is_int(ClayValue v);
+
+/* Forward declaration */
+typedef struct ClayObject ClayObject;
+
+/* Method function signature: receiver, argc, argv -> return value */
+typedef ClayValue (*ClayMethodFunc)(ClayObject *self, int argc, ClayValue *argv);
+
+/* Method entry stored in the methods table */
+typedef struct {
+    ClayMethodFunc func;
+} ClayMethod;
+
+/*
+ * ClayObject - the core object structure
+ *
+ * Every object has:
+ *   - parent: prototype chain (NULL for root Object)
+ *   - slots: hash table of named ClayValue slots
+ *   - methods: hash table of named ClayMethod entries
+ *   - refcount: reference counting for memory management
+ *   - type: internal type tag for special objects (string, array, block)
+ */
+typedef enum {
+    CLAY_TYPE_OBJECT = 0,
+    CLAY_TYPE_STRING,
+    CLAY_TYPE_ARRAY,
+    CLAY_TYPE_BLOCK
+} ClayType;
+
+struct ClayObject {
+    ClayObject *parent;
+    HashTable  *slots;
+    HashTable  *methods;
+    int         refcount;
+    ClayType    type;
+
+    /* Type-specific data */
+    union {
+        struct {
+            char  *data;
+            size_t length;
+        } string;
+
+        struct {
+            ClayValue *items;
+            size_t     size;
+            size_t     capacity;
+        } array;
+
+        struct {
+            ClayMethodFunc func;
+            ClayValue     *env;
+            int            env_size;
+        } block;
+    } as;
+};
+
+/* Convert between ClayValue and ClayObject* */
+#define CLAY_OBJ(v)     ((ClayObject*)(v))
+#define CLAY_VAL(obj)   ((ClayValue)(uintptr_t)(obj))
+
+/* Nil value */
+#define CLAY_NIL        ((ClayValue)0)
+#define CLAY_IS_NIL(v)  ((v) == CLAY_NIL)
+
+/* Boolean singletons */
+extern ClayObject clay_true_obj;
+extern ClayObject clay_false_obj;
+#define CLAY_TRUE   CLAY_VAL(&clay_true_obj)
+#define CLAY_FALSE  CLAY_VAL(&clay_false_obj)
+#define CLAY_BOOL(c) ((c) ? CLAY_TRUE : CLAY_FALSE)
+#define CLAY_IS_TRUE(v) ((v) == CLAY_TRUE)
+#define CLAY_IS_FALSE(v) ((v) == CLAY_FALSE)
+
+/* --- Object model --- */
+ClayObject *clay_object_new(void);
+ClayObject *clay_clone(ClayObject *proto);
+void        clay_set_slot(ClayObject *obj, const char *name, ClayValue value);
+ClayValue   clay_get_slot(ClayObject *obj, const char *name);
+void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func);
+ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
+
+/* --- Memory management --- */
+ClayObject *clay_retain(ClayObject *obj);
+void        clay_release(ClayObject *obj);
+
+/* --- Message dispatch --- */
+ClayValue   clay_send(ClayObject *receiver, const char *selector, int argc, ClayValue *argv);
+
+/* --- Bootstrap / core prototypes --- */
+extern ClayObject *clay_Object;
+extern ClayObject *clay_Number;
+extern ClayObject *clay_String;
+extern ClayObject *clay_Array;
+extern ClayObject *clay_Block;
+extern ClayObject *clay_Nil;
+extern ClayObject *clay_Boolean;
+
+void clay_bootstrap(void);
+void clay_shutdown(void);
+
+/* --- String helpers --- */
+ClayObject *clay_string_new(const char *str);
+ClayObject *clay_string_new_len(const char *str, size_t len);
+const char *clay_string_data(ClayObject *obj);
+
+/* --- Array helpers --- */
+ClayObject *clay_array_new(void);
+void        clay_array_append(ClayObject *arr, ClayValue val);
+ClayValue   clay_array_at(ClayObject *arr, size_t index);
+size_t      clay_array_size(ClayObject *arr);
+
+/* --- Block helpers --- */
+ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size);
+
+/* --- Debug --- */
+void        clay_inspect(ClayObject *obj);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* CLAY_H */
