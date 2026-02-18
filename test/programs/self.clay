@@ -1,0 +1,46 @@
+// self.clay - Test the self keyword
+
+Counter = Object clone({
+  count = 0
+
+  inc() {
+    count = count + 1
+    self
+  }
+
+  value() {
+    count
+  }
+
+  toString() {
+    "Counter(" + count toString() + ")"
+  }
+})
+
+c = Counter clone()
+
+// Method chaining via self
+c inc() inc() inc()
+
+"After 3 increments: " print()
+c toString() println()
+
+"Value: " print()
+c value() println()
+
+// self in a method that returns self
+Dog = Object clone({
+  name = "unnamed"
+
+  setName(n) {
+    name = n
+    self
+  }
+
+  speak() {
+    name + " says woof!"
+  }
+})
+
+d = Dog clone()
+d setName("Rex") speak() println()

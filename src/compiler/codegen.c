@@ -280,8 +280,11 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
 }
 
 static char *emit_self(CodeGen *cg, AstNode *node) {
+    if (!cg->in_method) {
+        fprintf(stderr, "codegen: 'self' used outside of method or block (line %d)\n", node->line);
+        return NULL;
+    }
     char *t = temp_name(cg);
-    (void)node;
     emit_indent(cg);
     fprintf(cg->out, "ClayValue %s = CLAY_VAL(self);\n", t);
     return t;
