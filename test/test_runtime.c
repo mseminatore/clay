@@ -441,6 +441,86 @@ static void test_deep_prototype_chain(void) {
     clay_release(Animal);
 }
 
+static void test_error_handling(void) {
+    SUITE("Error Handling");
+
+    COMMENT("error object creation...");
+    ClayObject *err = clay_error_new("test error", "TestError");
+    TEST(err != NULL);
+    ClayValue msg = clay_send(err, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(msg)), "test error") == 0);
+    ClayValue typ = clay_send(err, "type", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(typ)), "TestError") == 0);
+    clay_release(CLAY_OBJ(msg));
+    clay_release(CLAY_OBJ(typ));
+    clay_release(err);
+
+    COMMENT("try/catch with raise...");
+    ClayValue result = CLAY_NIL;
+    if (clay_try_push() == 0) {
+        clay_raise(CLAY_VAL(clay_error_new("caught me", "RuntimeError")));
+        clay_try_pop();
+        result = CLAY_VAL(clay_string_new("not reached"));
+    } else {
+        result = clay_error_stack.current_error;
+    }
+    TEST(!CLAY_IS_NIL(result));
+    ClayValue rmsg = clay_send_val(result, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(rmsg)), "caught me") == 0);
+    clay_release(CLAY_OBJ(rmsg));
+
+    COMMENT("try/catch with div by zero...");
+    ClayValue result2 = CLAY_NIL;
+    if (clay_try_push() == 0) {
+        /* Trigger division by zero through dispatch */
+        ClayObject *ten = clay_clone(clay_Number);
+        clay_set_slot(ten, "_value", clay_int(10));
+        ClayValue zero = clay_int(0);
+        clay_send(ten, "/", 1, &zero);
+        clay_try_pop();
+        result2 = CLAY_VAL(clay_string_new("not reached"));
+        clay_release(ten);
+    } else {
+        result2 = clay_error_stack.current_error;
+    }
+    TEST(!CLAY_IS_NIL(result2));
+    ClayValue dmsg = clay_send_val(result2, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(dmsg)), "division by zero") == 0);
+    clay_release(CLAY_OBJ(dmsg));
+
+    COMMENT("nested try/catch...");
+    ClayValue outer = CLAY_NIL;
+    if (clay_try_push() == 0) {
+        ClayValue inner = CLAY_NIL;
+        if (clay_try_push() == 0) {
+            clay_raise(CLAY_VAL(clay_error_new("inner error", "RuntimeError")));
+            clay_try_pop();
+        } else {
+            inner = clay_error_stack.current_error;
+        }
+        clay_try_pop();
+        outer = inner; /* inner catch handles it */
+    } else {
+        outer = CLAY_VAL(clay_string_new("outer should not catch"));
+    }
+    ClayValue imsg = clay_send_val(outer, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(imsg)), "inner error") == 0);
+    clay_release(CLAY_OBJ(imsg));
+
+    COMMENT("method not found raises error...");
+    ClayValue result3 = CLAY_NIL;
+    if (clay_try_push() == 0) {
+        clay_send_val(clay_int(42), "nonexistent", 0, NULL);
+        clay_try_pop();
+    } else {
+        result3 = clay_error_stack.current_error;
+    }
+    TEST(!CLAY_IS_NIL(result3));
+    ClayValue etype = clay_send_val(result3, "type", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(etype)), "MethodNotFound") == 0);
+    clay_release(CLAY_OBJ(etype));
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -458,6 +538,7 @@ void test_main(int argc, char *argv[]) {
     test_boolean_control();
     test_prototype_chain();
     test_deep_prototype_chain();
+    test_error_handling();
 
     clay_shutdown();
 }

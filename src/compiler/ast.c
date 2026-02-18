@@ -79,6 +79,13 @@ void ast_free(AstNode *node) {
         case NODE_IMPORT:
             free(node->as.import.path);
             break;
+        case NODE_TRY_CATCH:
+            ast_free(node->as.try_catch.try_block);
+            if (node->as.try_catch.catch_block) ast_free(node->as.try_catch.catch_block);
+            break;
+        case NODE_RAISE:
+            ast_free(node->as.raise.expr);
+            break;
         case NODE_PROGRAM:
             nodelist_free(&node->as.program.stmts);
             break;
@@ -149,6 +156,17 @@ void ast_print(AstNode *node, int indent) {
             break;
         case NODE_IMPORT:
             printf("Import(\"%s\")\n", node->as.import.path);
+            break;
+        case NODE_TRY_CATCH:
+            printf("TryCatch\n");
+            print_indent(indent + 1); printf("try: "); ast_print(node->as.try_catch.try_block, indent + 2);
+            if (node->as.try_catch.catch_block) {
+                print_indent(indent + 1); printf("catch: "); ast_print(node->as.try_catch.catch_block, indent + 2);
+            }
+            break;
+        case NODE_RAISE:
+            printf("Raise\n");
+            ast_print(node->as.raise.expr, indent + 1);
             break;
         case NODE_PROGRAM:
             printf("Program(stmts=%d)\n", node->as.program.stmts.count);

@@ -136,6 +136,7 @@ extern ClayObject *clay_Array;
 extern ClayObject *clay_Block;
 extern ClayObject *clay_Nil;
 extern ClayObject *clay_Boolean;
+extern ClayObject *clay_Error;
 
 void clay_bootstrap(void);
 void clay_shutdown(void);
@@ -156,6 +157,30 @@ ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size);
 
 /* --- Debug --- */
 void        clay_inspect(ClayObject *obj);
+
+/* --- Error handling (setjmp/longjmp) --- */
+#include <setjmp.h>
+
+#define CLAY_MAX_TRY_DEPTH 64
+
+typedef struct {
+    jmp_buf frames[CLAY_MAX_TRY_DEPTH];
+    int depth;
+    ClayValue current_error; /* the error being raised */
+} ClayErrorStack;
+
+extern ClayErrorStack clay_error_stack;
+
+/* Push/pop try frames */
+#define clay_try_push() (clay_error_stack.depth < CLAY_MAX_TRY_DEPTH ? \
+    setjmp(clay_error_stack.frames[clay_error_stack.depth++]) : -1)
+#define clay_try_pop() (clay_error_stack.depth--)
+
+/* Raise an error — longjmps to nearest try frame, or aborts */
+void clay_raise(ClayValue error);
+
+/* Create an Error object with message and type */
+ClayObject *clay_error_new(const char *message, const char *type);
 
 #ifdef __cplusplus
 }

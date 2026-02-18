@@ -243,6 +243,42 @@ s replace("world", "Clay")          // "hello Clay"
 /* block comment */
 ```
 
+### Error handling
+
+Clay provides `try`/`catch` blocks and `raise` for error handling:
+
+```clay
+// Catch errors
+result = try({
+  10 / 0
+}) catch({ |e|
+  "Caught: " + e message()
+})
+
+// Raise custom errors
+raise("something went wrong")
+
+// Errors have message() and type() methods
+try({
+  nil banana()
+}) catch({ |e|
+  e type() println()    // "NilError"
+  e message() println() // "message 'banana' sent to nil"
+})
+```
+
+Error types include `DivisionByZero`, `MethodNotFound`, `NilError`, `TypeError`, and `RuntimeError` (for user-raised strings).
+
+Objects can override `doesNotUnderstand` for proxy-style dispatch:
+
+```clay
+Proxy = Object clone({
+  doesNotUnderstand(name, args) {
+    "forwarding: " + name
+  }
+})
+```
+
 ## Core Objects
 
 | Prototype | Methods |
@@ -253,6 +289,7 @@ s replace("world", "Clay")          // "hello Clay"
 | Array | `at(i)`, `append(val)`, `size()`, `each(block)`, `toString()` |
 | Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
 | Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
+| Error | `message()`, `type()`, `toString()` |
 
 ## Generated C
 

@@ -26,6 +26,7 @@ set(RUNTIME_SOURCES
     src/runtime/number.c
     src/runtime/block.c
     src/runtime/array.c
+    src/runtime/error.c
     src/runtime/bootstrap.c
 )
 

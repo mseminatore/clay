@@ -48,8 +48,7 @@ static ClayValue number_div(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t a = self_int_value(self);
     intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
     if (b == 0) {
-        fprintf(stderr, "clay: division by zero\n");
-        exit(1);
+        clay_raise(CLAY_VAL(clay_error_new("division by zero", "DivisionByZero")));
     }
     return clay_int(a / b);
 }
@@ -59,8 +58,7 @@ static ClayValue number_mod(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t a = self_int_value(self);
     intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
     if (b == 0) {
-        fprintf(stderr, "clay: modulo by zero\n");
-        exit(1);
+        clay_raise(CLAY_VAL(clay_error_new("modulo by zero", "DivisionByZero")));
     }
     return clay_int(a % b);
 }

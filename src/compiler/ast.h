@@ -15,7 +15,9 @@ typedef enum {
     NODE_SLOT_DEF,      /* name = expr inside clone */
     NODE_CLONE,         /* expr clone({ slots/methods }) */
     NODE_ARRAY_LIT,     /* [a, b, c] */
-    NODE_IMPORT         /* import("path") */
+    NODE_IMPORT,        /* import("path") */
+    NODE_TRY_CATCH,     /* try({ ... }) catch({ |e| ... }) */
+    NODE_RAISE          /* raise(expr) */
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -91,6 +93,15 @@ struct AstNode {
 
         /* NODE_IMPORT */
         struct { char *path; } import;
+
+        /* NODE_TRY_CATCH */
+        struct {
+            AstNode *try_block;
+            AstNode *catch_block;  /* block with 1 param (error) */
+        } try_catch;
+
+        /* NODE_RAISE */
+        struct { AstNode *expr; } raise;
 
         /* NODE_PROGRAM */
         struct { NodeList stmts; } program;

@@ -244,6 +244,14 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
         case NODE_SLOT_DEF:
             prewalk_assign_names(node->as.slot_def.value, parent_name);
             break;
+        case NODE_TRY_CATCH:
+            prewalk_assign_names(node->as.try_catch.try_block, parent_name);
+            if (node->as.try_catch.catch_block)
+                prewalk_assign_names(node->as.try_catch.catch_block, parent_name);
+            break;
+        case NODE_RAISE:
+            prewalk_assign_names(node->as.raise.expr, parent_name);
+            break;
         default:
             break;
     }
@@ -297,6 +305,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Block") == 0 ||
            strcmp(name, "Nil") == 0 ||
            strcmp(name, "Boolean") == 0 ||
+           strcmp(name, "Error") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -310,6 +319,7 @@ static const char *builtin_c_expr(const char *name) {
     if (strcmp(name, "Block") == 0)   return "CLAY_VAL(clay_Block)";
     if (strcmp(name, "Nil") == 0)     return "CLAY_VAL(clay_Nil)";
     if (strcmp(name, "Boolean") == 0) return "CLAY_VAL(clay_Boolean)";
+    if (strcmp(name, "Error") == 0)   return "CLAY_VAL(clay_Error)";
     if (strcmp(name, "true") == 0)    return "CLAY_TRUE";
     if (strcmp(name, "false") == 0)   return "CLAY_FALSE";
     if (strcmp(name, "nil") == 0)     return "CLAY_NIL";
@@ -381,6 +391,14 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             break;
         case NODE_ARRAY_LIT:
             scan_free_vars_list(&node->as.array_lit.elements, block_params, param_count, caps, cg);
+            break;
+        case NODE_TRY_CATCH:
+            scan_free_vars(node->as.try_catch.try_block, block_params, param_count, caps, cg);
+            if (node->as.try_catch.catch_block)
+                scan_free_vars(node->as.try_catch.catch_block, block_params, param_count, caps, cg);
+            break;
+        case NODE_RAISE:
+            scan_free_vars(node->as.raise.expr, block_params, param_count, caps, cg);
             break;
         default:
             break;
@@ -531,8 +549,12 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     } else if (strcmp(op, "*") == 0) {
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) * clay_to_int(%s));\n", t, left, right);
     } else if (strcmp(op, "/") == 0) {
+        fprintf(cg->out, "if (clay_to_int(%s) == 0) clay_raise(CLAY_VAL(clay_error_new(\"division by zero\", \"DivisionByZero\")));\n", right);
+        emit_indent(cg);
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) / clay_to_int(%s));\n", t, left, right);
     } else if (strcmp(op, "%%") == 0) {
+        fprintf(cg->out, "if (clay_to_int(%s) == 0) clay_raise(CLAY_VAL(clay_error_new(\"modulo by zero\", \"DivisionByZero\")));\n", right);
+        emit_indent(cg);
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) %% clay_to_int(%s));\n", t, left, right);
     } else if (strcmp(op, "==") == 0) {
         fprintf(cg->out, "%s = CLAY_BOOL(clay_to_int(%s) == clay_to_int(%s));\n", t, left, right);
@@ -630,6 +652,89 @@ static char *emit_array_lit(CodeGen *cg, AstNode *node) {
     return t;
 }
 
+static char *emit_try_catch(CodeGen *cg, AstNode *node) {
+    char *t = temp_name(cg);
+    char *try_tmp = temp_name(cg);
+    char *err_tmp = temp_name(cg);
+
+    /* Declare result variable */
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s;\n", t);
+
+    /* Emit try block as a block object */
+    char *try_block = emit_expr(cg, node->as.try_catch.try_block);
+
+    /* Emit catch block if present */
+    char *catch_block = NULL;
+    if (node->as.try_catch.catch_block) {
+        catch_block = emit_expr(cg, node->as.try_catch.catch_block);
+    }
+
+    /* Push error frame and test setjmp */
+    emit_indent(cg);
+    fprintf(cg->out, "if (clay_try_push() == 0) {\n");
+    cg->indent++;
+
+    /* Execute try block */
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s = clay_send_val(%s, \"value\", 0, NULL);\n", try_tmp, try_block);
+    emit_indent(cg);
+    fprintf(cg->out, "clay_try_pop();\n");
+    emit_indent(cg);
+    fprintf(cg->out, "%s = %s;\n", t, try_tmp);
+
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "} else {\n");
+    cg->indent++;
+
+    /* Error was raised — get the error value */
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s = clay_error_stack.current_error;\n", err_tmp);
+
+    if (catch_block) {
+        emit_indent(cg);
+        fprintf(cg->out, "%s = clay_send_val(%s, \"value\", 1, (ClayValue[]){ %s });\n",
+                t, catch_block, err_tmp);
+    } else {
+        emit_indent(cg);
+        fprintf(cg->out, "%s = CLAY_NIL;\n", t);
+    }
+
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "}\n");
+
+    free(try_block);
+    if (catch_block) free(catch_block);
+    free(try_tmp);
+    free(err_tmp);
+    return t;
+}
+
+static char *emit_raise(CodeGen *cg, AstNode *node) {
+    char *val = emit_expr(cg, node->as.raise.expr);
+
+    /* If the value is a string, wrap it in an Error object */
+    char *t = temp_name(cg);
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s = %s;\n", t, val);
+    emit_indent(cg);
+    fprintf(cg->out, "if (CLAY_IS_PTR(%s) && !CLAY_IS_NIL(%s) && CLAY_OBJ(%s)->type == CLAY_TYPE_STRING) {\n",
+            t, t, t);
+    cg->indent++;
+    emit_indent(cg);
+    fprintf(cg->out, "%s = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(%s)), \"RuntimeError\"));\n", t, t);
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "}\n");
+    emit_indent(cg);
+    fprintf(cg->out, "clay_raise(%s);\n", t);
+
+    free(val);
+    return t;
+}
+
 static char *emit_expr(CodeGen *cg, AstNode *node) {
     if (!node) return NULL;
     switch (node->type) {
@@ -641,6 +746,8 @@ static char *emit_expr(CodeGen *cg, AstNode *node) {
         case NODE_BINARY:     return emit_binary(cg, node);
         case NODE_BLOCK:      return emit_block(cg, node);
         case NODE_ARRAY_LIT:  return emit_array_lit(cg, node);
+        case NODE_TRY_CATCH:  return emit_try_catch(cg, node);
+        case NODE_RAISE:      return emit_raise(cg, node);
         default:
             fprintf(stderr, "codegen: unhandled node type %d\n", node->type);
             return NULL;

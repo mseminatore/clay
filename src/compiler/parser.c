@@ -281,6 +281,36 @@ static AstNode *parse_primary(Parser *p) {
         return result;
     }
 
+    /* try/catch expression */
+    if (match(p, TOK_TRY)) {
+        int line = p->previous.line;
+        expect(p, TOK_LPAREN, "Expected '(' after try");
+        AstNode *try_block = parse_block(p);
+        expect(p, TOK_RPAREN, "Expected ')' after try block");
+        skip_newlines(p);
+        AstNode *catch_block = NULL;
+        if (match(p, TOK_CATCH)) {
+            expect(p, TOK_LPAREN, "Expected '(' after catch");
+            catch_block = parse_block(p);
+            expect(p, TOK_RPAREN, "Expected ')' after catch block");
+        }
+        AstNode *node = ast_new(NODE_TRY_CATCH, line);
+        node->as.try_catch.try_block = try_block;
+        node->as.try_catch.catch_block = catch_block;
+        return node;
+    }
+
+    /* raise expression */
+    if (match(p, TOK_RAISE)) {
+        int line = p->previous.line;
+        expect(p, TOK_LPAREN, "Expected '(' after raise");
+        AstNode *expr = parse_expression(p);
+        expect(p, TOK_RPAREN, "Expected ')' after raise argument");
+        AstNode *node = ast_new(NODE_RAISE, line);
+        node->as.raise.expr = expr;
+        return node;
+    }
+
     /* Identifier */
     if (match(p, TOK_IDENT)) {
         AstNode *node = ast_new(NODE_IDENT, p->previous.line);

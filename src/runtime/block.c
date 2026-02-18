@@ -31,8 +31,7 @@ ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size) {
 /* Block "value" messages - call the block with arguments */
 static ClayValue block_value(ClayObject *self, int argc, ClayValue *argv) {
     if (self->type != CLAY_TYPE_BLOCK || !self->as.block.func) {
-        fprintf(stderr, "clay: value sent to non-block\n");
-        exit(1);
+        clay_raise(CLAY_VAL(clay_error_new("value sent to non-block", "TypeError")));
     }
     return self->as.block.func(self, argc, argv);
 }

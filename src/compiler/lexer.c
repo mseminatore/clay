@@ -100,6 +100,9 @@ static Token lex_number(Lexer *lexer, const char *start) {
 static TokenType check_keyword(const char *start, int length) {
     if (length == 4 && memcmp(start, "self", 4) == 0) return TOK_SELF;
     if (length == 6 && memcmp(start, "import", 6) == 0) return TOK_IMPORT;
+    if (length == 3 && memcmp(start, "try", 3) == 0) return TOK_TRY;
+    if (length == 5 && memcmp(start, "catch", 5) == 0) return TOK_CATCH;
+    if (length == 5 && memcmp(start, "raise", 5) == 0) return TOK_RAISE;
     return TOK_IDENT;
 }
 
@@ -190,6 +193,9 @@ const char *token_type_name(TokenType type) {
         case TOK_IDENT:      return "IDENT";
         case TOK_SELF:       return "SELF";
         case TOK_IMPORT:     return "IMPORT";
+        case TOK_TRY:        return "TRY";
+        case TOK_CATCH:      return "CATCH";
+        case TOK_RAISE:      return "RAISE";
         case TOK_LPAREN:     return "(";
         case TOK_RPAREN:     return ")";
         case TOK_LBRACE:     return "{";

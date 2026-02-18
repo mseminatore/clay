@@ -11,12 +11,14 @@ ClayObject *clay_Array   = NULL;
 ClayObject *clay_Block   = NULL;
 ClayObject *clay_Nil     = NULL;
 ClayObject *clay_Boolean = NULL;
+ClayObject *clay_Error   = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
 extern void clay_string_init_methods(ClayObject *proto);
 extern void clay_array_init_methods(ClayObject *proto);
 extern void clay_block_init_methods(ClayObject *proto);
+extern void clay_error_init_methods(ClayObject *proto);
 
 /* Object base methods */
 
@@ -44,8 +46,9 @@ static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue 
     const char *sel = (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0]))
         ? clay_string_data(CLAY_OBJ(argv[0]))
         : "???";
-    fprintf(stderr, "clay: object %p does not understand '%s'\n", (void *)self, sel);
-    exit(1);
+    char buf[128];
+    snprintf(buf, sizeof(buf), "object does not understand '%s'", sel);
+    clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     return CLAY_NIL;
 }
 
@@ -195,6 +198,12 @@ void clay_bootstrap(void) {
     clay_Nil->parent = clay_Object;
     clay_Nil->refcount = 1000000;
     clay_set_method(clay_Nil, "toString", nil_toString);
+
+    /* Error prototype */
+    clay_Error = clay_object_new();
+    clay_Error->parent = clay_Object;
+    clay_Error->refcount = 1000000;
+    clay_error_init_methods(clay_Error);
 }
 
 void clay_shutdown(void) {
