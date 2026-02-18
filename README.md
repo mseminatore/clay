@@ -19,6 +19,7 @@ This produces:
 
 ```
 clay [options] <source.clay>
+clay              # start interactive REPL
 ```
 
 | Option | Description |
@@ -26,6 +27,30 @@ clay [options] <source.clay>
 | `-c` | Emit C code only (don't compile to binary) |
 | `-o <name>` | Set output binary name |
 | `--ast` | Print the AST and exit |
+| `--repl` | Start interactive REPL (also activates with no arguments) |
+
+### REPL
+
+Run `clay` with no arguments to start the interactive REPL:
+
+```
+$ clay
+Clay REPL (type 'quit' or Ctrl+Z to exit)
+
+clay> 1 + 2
+3
+clay> name = "World"
+clay> "Hello, ${name}!"
+Hello, World!
+clay> Point = Object clone({
+  ...   x = 0
+  ...   y = 0
+  ... })
+clay> quit
+Bye!
+```
+
+Variables and object definitions persist across inputs. Bare expressions are automatically printed. Multi-line input is detected via brace/paren matching.
 
 ### Examples
 
