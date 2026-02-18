@@ -121,6 +121,37 @@ Booleans are objects. Control flow is message passing with blocks:
 ```clay
 (x > 0) ifTrue({ "positive" println() })
 (x > 0) ifFalse({ "non-positive" println() })
+
+// Chaining ifTrue/ifFalse
+(x > 0) ifTrue({ "positive" }) ifFalse({ "non-positive" })
+```
+
+Blocks capture variables from their enclosing scope (closures):
+
+```clay
+multiplier(factor) {
+  { |x| x * factor }   // 'factor' is captured from the method scope
+}
+```
+
+### Imports
+
+Use `import` to include definitions from another Clay file:
+
+```clay
+import("math.clay")        // relative to the importing file
+import("lib/utils.clay")   // subdirectory paths work too
+```
+
+Imports are resolved at parse time. Duplicate imports of the same file are silently skipped.
+
+### Unary minus
+
+Negative numbers work naturally:
+
+```clay
+x = -5
+y = -(a + b)
 ```
 
 ### Arrays

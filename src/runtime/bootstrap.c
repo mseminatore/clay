@@ -51,20 +51,72 @@ static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue 
 
 /* Boolean methods */
 
-static ClayValue bool_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_NIL;
-    if (self == &clay_true_obj) {
-        return clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
+/*
+ * ifTrue/ifFalse return a "condition result" object that supports chaining.
+ * The result stores the value in a "_val" slot and the "_matched" flag.
+ * ifFalse on a result where _matched==true returns _val unchanged.
+ * ifFalse on a result where _matched==false evaluates the block.
+ */
+
+static ClayObject *make_cond_result(ClayValue val, int matched) {
+    ClayObject *obj = clay_clone(clay_Object);
+    clay_set_slot(obj, "_val", val);
+    clay_set_slot(obj, "_matched", matched ? CLAY_TRUE : CLAY_FALSE);
+    return obj;
+}
+
+static ClayValue cond_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
+    ClayValue matched = clay_get_slot(self, "_matched");
+    if (matched == CLAY_TRUE) {
+        return clay_get_slot(self, "_val");
     }
-    return CLAY_NIL;
+    if (argc < 1) return CLAY_NIL;
+    return clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
+}
+
+static ClayValue cond_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
+    ClayValue matched = clay_get_slot(self, "_matched");
+    if (matched == CLAY_TRUE) {
+        return clay_get_slot(self, "_val");
+    }
+    if (argc < 1) return CLAY_VAL(self);
+    ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
+    ClayObject *cr = make_cond_result(result, 1);
+    clay_set_method(cr, "ifFalse", cond_ifFalse);
+    clay_set_method(cr, "ifTrue", cond_ifTrue);
+    return CLAY_VAL(cr);
+}
+
+static ClayValue bool_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_VAL(self);
+    if (self == &clay_true_obj) {
+        ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
+        ClayObject *cr = make_cond_result(result, 1);
+        clay_set_method(cr, "ifFalse", cond_ifFalse);
+        clay_set_method(cr, "ifTrue", cond_ifTrue);
+        return CLAY_VAL(cr);
+    }
+    /* false: return a condition result with _matched=false */
+    ClayObject *cr = make_cond_result(CLAY_NIL, 0);
+    clay_set_method(cr, "ifFalse", cond_ifFalse);
+    clay_set_method(cr, "ifTrue", cond_ifTrue);
+    return CLAY_VAL(cr);
 }
 
 static ClayValue bool_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_NIL;
+    if (argc < 1) return CLAY_VAL(self);
     if (self == &clay_false_obj) {
-        return clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
+        ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
+        ClayObject *cr = make_cond_result(result, 1);
+        clay_set_method(cr, "ifTrue", cond_ifTrue);
+        clay_set_method(cr, "ifFalse", cond_ifFalse);
+        return CLAY_VAL(cr);
     }
-    return CLAY_NIL;
+    /* true: return a condition result with _matched=false */
+    ClayObject *cr = make_cond_result(CLAY_NIL, 0);
+    clay_set_method(cr, "ifTrue", cond_ifTrue);
+    clay_set_method(cr, "ifFalse", cond_ifFalse);
+    return CLAY_VAL(cr);
 }
 
 static ClayValue bool_toString(ClayObject *self, int argc, ClayValue *argv) {

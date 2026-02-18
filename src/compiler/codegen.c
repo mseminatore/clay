@@ -84,10 +84,48 @@ static const char *op_func_suffix(const char *op) {
 
 /* --- Forward declarations for collecting methods/blocks --- */
 
+/* Capture list for blocks (closure-captured variables) */
+typedef struct {
+    char **names;
+    int count;
+    int capacity;
+} CaptureList;
+
+static void capture_init(CaptureList *cl) {
+    cl->names = NULL;
+    cl->count = 0;
+    cl->capacity = 0;
+}
+
+static int capture_has(CaptureList *cl, const char *name) {
+    for (int i = 0; i < cl->count; i++) {
+        if (strcmp(cl->names[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
+static void capture_add(CaptureList *cl, const char *name) {
+    if (capture_has(cl, name)) return;
+    if (cl->count >= cl->capacity) {
+        cl->capacity = cl->capacity == 0 ? 4 : cl->capacity * 2;
+        cl->names = (char **)realloc(cl->names, sizeof(char *) * (size_t)cl->capacity);
+    }
+    cl->names[cl->count++] = strdup(name);
+}
+
+static void capture_free(CaptureList *cl) {
+    for (int i = 0; i < cl->count; i++) free(cl->names[i]);
+    free(cl->names);
+    cl->names = NULL;
+    cl->count = 0;
+    cl->capacity = 0;
+}
+
 typedef struct MethodDef {
     char *func_name;
     char *obj_context; /* which object this method belongs to */
     AstNode *node;     /* NODE_METHOD_DEF or NODE_BLOCK */
+    CaptureList captures; /* captured variables for blocks */
     struct MethodDef *next;
 } MethodDef;
 
@@ -98,6 +136,19 @@ static void collect_method(const char *func_name, const char *obj_ctx, AstNode *
     m->func_name = strdup(func_name);
     m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
     m->node = node;
+    capture_init(&m->captures);
+    m->next = collected_methods;
+    collected_methods = m;
+}
+
+static void collect_method_with_captures(const char *func_name, const char *obj_ctx,
+                                         AstNode *node, CaptureList *caps) {
+    MethodDef *m = (MethodDef *)malloc(sizeof(MethodDef));
+    m->func_name = strdup(func_name);
+    m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
+    m->node = node;
+    m->captures = *caps; /* take ownership */
+    caps->names = NULL; caps->count = 0; caps->capacity = 0;
     m->next = collected_methods;
     collected_methods = m;
 }
@@ -265,6 +316,77 @@ static const char *builtin_c_expr(const char *name) {
     return name;
 }
 
+/* --- Free-variable scanner for closure capture --- */
+
+/* Helper: check if name is in a string array */
+static int name_in_list(const char *name, char **list, int count) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(list[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
+static void scan_free_vars(AstNode *node, char **block_params, int param_count,
+                           CaptureList *caps, CodeGen *cg);
+
+static void scan_free_vars_list(NodeList *list, char **block_params, int param_count,
+                                CaptureList *caps, CodeGen *cg) {
+    for (int i = 0; i < list->count; i++)
+        scan_free_vars(list->items[i], block_params, param_count, caps, cg);
+}
+
+static void scan_free_vars(AstNode *node, char **block_params, int param_count,
+                           CaptureList *caps, CodeGen *cg) {
+    if (!node) return;
+    switch (node->type) {
+        case NODE_IDENT: {
+            const char *name = node->as.ident.name;
+            /* Skip builtins, block params, and captures already recorded */
+            if (is_builtin_global(name)) break;
+            if (name_in_list(name, block_params, param_count)) break;
+            if (capture_has(caps, name)) break;
+            /* If it's a local in the enclosing scope, it needs capture */
+            if (is_local(cg, name)) {
+                capture_add(caps, name);
+            }
+            break;
+        }
+        case NODE_BLOCK:
+            /* Don't descend into nested blocks — they capture separately */
+            break;
+        case NODE_INT_LIT:
+        case NODE_STRING_LIT:
+        case NODE_SELF:
+            break;
+        case NODE_SEND:
+            scan_free_vars(node->as.send.receiver, block_params, param_count, caps, cg);
+            scan_free_vars_list(&node->as.send.args, block_params, param_count, caps, cg);
+            break;
+        case NODE_BINARY:
+            scan_free_vars(node->as.binary.left, block_params, param_count, caps, cg);
+            scan_free_vars(node->as.binary.right, block_params, param_count, caps, cg);
+            break;
+        case NODE_ASSIGN:
+            scan_free_vars(node->as.assign.value, block_params, param_count, caps, cg);
+            break;
+        case NODE_CLONE:
+            scan_free_vars(node->as.clone.proto, block_params, param_count, caps, cg);
+            scan_free_vars_list(&node->as.clone.members, block_params, param_count, caps, cg);
+            break;
+        case NODE_METHOD_DEF:
+            scan_free_vars_list(&node->as.method_def.body, block_params, param_count, caps, cg);
+            break;
+        case NODE_SLOT_DEF:
+            scan_free_vars(node->as.slot_def.value, block_params, param_count, caps, cg);
+            break;
+        case NODE_ARRAY_LIT:
+            scan_free_vars_list(&node->as.array_lit.elements, block_params, param_count, caps, cg);
+            break;
+        default:
+            break;
+    }
+}
+
 static char *emit_ident(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
@@ -397,11 +519,42 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
         return NULL;
     }
 
-    collect_method(fname, NULL, node);
+    /* Scan for captured variables from enclosing scope */
+    char **param_names = NULL;
+    int param_count = node->as.block.params.count;
+    if (param_count > 0) {
+        param_names = (char **)malloc(sizeof(char *) * (size_t)param_count);
+        for (int i = 0; i < param_count; i++)
+            param_names[i] = node->as.block.params.items[i]->as.ident.name;
+    }
+
+    CaptureList caps;
+    capture_init(&caps);
+    for (int i = 0; i < node->as.block.body.count; i++)
+        scan_free_vars(node->as.block.body.items[i], param_names, param_count, &caps, cg);
+    free(param_names);
+
+    collect_method_with_captures(fname, NULL, node, &caps);
 
     char *t = temp_name(cg);
     emit_indent(cg);
-    fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, NULL, 0));\n", t, fname);
+
+    /* Find the MethodDef we just added to get its captures */
+    MethodDef *md = collected_methods; /* it's the most recent one */
+    if (md->captures.count > 0) {
+        /* Build env array */
+        fprintf(cg->out, "ClayValue %s_env[] = {", t);
+        for (int i = 0; i < md->captures.count; i++) {
+            if (i > 0) fprintf(cg->out, ", ");
+            fprintf(cg->out, "%s", md->captures.names[i]);
+        }
+        fprintf(cg->out, "};\n");
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, %s_env, %d));\n",
+                t, fname, t, md->captures.count);
+    } else {
+        fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, NULL, 0));\n", t, fname);
+    }
     return t;
 }
 
@@ -566,6 +719,12 @@ static void emit_method_bodies(CodeGen *cg) {
             cg->indent = saved_indent;
             fprintf(cg->out, "    return _result;\n");
         } else if (node->type == NODE_BLOCK) {
+            /* Declare captured variables from env */
+            for (int i = 0; i < cur->captures.count; i++) {
+                fprintf(cg->out, "    ClayValue %s = self->as.block.env[%d];\n",
+                        cur->captures.names[i], i);
+                push_local(cg, cur->captures.names[i]);
+            }
             /* Register block params as locals */
             for (int i = 0; i < node->as.block.params.count; i++) {
                 AstNode *param = node->as.block.params.items[i];
@@ -611,6 +770,7 @@ static void emit_method_bodies(CodeGen *cg) {
         fprintf(cg->out, "}\n");
 
         MethodDef *next = cur->next;
+        capture_free(&cur->captures);
         free(cur->func_name);
         free(cur->obj_context);
         free(cur);

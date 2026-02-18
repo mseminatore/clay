@@ -1,0 +1,9 @@
+// import_test.clay - Test import statement
+import("math.clay")
+import("math.clay")  // duplicate import should be silently skipped
+
+"square(7) = " print()
+square value(7) println()
+
+"Math abs(-5) = " print()
+Math abs(-5) println()

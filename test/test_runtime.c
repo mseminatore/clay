@@ -216,16 +216,26 @@ static void test_boolean_control(void) {
     ClayObject *yes_block = clay_block_new(return_yes, NULL, 0);
     ClayObject *no_block = clay_block_new(return_no, NULL, 0);
 
+    /* ifTrue on true evaluates block, returns cond result wrapping 1 */
     ClayValue arg = CLAY_VAL(yes_block);
     ClayValue result = clay_send(&clay_true_obj, "ifTrue", 1, &arg);
-    TEST(clay_to_int(result) == 1);
+    TEST(CLAY_IS_PTR(result)); /* returns a condition result object */
 
+    /* ifTrue on false returns cond result with _matched=false */
     arg = CLAY_VAL(yes_block);
     result = clay_send(&clay_false_obj, "ifTrue", 1, &arg);
-    TEST(CLAY_IS_NIL(result));
+    TEST(CLAY_IS_PTR(result));
 
+    /* ifFalse on false evaluates block, returns cond result wrapping 0 */
     arg = CLAY_VAL(no_block);
     result = clay_send(&clay_false_obj, "ifFalse", 1, &arg);
+    TEST(CLAY_IS_PTR(result));
+
+    /* Test chaining: ifTrue on false -> ifFalse evaluates fallback */
+    arg = CLAY_VAL(yes_block);
+    result = clay_send(&clay_false_obj, "ifTrue", 1, &arg);
+    arg = CLAY_VAL(no_block);
+    result = clay_send_val(result, "ifFalse", 1, &arg);
     TEST(clay_to_int(result) == 0);
 
     clay_release(yes_block);

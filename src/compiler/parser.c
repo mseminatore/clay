@@ -20,6 +20,60 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+#define strdup _strdup
+#endif
+
+/* --- File reading helper --- */
+
+static char *read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
+    char *buf = (char *)malloc((size_t)len + 1);
+    fread(buf, 1, (size_t)len, f);
+    buf[len] = '\0';
+    fclose(f);
+    return buf;
+}
+
+/* Resolve a relative import path based on the importing file's directory */
+static char *resolve_import_path(const char *base_file, const char *import_path) {
+    /* Find directory of base_file */
+    const char *last_sep = strrchr(base_file, '/');
+    const char *last_bsep = strrchr(base_file, '\\');
+    if (last_bsep && (!last_sep || last_bsep > last_sep)) last_sep = last_bsep;
+
+    if (!last_sep) {
+        /* base_file has no directory component */
+        return strdup(import_path);
+    }
+
+    size_t dir_len = (size_t)(last_sep - base_file + 1);
+    size_t imp_len = strlen(import_path);
+    char *result = (char *)malloc(dir_len + imp_len + 1);
+    memcpy(result, base_file, dir_len);
+    memcpy(result + dir_len, import_path, imp_len);
+    result[dir_len + imp_len] = '\0';
+    return result;
+}
+
+static int already_imported(Parser *p, const char *path) {
+    for (ImportEntry *e = p->imported; e; e = e->next) {
+        if (strcmp(e->path, path) == 0) return 1;
+    }
+    return 0;
+}
+
+static void mark_imported(Parser *p, const char *path) {
+    ImportEntry *e = (ImportEntry *)malloc(sizeof(ImportEntry));
+    e->path = strdup(path);
+    e->next = p->imported;
+    p->imported = e;
+}
+
 /* --- Utilities --- */
 
 static void parser_error(Parser *p, const char *msg) {
@@ -79,6 +133,26 @@ static AstNode *parse_block(Parser *p);
 
 static AstNode *parse_primary(Parser *p) {
     if (p->had_error) return NULL;
+
+    /* Unary minus */
+    if (match(p, TOK_MINUS)) {
+        int line = p->previous.line;
+        AstNode *operand = parse_primary(p);
+        if (!operand) return NULL;
+        /* Optimize: fold negative integer literals */
+        if (operand->type == NODE_INT_LIT) {
+            operand->as.int_lit.value = -operand->as.int_lit.value;
+            return operand;
+        }
+        /* General case: 0 - operand */
+        AstNode *zero = ast_new(NODE_INT_LIT, line);
+        zero->as.int_lit.value = 0;
+        AstNode *bin = ast_new(NODE_BINARY, line);
+        bin->as.binary.left = zero;
+        bin->as.binary.op = strdup("-");
+        bin->as.binary.right = operand;
+        return bin;
+    }
 
     /* Integer literal */
     if (match(p, TOK_INT)) {
@@ -382,6 +456,19 @@ static AstNode *parse_expression(Parser *p) {
 static AstNode *parse_statement(Parser *p) {
     if (p->had_error) return NULL;
 
+    /* Check for import("path") */
+    if (check(p, TOK_IMPORT)) {
+        parser_advance(p);
+        expect(p, TOK_LPAREN, "Expected '(' after import");
+        expect(p, TOK_STRING, "Expected string path in import()");
+        char *import_path = token_strdup(&p->previous);
+        expect(p, TOK_RPAREN, "Expected ')' after import path");
+
+        AstNode *node = ast_new(NODE_IMPORT, p->previous.line);
+        node->as.import.path = import_path;
+        return node;
+    }
+
     /* Check for assignment: IDENT = expr */
     if (check(p, TOK_IDENT)) {
         /* Peek ahead to see if next is '=' (but not '==') */
@@ -413,7 +500,47 @@ void parser_init(Parser *p, const char *source, const char *filename) {
     lexer_init(&p->lexer, source);
     p->had_error = 0;
     p->filename = filename;
+    p->imported = NULL;
     parser_advance(p); /* prime the parser */
+}
+
+/* Parse an imported file and return its statements */
+static AstNode *parse_import_file(Parser *parent, const char *import_path) {
+    char *resolved = resolve_import_path(parent->filename, import_path);
+
+    if (already_imported(parent, resolved)) {
+        free(resolved);
+        return NULL; /* skip double import */
+    }
+    mark_imported(parent, resolved);
+
+    char *source = read_file(resolved);
+    if (!source) {
+        fprintf(stderr, "%s: cannot open import '%s'\n", parent->filename, resolved);
+        parent->had_error = 1;
+        free(resolved);
+        return NULL;
+    }
+
+    Parser import_parser;
+    lexer_init(&import_parser.lexer, source);
+    import_parser.had_error = 0;
+    import_parser.filename = resolved;
+    import_parser.imported = parent->imported; /* share import tracking */
+    parser_advance(&import_parser);
+
+    AstNode *program = parser_parse(&import_parser);
+
+    if (import_parser.had_error) {
+        parent->had_error = 1;
+    }
+    /* Update parent's import list with any new imports from the child */
+    parent->imported = import_parser.imported;
+
+    /* Note: source and resolved are leaked intentionally —
+     * they're needed while the AST references them.
+     * A real compiler would use an arena allocator. */
+    return program;
 }
 
 AstNode *parser_parse(Parser *p) {
@@ -425,7 +552,23 @@ AstNode *parser_parse(Parser *p) {
     while (!check(p, TOK_EOF) && !p->had_error) {
         AstNode *stmt = parse_statement(p);
         if (stmt) {
-            nodelist_push(&program->as.program.stmts, stmt);
+            if (stmt->type == NODE_IMPORT) {
+                /* Resolve import: parse the file and splice its statements */
+                AstNode *imported = parse_import_file(p, stmt->as.import.path);
+                if (imported && imported->type == NODE_PROGRAM) {
+                    for (int i = 0; i < imported->as.program.stmts.count; i++) {
+                        nodelist_push(&program->as.program.stmts,
+                                      imported->as.program.stmts.items[i]);
+                    }
+                    /* Free the program wrapper but not the statements (they're now ours) */
+                    imported->as.program.stmts.items = NULL;
+                    imported->as.program.stmts.count = 0;
+                    ast_free(imported);
+                }
+                ast_free(stmt); /* free the import node itself */
+            } else {
+                nodelist_push(&program->as.program.stmts, stmt);
+            }
         }
         /* Expect newline or EOF after statement */
         if (!check(p, TOK_EOF) && !check(p, TOK_RBRACE)) {
@@ -438,4 +581,15 @@ AstNode *parser_parse(Parser *p) {
     }
 
     return program;
+}
+
+void parser_free_imports(Parser *p) {
+    ImportEntry *e = p->imported;
+    while (e) {
+        ImportEntry *next = e->next;
+        free(e->path);
+        free(e);
+        e = next;
+    }
+    p->imported = NULL;
 }
