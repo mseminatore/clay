@@ -1,0 +1,94 @@
+{
+  "Clone Object": {
+    "prefix": "clone",
+    "body": [
+      "${1:Name} = ${2:Object} clone({",
+      "\t${3:slot} = ${4:value}",
+      "",
+      "\t${5:method}(${6:params}) {",
+      "\t\t$0",
+      "\t}",
+      "})"
+    ],
+    "description": "Create a new object by cloning a prototype"
+  },
+  "Method Definition": {
+    "prefix": "method",
+    "body": [
+      "${1:name}(${2:params}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Define a method inside a clone body"
+  },
+  "Block": {
+    "prefix": "block",
+    "body": [
+      "{ |${1:params}|",
+      "\t$0",
+      "}"
+    ],
+    "description": "Block (closure) with parameters"
+  },
+  "Try/Catch": {
+    "prefix": "try",
+    "body": [
+      "try({",
+      "\t$1",
+      "}) catch({ |${2:e}|",
+      "\t$0",
+      "})"
+    ],
+    "description": "Try/catch error handling"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "{ ${1:condition} } whileTrue({",
+      "\t$0",
+      "})"
+    ],
+    "description": "While loop using whileTrue"
+  },
+  "If True": {
+    "prefix": "if",
+    "body": [
+      "(${1:condition}) ifTrue({",
+      "\t$0",
+      "})"
+    ],
+    "description": "Conditional ifTrue block"
+  },
+  "If True / If False": {
+    "prefix": "ifelse",
+    "body": [
+      "(${1:condition}) ifTrue({",
+      "\t$2",
+      "}) ifFalse({",
+      "\t$0",
+      "})"
+    ],
+    "description": "Conditional ifTrue/ifFalse chain"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": [
+      "import(\"${1:path}.clay\")"
+    ],
+    "description": "Import another Clay file"
+  },
+  "Raise Error": {
+    "prefix": "raise",
+    "body": [
+      "raise(\"${1:error message}\")"
+    ],
+    "description": "Raise an error"
+  },
+  "Print Line": {
+    "prefix": "println",
+    "body": [
+      "${1:expr} println()"
+    ],
+    "description": "Print expression with newline"
+  }
+}

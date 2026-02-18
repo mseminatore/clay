@@ -325,3 +325,17 @@ Included as git submodules under `deps/`:
 
 - [mseminatore/hash](https://github.com/mseminatore/hash) — hash table for object slots and methods
 - [mseminatore/testy](https://github.com/mseminatore/testy) — test framework for runtime unit tests
+
+## Editor Support
+
+### VS Code
+
+A syntax highlighting extension is included at `editors/vscode/clay-lang/`. To install:
+
+```powershell
+# Windows (PowerShell as Admin) — create a junction
+$ext = "$env:USERPROFILE\.vscode\extensions\clay-lang"
+New-Item -ItemType Junction -Path $ext -Target (Resolve-Path "editors\vscode\clay-lang").Path
+```
+
+Then restart VS Code. See [`editors/vscode/clay-lang/README.md`](editors/vscode/clay-lang/README.md) for details.

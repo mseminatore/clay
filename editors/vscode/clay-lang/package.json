@@ -1,0 +1,42 @@
+{
+  "name": "clay-lang",
+  "displayName": "Clay Language",
+  "description": "Syntax highlighting, snippets, and language support for the Clay programming language",
+  "version": "0.1.0",
+  "publisher": "clay-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "clay",
+        "aliases": [
+          "Clay",
+          "clay"
+        ],
+        "extensions": [
+          ".clay"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "clay",
+        "scopeName": "source.clay",
+        "path": "./syntaxes/clay.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "clay",
+        "path": "./snippets/clay.json"
+      }
+    ]
+  }
+}
