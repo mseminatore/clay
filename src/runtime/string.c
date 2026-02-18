@@ -99,6 +99,107 @@ static ClayValue string_equals(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) == 0);
 }
 
+static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_NIL;
+    intptr_t idx = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0])
+                 : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    if (idx < 0 || (size_t)idx >= self->as.string.length) return CLAY_NIL;
+    return CLAY_VAL(clay_string_new_len(self->as.string.data + idx, 1));
+}
+
+static ClayValue string_contains(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    ClayObject *sub = CLAY_OBJ(argv[0]);
+    if (sub->type != CLAY_TYPE_STRING) return CLAY_FALSE;
+    return CLAY_BOOL(strstr(self->as.string.data, sub->as.string.data) != NULL);
+}
+
+static ClayValue string_slice(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_VAL(clay_retain(self));
+    intptr_t start = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : 0;
+    intptr_t end = (argc > 1 && CLAY_IS_INT(argv[1])) ? clay_to_int(argv[1])
+                 : (intptr_t)self->as.string.length;
+    intptr_t len = (intptr_t)self->as.string.length;
+    if (start < 0) start = 0;
+    if (end > len) end = len;
+    if (start >= end) return CLAY_VAL(clay_string_new(""));
+    return CLAY_VAL(clay_string_new_len(self->as.string.data + start, (size_t)(end - start)));
+}
+
+static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
+    ClayObject *arr = clay_array_new();
+    const char *delim = " ";
+    if (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
+        ClayObject *d = CLAY_OBJ(argv[0]);
+        if (d->type == CLAY_TYPE_STRING) delim = d->as.string.data;
+    }
+    size_t delim_len = strlen(delim);
+    if (delim_len == 0) {
+        /* Split into individual characters */
+        for (size_t i = 0; i < self->as.string.length; i++) {
+            ClayObject *ch = clay_string_new_len(self->as.string.data + i, 1);
+            clay_array_append(arr, CLAY_VAL(ch));
+            clay_release(ch);
+        }
+        return CLAY_VAL(arr);
+    }
+    const char *p = self->as.string.data;
+    const char *end = p + self->as.string.length;
+    while (p <= end) {
+        const char *found = strstr(p, delim);
+        if (!found) found = end;
+        ClayObject *s = clay_string_new_len(p, (size_t)(found - p));
+        clay_array_append(arr, CLAY_VAL(s));
+        clay_release(s);
+        p = found + delim_len;
+        if (found == end) break;
+    }
+    return CLAY_VAL(arr);
+}
+
+static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 2 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])
+                  || CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) {
+        return CLAY_VAL(clay_retain(self));
+    }
+    ClayObject *old_str = CLAY_OBJ(argv[0]);
+    ClayObject *new_str = CLAY_OBJ(argv[1]);
+    if (old_str->type != CLAY_TYPE_STRING || new_str->type != CLAY_TYPE_STRING)
+        return CLAY_VAL(clay_retain(self));
+    if (old_str->as.string.length == 0) return CLAY_VAL(clay_retain(self));
+
+    /* Count occurrences to pre-allocate */
+    size_t count = 0;
+    const char *p = self->as.string.data;
+    while ((p = strstr(p, old_str->as.string.data)) != NULL) {
+        count++;
+        p += old_str->as.string.length;
+    }
+    if (count == 0) return CLAY_VAL(clay_retain(self));
+
+    size_t new_len = self->as.string.length
+                   + count * (new_str->as.string.length - old_str->as.string.length);
+    char *buf = (char *)malloc(new_len + 1);
+    char *out = buf;
+    p = self->as.string.data;
+    while (1) {
+        const char *found = strstr(p, old_str->as.string.data);
+        if (!found) {
+            strcpy(out, p);
+            break;
+        }
+        memcpy(out, p, (size_t)(found - p));
+        out += found - p;
+        memcpy(out, new_str->as.string.data, new_str->as.string.length);
+        out += new_str->as.string.length;
+        p = found + old_str->as.string.length;
+    }
+
+    ClayObject *result = clay_string_new_len(buf, new_len);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
 void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "println", string_println);
     clay_set_method(proto, "print", string_print);
@@ -106,4 +207,9 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "toString", string_toString);
     clay_set_method(proto, "+", string_concat);
     clay_set_method(proto, "==", string_equals);
+    clay_set_method(proto, "at", string_at);
+    clay_set_method(proto, "contains", string_contains);
+    clay_set_method(proto, "slice", string_slice);
+    clay_set_method(proto, "split", string_split);
+    clay_set_method(proto, "replace", string_replace);
 }

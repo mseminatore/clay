@@ -154,6 +154,18 @@ static AstNode *parse_primary(Parser *p) {
         return bin;
     }
 
+    /* Unary not: !expr becomes a NODE_BINARY with op "!" */
+    if (match(p, TOK_BANG)) {
+        int line = p->previous.line;
+        AstNode *operand = parse_primary(p);
+        if (!operand) return NULL;
+        AstNode *node = ast_new(NODE_SEND, line);
+        node->as.send.receiver = operand;
+        node->as.send.message = strdup("not");
+        nodelist_init(&node->as.send.args);
+        return node;
+    }
+
     /* Integer literal */
     if (match(p, TOK_INT)) {
         AstNode *node = ast_new(NODE_INT_LIT, p->previous.line);
@@ -168,6 +180,105 @@ static AstNode *parse_primary(Parser *p) {
         AstNode *node = ast_new(NODE_STRING_LIT, p->previous.line);
         node->as.string_lit.value = token_strdup(&p->previous);
         return node;
+    }
+
+    /* Interpolated string: "text ${expr} more text" */
+    if (match(p, TOK_INTERP_STRING)) {
+        int line = p->previous.line;
+        char *raw = token_strdup(&p->previous);
+        int len = (int)strlen(raw);
+        AstNode *result = NULL;
+
+        int pos = 0;
+        while (pos < len) {
+            /* Find next ${ */
+            int start = pos;
+            while (pos < len) {
+                if (pos < len - 1 && raw[pos] == '$' && raw[pos + 1] == '{') break;
+                pos++;
+            }
+
+            /* Emit literal fragment if any */
+            if (pos > start) {
+                AstNode *lit = ast_new(NODE_STRING_LIT, line);
+                lit->as.string_lit.value = (char *)malloc((size_t)(pos - start + 1));
+                memcpy(lit->as.string_lit.value, raw + start, (size_t)(pos - start));
+                lit->as.string_lit.value[pos - start] = '\0';
+                if (!result) {
+                    result = lit;
+                } else {
+                    AstNode *concat = ast_new(NODE_BINARY, line);
+                    concat->as.binary.left = result;
+                    concat->as.binary.op = strdup("+");
+                    concat->as.binary.right = lit;
+                    result = concat;
+                }
+            }
+
+            if (pos >= len) break; /* no more interpolations */
+
+            /* Skip ${ */
+            pos += 2;
+            /* Find matching } with brace counting */
+            int depth = 1;
+            int expr_start = pos;
+            while (pos < len && depth > 0) {
+                if (raw[pos] == '{') depth++;
+                else if (raw[pos] == '}') depth--;
+                if (depth > 0) pos++;
+            }
+
+            /* Extract expression text and parse it */
+            int expr_len = pos - expr_start;
+            char *expr_text = (char *)malloc((size_t)(expr_len + 1));
+            memcpy(expr_text, raw + expr_start, (size_t)expr_len);
+            expr_text[expr_len] = '\0';
+
+            /* Parse the expression */
+            Parser sub;
+            lexer_init(&sub.lexer, expr_text);
+            sub.had_error = 0;
+            sub.filename = p->filename;
+            sub.imported = NULL;
+            parser_advance(&sub);
+            AstNode *expr = parse_expression(&sub);
+            if (sub.had_error) p->had_error = 1;
+            free(expr_text);
+
+            if (expr) {
+                /* Wrap in toString send */
+                AstNode *toStr = ast_new(NODE_SEND, line);
+                toStr->as.send.receiver = expr;
+                toStr->as.send.message = strdup("toString");
+                nodelist_init(&toStr->as.send.args);
+
+                if (!result) {
+                    /* Start with empty string so result is always a string */
+                    AstNode *empty = ast_new(NODE_STRING_LIT, line);
+                    empty->as.string_lit.value = strdup("");
+                    AstNode *concat = ast_new(NODE_BINARY, line);
+                    concat->as.binary.left = empty;
+                    concat->as.binary.op = strdup("+");
+                    concat->as.binary.right = toStr;
+                    result = concat;
+                } else {
+                    AstNode *concat = ast_new(NODE_BINARY, line);
+                    concat->as.binary.left = result;
+                    concat->as.binary.op = strdup("+");
+                    concat->as.binary.right = toStr;
+                    result = concat;
+                }
+            }
+
+            if (pos < len) pos++; /* skip closing } */
+        }
+
+        free(raw);
+        if (!result) {
+            result = ast_new(NODE_STRING_LIT, line);
+            result->as.string_lit.value = strdup("");
+        }
+        return result;
     }
 
     /* Identifier */
@@ -408,19 +519,24 @@ static int is_binary_op(TokenType type) {
            type == TOK_STAR || type == TOK_SLASH || type == TOK_PERCENT ||
            type == TOK_EQUAL || type == TOK_NOT_EQUAL ||
            type == TOK_LESS || type == TOK_GREATER ||
-           type == TOK_LESS_EQ || type == TOK_GREATER_EQ;
+           type == TOK_LESS_EQ || type == TOK_GREATER_EQ ||
+           type == TOK_AND || type == TOK_OR;
 }
 
 static int precedence(TokenType type) {
     switch (type) {
-        case TOK_EQUAL: case TOK_NOT_EQUAL:
+        case TOK_OR:
             return 1;
-        case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
+        case TOK_AND:
             return 2;
-        case TOK_PLUS: case TOK_MINUS:
+        case TOK_EQUAL: case TOK_NOT_EQUAL:
             return 3;
-        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+        case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
             return 4;
+        case TOK_PLUS: case TOK_MINUS:
+            return 5;
+        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+            return 6;
         default: return 0;
     }
 }

@@ -1,0 +1,32 @@
+// proto_chain.clay - Test deep prototype chains
+
+Animal = Object clone({
+  speak() { "..." }
+  legs() { 4 }
+})
+
+Dog = Animal clone({
+  speak() { "woof" }
+})
+
+Puppy = Dog clone({
+  speak() { "yip" }
+})
+
+"Animal speak: " print()
+Animal speak() println()
+
+"Dog speak: " print()
+Dog speak() println()
+
+"Puppy speak: " print()
+Puppy speak() println()
+
+"Puppy legs (inherited): " print()
+Puppy legs() println()
+
+// Clone and customize
+rex = Dog clone()
+fido = Dog clone()
+
+"Done." println()

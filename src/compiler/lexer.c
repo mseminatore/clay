@@ -75,9 +75,11 @@ static void skip_whitespace(Lexer *lexer) {
 
 static Token lex_string(Lexer *lexer) {
     const char *start = lexer->current; /* after opening quote */
+    int has_interp = 0;
     while (peek(lexer) != '"' && peek(lexer) != '\0') {
         if (peek(lexer) == '\n') lexer->line++;
-        if (peek(lexer) == '\\') advance(lexer); /* skip escape */
+        if (peek(lexer) == '\\') { advance(lexer); advance(lexer); continue; }
+        if (peek(lexer) == '$' && lexer->current[1] == '{') has_interp = 1;
         advance(lexer);
     }
     if (peek(lexer) == '\0') {
@@ -85,7 +87,7 @@ static Token lex_string(Lexer *lexer) {
     }
     int length = (int)(lexer->current - start);
     advance(lexer); /* closing quote */
-    return make_token(lexer, TOK_STRING, start, length);
+    return make_token(lexer, has_interp ? TOK_INTERP_STRING : TOK_STRING, start, length);
 }
 
 static Token lex_number(Lexer *lexer, const char *start) {
@@ -151,7 +153,9 @@ Token lexer_next(Lexer *lexer) {
         case ']': return make_token(lexer, TOK_RBRACKET, start, 1);
         case ',': return make_token(lexer, TOK_COMMA, start, 1);
         case '.': return make_token(lexer, TOK_DOT, start, 1);
-        case '|': return make_token(lexer, TOK_PIPE, start, 1);
+        case '|':
+            if (match(lexer, '|')) return make_token(lexer, TOK_OR, start, 2);
+            return make_token(lexer, TOK_PIPE, start, 1);
         case ';': return make_token(lexer, TOK_SEMICOLON, start, 1);
         case '+': return make_token(lexer, TOK_PLUS, start, 1);
         case '-': return make_token(lexer, TOK_MINUS, start, 1);
@@ -170,6 +174,9 @@ Token lexer_next(Lexer *lexer) {
         case '>':
             if (match(lexer, '=')) return make_token(lexer, TOK_GREATER_EQ, start, 2);
             return make_token(lexer, TOK_GREATER, start, 1);
+        case '&':
+            if (match(lexer, '&')) return make_token(lexer, TOK_AND, start, 2);
+            return error_token(lexer, "Unexpected character '&' (did you mean '&&'?)");
         default:
             return error_token(lexer, "Unexpected character");
     }
@@ -179,6 +186,7 @@ const char *token_type_name(TokenType type) {
     switch (type) {
         case TOK_INT:        return "INT";
         case TOK_STRING:     return "STRING";
+        case TOK_INTERP_STRING: return "INTERP_STRING";
         case TOK_IDENT:      return "IDENT";
         case TOK_SELF:       return "SELF";
         case TOK_IMPORT:     return "IMPORT";
@@ -206,6 +214,8 @@ const char *token_type_name(TokenType type) {
         case TOK_LESS_EQ:    return "<=";
         case TOK_GREATER_EQ: return ">=";
         case TOK_BANG:       return "!";
+        case TOK_AND:        return "&&";
+        case TOK_OR:         return "||";
         case TOK_EOF:        return "EOF";
         case TOK_ERROR:      return "ERROR";
         default:             return "???";

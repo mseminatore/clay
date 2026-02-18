@@ -154,6 +154,41 @@ x = -5
 y = -(a + b)
 ```
 
+### String interpolation
+
+Use `${}` inside strings to embed expressions:
+
+```clay
+name = "Clay"
+"Hello, ${name}!" println()       // Hello, Clay!
+"2 + 3 = ${2 + 3}" println()     // 2 + 3 = 5
+"${x} + ${y} = ${x + y}" println()
+```
+
+Expressions are automatically converted via `toString()`.
+
+### Logical operators
+
+```clay
+(a && b)     // short-circuit AND
+(a || b)     // short-circuit OR
+!a           // logical NOT (sends 'not' message)
+```
+
+`&&` and `||` short-circuit: the right side is only evaluated if needed. Values are truthy unless they are `nil`, `false`, or `0`.
+
+### While loops
+
+Blocks support `whileTrue` and `whileFalse` for looping:
+
+```clay
+i = 0
+{ i < 10 } whileTrue({
+  i println()
+  i = i + 1
+})
+```
+
 ### Arrays
 
 ```clay
@@ -162,6 +197,18 @@ arr at(0)                     // 1
 arr append(4)
 arr size()                    // 4
 arr each({ |item| item println() })
+```
+
+### Strings
+
+```clay
+s = "hello world"
+s length()                          // 11
+s at(0)                             // "h"
+s contains("world")                 // true
+s slice(0, 5)                       // "hello"
+s split(" ")                        // ["hello", "world"]
+s replace("world", "Clay")          // "hello Clay"
 ```
 
 ### Comments
@@ -176,11 +223,11 @@ arr each({ |item| item println() })
 | Prototype | Methods |
 |-----------|---------|
 | Object | `clone()`, `toString()`, `println()`, `doesNotUnderstand(name, args)` |
-| Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `==`, `toString()`, `println()` |
-| String | `+`, `==`, `length()`, `print()`, `println()`, `toString()` |
+| Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toString()`, `println()` |
+| String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `each(block)`, `toString()` |
-| Block | `value(args...)` |
-| Boolean | `ifTrue(block)`, `ifFalse(block)`, `toString()` |
+| Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
+| Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
 
 ## Generated C
 

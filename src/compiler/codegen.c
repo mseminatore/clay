@@ -452,6 +452,62 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
 }
 
 static char *emit_binary(CodeGen *cg, AstNode *node) {
+    const char *op = node->as.binary.op;
+
+    /* Short-circuit && and || */
+    if (strcmp(op, "&&") == 0) {
+        char *left = emit_expr(cg, node->as.binary.left);
+        if (!left) return NULL;
+        char *t = temp_name(cg);
+        emit_line(cg, node->line);
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "if (CLAY_IS_TRUTHY(%s)) {\n", left);
+        cg->indent++;
+        char *right = emit_expr(cg, node->as.binary.right);
+        emit_indent(cg);
+        fprintf(cg->out, "%s = CLAY_BOOL(CLAY_IS_TRUTHY(%s));\n", t, right);
+        free(right);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "} else {\n");
+        cg->indent++;
+        emit_indent(cg);
+        fprintf(cg->out, "%s = CLAY_FALSE;\n", t);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "}\n");
+        free(left);
+        return t;
+    }
+    if (strcmp(op, "||") == 0) {
+        char *left = emit_expr(cg, node->as.binary.left);
+        if (!left) return NULL;
+        char *t = temp_name(cg);
+        emit_line(cg, node->line);
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "if (CLAY_IS_TRUTHY(%s)) {\n", left);
+        cg->indent++;
+        emit_indent(cg);
+        fprintf(cg->out, "%s = CLAY_TRUE;\n", t);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "} else {\n");
+        cg->indent++;
+        char *right = emit_expr(cg, node->as.binary.right);
+        emit_indent(cg);
+        fprintf(cg->out, "%s = CLAY_BOOL(CLAY_IS_TRUTHY(%s));\n", t, right);
+        free(right);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "}\n");
+        free(left);
+        return t;
+    }
+
     char *left = emit_expr(cg, node->as.binary.left);
     char *right = emit_expr(cg, node->as.binary.right);
     if (!left || !right) return NULL;
@@ -468,7 +524,6 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     emit_indent(cg);
 
     /* Direct integer operations for common cases */
-    const char *op = node->as.binary.op;
     if (strcmp(op, "+") == 0) {
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) + clay_to_int(%s));\n", t, left, right);
     } else if (strcmp(op, "-") == 0) {

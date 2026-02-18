@@ -125,6 +125,11 @@ static ClayValue bool_toString(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(clay_string_new("false"));
 }
 
+static ClayValue bool_not(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    return (self == &clay_true_obj) ? CLAY_FALSE : CLAY_TRUE;
+}
+
 static ClayValue nil_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv; (void)self;
     return CLAY_VAL(clay_string_new("nil"));
@@ -174,6 +179,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Boolean, "ifTrue", bool_ifTrue);
     clay_set_method(clay_Boolean, "ifFalse", bool_ifFalse);
     clay_set_method(clay_Boolean, "toString", bool_toString);
+    clay_set_method(clay_Boolean, "not", bool_not);
 
     /* Wire up boolean singletons */
     clay_true_obj.parent = clay_Boolean;

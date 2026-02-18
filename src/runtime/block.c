@@ -37,6 +37,32 @@ static ClayValue block_value(ClayObject *self, int argc, ClayValue *argv) {
     return self->as.block.func(self, argc, argv);
 }
 
+static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_NIL;
+    ClayObject *body = CLAY_OBJ(argv[0]);
+    ClayValue result = CLAY_NIL;
+    while (1) {
+        ClayValue cond = self->as.block.func(self, 0, NULL);
+        if (!CLAY_IS_TRUTHY(cond)) break;
+        result = body->as.block.func(body, 0, NULL);
+    }
+    return result;
+}
+
+static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_NIL;
+    ClayObject *body = CLAY_OBJ(argv[0]);
+    ClayValue result = CLAY_NIL;
+    while (1) {
+        ClayValue cond = self->as.block.func(self, 0, NULL);
+        if (CLAY_IS_TRUTHY(cond)) break;
+        result = body->as.block.func(body, 0, NULL);
+    }
+    return result;
+}
+
 void clay_block_init_methods(ClayObject *proto) {
     clay_set_method(proto, "value", block_value);
+    clay_set_method(proto, "whileTrue", block_whileTrue);
+    clay_set_method(proto, "whileFalse", block_whileFalse);
 }

@@ -5,6 +5,7 @@ typedef enum {
     /* Literals */
     TOK_INT,            /* 42 */
     TOK_STRING,         /* "hello" */
+    TOK_INTERP_STRING,  /* "hello ${name}" - contains interpolation */
     TOK_IDENT,          /* foo, Bar, clone */
 
     /* Keywords */
@@ -38,6 +39,8 @@ typedef enum {
     TOK_LESS_EQ,        /* <= */
     TOK_GREATER_EQ,     /* >= */
     TOK_BANG,           /* ! */
+    TOK_AND,            /* && */
+    TOK_OR,             /* || */
 
     /* Special */
     TOK_EOF,

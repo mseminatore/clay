@@ -1,0 +1,35 @@
+// logic.clay - Test logical operators
+
+// && short-circuits
+"true && true = " print()
+(true && true) println()
+
+"true && false = " print()
+(true && false) println()
+
+"false && true = " print()
+(false && true) println()
+
+// || short-circuits
+"false || true = " print()
+(false || true) println()
+
+"true || false = " print()
+(true || false) println()
+
+"false || false = " print()
+(false || false) println()
+
+// ! (not)
+"!true = " print()
+(!true) println()
+"!false = " print()
+(!false) println()
+
+// Combined with comparison
+x = 5
+"(x > 0 && x < 10) = " print()
+(x > 0 && x < 10) println()
+
+"(x > 10 || x < 0) = " print()
+(x > 10 || x < 0) println()

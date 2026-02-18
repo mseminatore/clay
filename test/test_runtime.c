@@ -141,6 +141,59 @@ static void test_strings(void) {
     ClayValue eq = clay_send(s, "==", 1, &arg);
     TEST(CLAY_IS_TRUE(eq));
 
+    COMMENT("at...");
+    ClayValue idx = clay_int(0);
+    ClayValue ch = clay_send(s, "at", 1, &idx);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(ch)), "h") == 0);
+    clay_release(CLAY_OBJ(ch));
+    idx = clay_int(4);
+    ch = clay_send(s, "at", 1, &idx);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(ch)), "o") == 0);
+    clay_release(CLAY_OBJ(ch));
+    idx = clay_int(10);
+    ch = clay_send(s, "at", 1, &idx);
+    TEST(CLAY_IS_NIL(ch));
+
+    COMMENT("contains...");
+    ClayObject *sub = clay_string_new("ell");
+    arg = CLAY_VAL(sub);
+    TEST(CLAY_IS_TRUE(clay_send(s, "contains", 1, &arg)));
+    clay_release(sub);
+    sub = clay_string_new("xyz");
+    arg = CLAY_VAL(sub);
+    TEST(CLAY_IS_FALSE(clay_send(s, "contains", 1, &arg)));
+    clay_release(sub);
+
+    COMMENT("slice...");
+    ClayValue slice_args[2] = { clay_int(1), clay_int(4) };
+    ClayValue sliced = clay_send(s, "slice", 2, slice_args);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(sliced)), "ell") == 0);
+    clay_release(CLAY_OBJ(sliced));
+
+    COMMENT("split...");
+    ClayObject *csv = clay_string_new("a,b,c");
+    ClayObject *comma = clay_string_new(",");
+    arg = CLAY_VAL(comma);
+    ClayValue parts = clay_send(csv, "split", 1, &arg);
+    TEST(CLAY_OBJ(parts)->as.array.size == 3);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(CLAY_OBJ(parts)->as.array.items[0])), "a") == 0);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(CLAY_OBJ(parts)->as.array.items[2])), "c") == 0);
+    clay_release(CLAY_OBJ(parts));
+    clay_release(comma);
+    clay_release(csv);
+
+    COMMENT("replace...");
+    ClayObject *hw = clay_string_new("hello world");
+    ClayObject *old_s = clay_string_new("world");
+    ClayObject *new_s = clay_string_new("Clay");
+    ClayValue repl_args[2] = { CLAY_VAL(old_s), CLAY_VAL(new_s) };
+    ClayValue replaced = clay_send(hw, "replace", 2, repl_args);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(replaced)), "hello Clay") == 0);
+    clay_release(CLAY_OBJ(replaced));
+    clay_release(new_s);
+    clay_release(old_s);
+    clay_release(hw);
+
     clay_release(CLAY_OBJ(concat));
     clay_release(s3);
     clay_release(s2);
@@ -194,6 +247,20 @@ static ClayValue return_no(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int(0);
 }
 
+/* whileTrue test helpers - use a shared static counter */
+static int while_counter = 0;
+
+static ClayValue while_cond_fn(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_BOOL(while_counter < 5);
+}
+
+static ClayValue while_body_fn(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    while_counter++;
+    return clay_int(while_counter);
+}
+
 static void test_blocks(void) {
     SUITE("Blocks");
 
@@ -207,6 +274,17 @@ static void test_blocks(void) {
     TEST(clay_to_int(result) == 42);
 
     clay_release(block);
+
+    COMMENT("whileTrue...");
+    while_counter = 0;
+    ClayObject *cond_block = clay_block_new(while_cond_fn, NULL, 0);
+    ClayObject *body_block = clay_block_new(while_body_fn, NULL, 0);
+    arg = CLAY_VAL(body_block);
+    result = clay_send(cond_block, "whileTrue", 1, &arg);
+    TEST(while_counter == 5);
+    TEST(clay_to_int(result) == 5);
+    clay_release(cond_block);
+    clay_release(body_block);
 }
 
 static void test_boolean_control(void) {
@@ -273,6 +351,96 @@ static void test_prototype_chain(void) {
     clay_release(a);
 }
 
+/* Method override helpers */
+static ClayValue animal_speak(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new("..."));
+}
+
+static ClayValue dog_speak(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new("woof"));
+}
+
+static ClayValue puppy_speak(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new("yip"));
+}
+
+static ClayValue animal_legs(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return clay_int(4);
+}
+
+static void test_deep_prototype_chain(void) {
+    SUITE("Deep Prototype Chain");
+
+    /* 3-level chain: Animal -> Dog -> Puppy */
+    ClayObject *Animal = clay_clone(clay_Object);
+    clay_set_method(Animal, "speak", animal_speak);
+    clay_set_method(Animal, "legs", animal_legs);
+    clay_set_slot(Animal, "kind", CLAY_VAL(clay_string_new("animal")));
+
+    ClayObject *Dog = clay_clone(Animal);
+    clay_set_method(Dog, "speak", dog_speak); /* override */
+    clay_set_slot(Dog, "kind", CLAY_VAL(clay_string_new("dog")));
+
+    ClayObject *Puppy = clay_clone(Dog);
+    clay_set_method(Puppy, "speak", puppy_speak); /* override again */
+
+    COMMENT("method override at each level...");
+    ClayValue r = clay_send(Animal, "speak", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r)), "...") == 0);
+    clay_release(CLAY_OBJ(r));
+    r = clay_send(Dog, "speak", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r)), "woof") == 0);
+    clay_release(CLAY_OBJ(r));
+    r = clay_send(Puppy, "speak", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r)), "yip") == 0);
+    clay_release(CLAY_OBJ(r));
+
+    COMMENT("inherited method from grandparent...");
+    ClayValue legs = clay_send(Puppy, "legs", 0, NULL);
+    TEST(clay_to_int(legs) == 4);
+    legs = clay_send(Dog, "legs", 0, NULL);
+    TEST(clay_to_int(legs) == 4);
+
+    COMMENT("slot inheritance and shadowing...");
+    /* Puppy doesn't have 'kind' slot, inherits from Dog */
+    ClayValue kind = clay_get_slot(Puppy, "kind");
+    TEST(strcmp(clay_string_data(CLAY_OBJ(kind)), "dog") == 0);
+    /* Dog shadows Animal's 'kind' */
+    kind = clay_get_slot(Dog, "kind");
+    TEST(strcmp(clay_string_data(CLAY_OBJ(kind)), "dog") == 0);
+    kind = clay_get_slot(Animal, "kind");
+    TEST(strcmp(clay_string_data(CLAY_OBJ(kind)), "animal") == 0);
+
+    /* Set slot on Puppy shadows parent */
+    clay_set_slot(Puppy, "kind", CLAY_VAL(clay_string_new("puppy")));
+    kind = clay_get_slot(Puppy, "kind");
+    TEST(strcmp(clay_string_data(CLAY_OBJ(kind)), "puppy") == 0);
+    /* Dog's slot unchanged */
+    kind = clay_get_slot(Dog, "kind");
+    TEST(strcmp(clay_string_data(CLAY_OBJ(kind)), "dog") == 0);
+
+    COMMENT("clone creates independent objects...");
+    ClayObject *d1 = clay_clone(Dog);
+    ClayObject *d2 = clay_clone(Dog);
+    clay_set_slot(d1, "name", CLAY_VAL(clay_string_new("Rex")));
+    clay_set_slot(d2, "name", CLAY_VAL(clay_string_new("Fido")));
+    TEST(strcmp(clay_string_data(CLAY_OBJ(clay_get_slot(d1, "name"))), "Rex") == 0);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(clay_get_slot(d2, "name"))), "Fido") == 0);
+    /* Neither has 'name' from parent */
+    ClayValue parent_name = clay_get_slot(Dog, "name");
+    TEST(CLAY_IS_NIL(parent_name));
+
+    clay_release(d2);
+    clay_release(d1);
+    clay_release(Puppy);
+    clay_release(Dog);
+    clay_release(Animal);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -289,6 +457,7 @@ void test_main(int argc, char *argv[]) {
     test_blocks();
     test_boolean_control();
     test_prototype_chain();
+    test_deep_prototype_chain();
 
     clay_shutdown();
 }

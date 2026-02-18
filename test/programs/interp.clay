@@ -1,0 +1,17 @@
+// interp.clay - Test string interpolation
+
+name = "Clay"
+version = 1
+
+"Hello, ${name}!" println()
+"Version: ${version}" println()
+"2 + 3 = ${2 + 3}" println()
+"Name length: ${name length()}" println()
+
+// No interpolation - plain string
+"plain string" println()
+
+// Multiple interpolations
+x = 10
+y = 20
+"${x} + ${y} = ${x + y}" println()
