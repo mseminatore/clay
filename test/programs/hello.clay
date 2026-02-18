@@ -1,0 +1,2 @@
+// hello.clay - First Clay program
+"Hello, Clay!" println()

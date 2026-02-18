@@ -33,6 +33,18 @@ add_library(clay_runtime STATIC ${RUNTIME_SOURCES})
 target_include_directories(clay_runtime PUBLIC src/runtime)
 target_link_libraries(clay_runtime PUBLIC ht)
 
+# Compiler binary
+add_executable(clay_compiler
+    src/compiler/main.c
+    src/compiler/lexer.c
+    src/compiler/parser.c
+    src/compiler/ast.c
+    src/compiler/codegen.c
+)
+target_include_directories(clay_compiler PRIVATE src/compiler)
+target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
+set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
+
 # Test runner
 add_executable(test_runner test/test_runtime.c)
 target_link_libraries(test_runner clay_runtime testy)

@@ -120,7 +120,10 @@ ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);
 
 /* --- Message dispatch --- */
-ClayValue   clay_send(ClayObject *receiver, const char *selector, int argc, ClayValue *argv);
+ClayValue   clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv);
+
+/* Legacy API - still works for object pointers */
+#define clay_send(recv, sel, ac, av) clay_send_val(CLAY_VAL(recv), sel, ac, av)
 
 /* --- Bootstrap / core prototypes --- */
 extern ClayObject *clay_Object;

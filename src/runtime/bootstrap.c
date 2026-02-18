@@ -143,3 +143,49 @@ void clay_shutdown(void) {
     /* In a real implementation we'd free all prototypes.
      * For now, they live for the program's lifetime. */
 }
+
+/* Debug helper: print object details to stderr */
+void clay_inspect(ClayObject *obj) {
+    if (!obj) {
+        fprintf(stderr, "[nil]\n");
+        return;
+    }
+    const char *type_name;
+    switch (obj->type) {
+        case CLAY_TYPE_STRING: type_name = "String"; break;
+        case CLAY_TYPE_ARRAY:  type_name = "Array"; break;
+        case CLAY_TYPE_BLOCK:  type_name = "Block"; break;
+        default:               type_name = "Object"; break;
+    }
+    fprintf(stderr, "[%s @%p refcount=%d parent=%p", type_name, (void *)obj, obj->refcount, (void *)obj->parent);
+
+    if (obj->type == CLAY_TYPE_STRING) {
+        fprintf(stderr, " data=\"%s\" len=%zu", obj->as.string.data, obj->as.string.length);
+    } else if (obj->type == CLAY_TYPE_ARRAY) {
+        fprintf(stderr, " size=%zu cap=%zu", obj->as.array.size, obj->as.array.capacity);
+    }
+
+    /* Print slots */
+    if (obj->slots) {
+        size_t pos = 0;
+        ht_key_t key;
+        ht_value_t val;
+        fprintf(stderr, " slots={");
+        int first = 1;
+        while (ht_next(obj->slots, &pos, &key, &val)) {
+            ClayValue cv = (ClayValue)(uintptr_t)val;
+            if (!first) fprintf(stderr, ", ");
+            first = 0;
+            fprintf(stderr, "%s=", (const char *)key);
+            if (CLAY_IS_INT(cv)) {
+                fprintf(stderr, "%ld", (long)clay_to_int(cv));
+            } else if (CLAY_IS_NIL(cv)) {
+                fprintf(stderr, "nil");
+            } else {
+                fprintf(stderr, "@%p", (void *)(uintptr_t)cv);
+            }
+        }
+        fprintf(stderr, "}");
+    }
+    fprintf(stderr, "]\n");
+}

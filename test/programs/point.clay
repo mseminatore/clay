@@ -1,0 +1,31 @@
+// point.clay - Prototype-based object example
+Point = Object clone({
+  x = 0
+  y = 0
+
+  toString() {
+    "(" + x toString() + ", " + y toString() + ")"
+  }
+})
+
+p = Point clone()
+
+"Point prototype: " print()
+Point toString() println()
+
+"Cloned point: " print()
+p toString() println()
+
+// Test arithmetic
+result = 3 + 4
+"3 + 4 = " print()
+result println()
+
+// Test comparison
+(10 > 5) ifTrue({ "10 > 5 is true" println() })
+(10 < 5) ifTrue({ "10 < 5 is true (BUG!)" println() })
+
+// Array test
+arr = [1, 2, 3]
+"Array: " print()
+arr toString() println()
