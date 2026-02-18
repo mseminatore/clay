@@ -116,19 +116,110 @@ int main(int argc, char *argv[]) {
 #endif
         }
 
-        /* Build the cc command */
-        char cmd[2048];
-        snprintf(cmd, sizeof(cmd),
-#ifdef _MSC_VER
-            "cl /nologo /W3 /I\"%s\" /I\"%s\" \"%s\" \"%s\" \"%s\" /Fe:\"%s\" /link /DEFAULTLIB:libcmt",
-#else
-            "cc -std=c99 -Wall -I\"%s\" -I\"%s\" \"%s\" \"%s\" \"%s\" -o \"%s\"",
+        /* Resolve paths relative to the compiler's own location */
+        char clay_dir[1024] = ".";
+#ifdef _WIN32
+        {
+            /* Use argv[0] to find the compiler directory */
+            char exe_path[1024];
+            strncpy(exe_path, argv[0], sizeof(exe_path) - 1);
+            exe_path[sizeof(exe_path) - 1] = '\0';
+            /* Try _fullpath for absolute resolution */
+            char full[1024];
+            if (_fullpath(full, exe_path, sizeof(full))) {
+                strncpy(exe_path, full, sizeof(exe_path) - 1);
+            }
+            /* Walk back to find project root (strip exe name, then up from build/Debug/) */
+            char *sep = strrchr(exe_path, '\\');
+            if (!sep) sep = strrchr(exe_path, '/');
+            if (sep) *sep = '\0'; /* strip clay.exe */
+            sep = strrchr(exe_path, '\\');
+            if (!sep) sep = strrchr(exe_path, '/');
+            if (sep) *sep = '\0'; /* strip Debug */
+            sep = strrchr(exe_path, '\\');
+            if (!sep) sep = strrchr(exe_path, '/');
+            if (sep) *sep = '\0'; /* strip build */
+            strncpy(clay_dir, exe_path, sizeof(clay_dir) - 1);
+        }
 #endif
-            "src/runtime", "deps/hash",
+
+        char cmd[4096];
+#ifdef _WIN32
+        {
+            /* Find Visual Studio via vswhere */
+            char vs_path[512] = "";
+            {
+                const char *pf86 = getenv("ProgramFiles(x86)");
+                if (!pf86) pf86 = "C:\\Program Files (x86)";
+                char vswhere_cmd[512];
+                snprintf(vswhere_cmd, sizeof(vswhere_cmd),
+                    "\"%s\\Microsoft Visual Studio\\Installer\\vswhere.exe\" "
+                    "-latest -property installationPath", pf86);
+                FILE *fp = _popen(vswhere_cmd, "r");
+                if (fp) {
+                    if (fgets(vs_path, sizeof(vs_path), fp)) {
+                        size_t len = strlen(vs_path);
+                        while (len > 0 && (vs_path[len-1] == '\n' || vs_path[len-1] == '\r'))
+                            vs_path[--len] = '\0';
+                    }
+                    _pclose(fp);
+                }
+            }
+
+            if (vs_path[0] == '\0') {
+                fprintf(stderr, "clay: cannot find Visual Studio installation\n");
+                fprintf(stderr, "clay: run from a Developer Command Prompt, or install Visual Studio\n");
+                return 1;
+            }
+
+            snprintf(cmd, sizeof(cmd),
+                "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
+                "cl /nologo /W3 "
+                "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" "
+                "/D_CRT_SECURE_NO_WARNINGS "
+                "\"%s\" "
+                "\"%s\\src\\runtime\\object.c\" "
+                "\"%s\\src\\runtime\\memory.c\" "
+                "\"%s\\src\\runtime\\dispatch.c\" "
+                "\"%s\\src\\runtime\\tagged.c\" "
+                "\"%s\\src\\runtime\\string.c\" "
+                "\"%s\\src\\runtime\\number.c\" "
+                "\"%s\\src\\runtime\\block.c\" "
+                "\"%s\\src\\runtime\\array.c\" "
+                "\"%s\\src\\runtime\\bootstrap.c\" "
+                "\"%s\\deps\\hash\\hash.c\" "
+                "/Fe:\"%s\"\"",
+                vs_path,
+                clay_dir, clay_dir,
+                c_file,
+                clay_dir, clay_dir, clay_dir, clay_dir,
+                clay_dir, clay_dir, clay_dir, clay_dir,
+                clay_dir, clay_dir,
+                output_name);
+        }
+#else
+        snprintf(cmd, sizeof(cmd),
+            "cc -std=c99 -Wall "
+            "-I\"%s/src/runtime\" -I\"%s/deps/hash\" "
+            "\"%s\" "
+            "\"%s/src/runtime/object.c\" "
+            "\"%s/src/runtime/memory.c\" "
+            "\"%s/src/runtime/dispatch.c\" "
+            "\"%s/src/runtime/tagged.c\" "
+            "\"%s/src/runtime/string.c\" "
+            "\"%s/src/runtime/number.c\" "
+            "\"%s/src/runtime/block.c\" "
+            "\"%s/src/runtime/array.c\" "
+            "\"%s/src/runtime/bootstrap.c\" "
+            "\"%s/deps/hash/hash.c\" "
+            "-o \"%s\"",
+            clay_dir, clay_dir,
             c_file,
-            "src/runtime/*.c",
-            "deps/hash/hash.c",
+            clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir,
             output_name);
+#endif
 
         printf("clay: compiling %s -> %s\n", c_file, output_name);
         int result = system(cmd);
