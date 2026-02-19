@@ -15,6 +15,230 @@
 #define strdup _strdup
 #endif
 
+/* --- Global state for trampoline access --- */
+
+static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
+static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
+
+/* --- Block trampoline ---
+ * When a block's value() method is called, this trampoline:
+ * 1. Reads chunk_id from self->as.block.env[0]
+ * 2. Stores block params as temporary globals
+ * 3. Runs the bytecode chunk on the VM
+ * 4. Restores old global values
+ * 5. Returns the result
+ */
+static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv) {
+    if (!g_bc || !g_vm) return CLAY_NIL;
+
+    /* Read chunk_id from env[0] */
+    int chunk_id = (int)clay_to_int(self->as.block.env[0]);
+    if (chunk_id < 0 || chunk_id >= g_bc->chunk_count) return CLAY_NIL;
+
+    BcChunk *chunk = g_bc->chunks[chunk_id];
+
+    /* Save old global values for params and set new ones */
+    HashTable *globals = (HashTable *)g_vm->globals;
+    ClayValue saved_params[16];
+    int saved_existed[16];
+
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        const char *pname = chunk->param_names[i];
+        saved_existed[i] = 0;
+
+        if (globals) {
+            ht_value_t old = ht_find(globals, (ht_key_t)pname);
+            if (old) {
+                clayvm_value_t *sv = (clayvm_value_t *)old;
+                saved_params[i] = vm_to_clay(*sv);
+                saved_existed[i] = 1;
+            }
+        }
+
+        /* Store param value as global */
+        ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
+        clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+        *stored = clay_to_vm(val);
+
+        if (saved_existed[i]) {
+            ht_value_t old = ht_find(globals, (ht_key_t)pname);
+            if (old) { free((void *)old); ht_remove(globals, (ht_key_t)pname); }
+        }
+        char *key = strdup(pname);
+        ht_add(globals, (ht_key_t)key, (ht_value_t)stored);
+    }
+
+    /* Save full VM state (re-entrant: vm_run called from within vm_run) */
+    const uint8_t *saved_code = g_vm->code;
+    size_t saved_code_len = g_vm->code_len;
+    size_t saved_ip = g_vm->ip;
+    size_t saved_sp = g_vm->sp;
+    int saved_running = g_vm->running;
+
+    int result = clayvm_vm_run(g_vm, chunk->code, chunk->len);
+
+    /* Get return value (last value on stack) */
+    ClayValue retval = CLAY_NIL;
+    if (result == 0 && g_vm->sp > 0) {
+        retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
+    }
+
+    /* Restore full VM state */
+    g_vm->code = saved_code;
+    g_vm->code_len = saved_code_len;
+    g_vm->ip = saved_ip;
+    g_vm->sp = saved_sp;
+    g_vm->running = saved_running;
+
+    /* Restore old param globals */
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        const char *pname = chunk->param_names[i];
+        ht_value_t cur = ht_find(globals, (ht_key_t)pname);
+        if (cur) { free((void *)cur); ht_remove(globals, (ht_key_t)pname); }
+
+        if (saved_existed[i]) {
+            clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+            *sv = clay_to_vm(saved_params[i]);
+            char *key = strdup(pname);
+            ht_add(globals, (ht_key_t)key, (ht_value_t)sv);
+        }
+    }
+
+    return retval;
+}
+
+/* --- Method trampolines ---
+ * Methods need unique ClayMethodFunc pointers. We generate a fixed pool
+ * of trampoline functions, each with a unique index.
+ */
+
+typedef struct {
+    int chunk_id;
+    int param_count;
+} MethodSlot;
+
+static MethodSlot g_method_slots[BC_MAX_METHOD_SLOTS];
+static int g_method_slot_count = 0;
+
+static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, ClayValue *argv) {
+    if (!g_bc || !g_vm || slot_index < 0 || slot_index >= g_method_slot_count) return CLAY_NIL;
+
+    MethodSlot *ms = &g_method_slots[slot_index];
+    if (ms->chunk_id < 0 || ms->chunk_id >= g_bc->chunk_count) return CLAY_NIL;
+
+    BcChunk *chunk = g_bc->chunks[ms->chunk_id];
+    HashTable *globals = (HashTable *)g_vm->globals;
+
+    /* Save and set params as globals */
+    ClayValue saved_params[16];
+    int saved_existed[16];
+
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        const char *pname = chunk->param_names[i];
+        saved_existed[i] = 0;
+        if (globals) {
+            ht_value_t old = ht_find(globals, (ht_key_t)pname);
+            if (old) {
+                saved_params[i] = vm_to_clay(*(clayvm_value_t *)old);
+                saved_existed[i] = 1;
+            }
+        }
+        ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
+        clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+        *stored = clay_to_vm(val);
+        if (saved_existed[i]) {
+            ht_value_t old_v = ht_find(globals, (ht_key_t)pname);
+            if (old_v) { free((void *)old_v); ht_remove(globals, (ht_key_t)pname); }
+        }
+        ht_add(globals, (ht_key_t)strdup(pname), (ht_value_t)stored);
+    }
+
+    /* Save and set self as global */
+    ClayValue saved_self = CLAY_NIL;
+    int self_existed = 0;
+    if (globals) {
+        ht_value_t old_self = ht_find(globals, (ht_key_t)"self");
+        if (old_self) {
+            saved_self = vm_to_clay(*(clayvm_value_t *)old_self);
+            self_existed = 1;
+            free((void *)old_self);
+            ht_remove(globals, (ht_key_t)"self");
+        }
+    }
+    clayvm_value_t *self_stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+    *self_stored = CLAYVM_OBJ(self);
+    ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
+
+    /* Save full VM state and run chunk */
+    const uint8_t *saved_code = g_vm->code;
+    size_t saved_code_len = g_vm->code_len;
+    size_t saved_ip = g_vm->ip;
+    size_t saved_sp = g_vm->sp;
+    int saved_running = g_vm->running;
+
+    int result = clayvm_vm_run(g_vm, chunk->code, chunk->len);
+
+    ClayValue retval = CLAY_NIL;
+    if (result == 0 && g_vm->sp > 0)
+        retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
+
+    /* Restore full VM state */
+    g_vm->code = saved_code;
+    g_vm->code_len = saved_code_len;
+    g_vm->ip = saved_ip;
+    g_vm->sp = saved_sp;
+    g_vm->running = saved_running;
+
+    /* Restore self */
+    ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
+    if (cur_self) { free((void *)cur_self); ht_remove(globals, (ht_key_t)"self"); }
+    if (self_existed) {
+        clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+        *sv = clay_to_vm(saved_self);
+        ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)sv);
+    }
+
+    /* Restore params */
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        const char *pname = chunk->param_names[i];
+        ht_value_t cur = ht_find(globals, (ht_key_t)pname);
+        if (cur) { free((void *)cur); ht_remove(globals, (ht_key_t)pname); }
+        if (saved_existed[i]) {
+            clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+            *sv = clay_to_vm(saved_params[i]);
+            ht_add(globals, (ht_key_t)strdup(pname), (ht_value_t)sv);
+        }
+    }
+
+    return retval;
+}
+
+/* Generate unique trampoline functions via macro */
+#define METHOD_TRAMP(N) \
+    static ClayValue bc_mtramp_##N(ClayObject *s, int ac, ClayValue *av) { \
+        return bc_method_dispatch(N, s, ac, av); \
+    }
+
+METHOD_TRAMP(0)  METHOD_TRAMP(1)  METHOD_TRAMP(2)  METHOD_TRAMP(3)
+METHOD_TRAMP(4)  METHOD_TRAMP(5)  METHOD_TRAMP(6)  METHOD_TRAMP(7)
+METHOD_TRAMP(8)  METHOD_TRAMP(9)  METHOD_TRAMP(10) METHOD_TRAMP(11)
+METHOD_TRAMP(12) METHOD_TRAMP(13) METHOD_TRAMP(14) METHOD_TRAMP(15)
+METHOD_TRAMP(16) METHOD_TRAMP(17) METHOD_TRAMP(18) METHOD_TRAMP(19)
+METHOD_TRAMP(20) METHOD_TRAMP(21) METHOD_TRAMP(22) METHOD_TRAMP(23)
+METHOD_TRAMP(24) METHOD_TRAMP(25) METHOD_TRAMP(26) METHOD_TRAMP(27)
+METHOD_TRAMP(28) METHOD_TRAMP(29) METHOD_TRAMP(30) METHOD_TRAMP(31)
+
+static ClayMethodFunc g_method_trampoline_table[] = {
+    bc_mtramp_0,  bc_mtramp_1,  bc_mtramp_2,  bc_mtramp_3,
+    bc_mtramp_4,  bc_mtramp_5,  bc_mtramp_6,  bc_mtramp_7,
+    bc_mtramp_8,  bc_mtramp_9,  bc_mtramp_10, bc_mtramp_11,
+    bc_mtramp_12, bc_mtramp_13, bc_mtramp_14, bc_mtramp_15,
+    bc_mtramp_16, bc_mtramp_17, bc_mtramp_18, bc_mtramp_19,
+    bc_mtramp_20, bc_mtramp_21, bc_mtramp_22, bc_mtramp_23,
+    bc_mtramp_24, bc_mtramp_25, bc_mtramp_26, bc_mtramp_27,
+    bc_mtramp_28, bc_mtramp_29, bc_mtramp_30, bc_mtramp_31,
+};
+
 /* --- Bytecode emission helpers --- */
 
 static void emit_byte(BcCompiler *bc, uint8_t b) {
@@ -150,6 +374,62 @@ static int native_make_string_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* native_make_block(chunk_id, param_count) */
+static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t pc_val = clayvm_vm_pop(vm);
+    clayvm_value_t id_val = clayvm_vm_pop(vm);
+    int chunk_id = (int)id_val.as.i64;
+    int param_count = (int)pc_val.as.i64;
+
+    /* Create env: env[0] = chunk_id as tagged int */
+    ClayValue *env = (ClayValue *)malloc(sizeof(ClayValue) * 1);
+    env[0] = clay_int(chunk_id);
+
+    ClayObject *block = clay_block_new(bc_block_trampoline, env, 1);
+    (void)param_count;
+    clayvm_vm_push(vm, CLAYVM_OBJ(block));
+    return 0;
+}
+
+/* native_make_array() — create empty array */
+static int native_make_array_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    ClayObject *arr = clay_array_new();
+    clayvm_vm_push(vm, CLAYVM_OBJ(arr));
+    return 0;
+}
+
+/* native_array_append(arr, val) — append to array, return array */
+static int native_array_append_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t val = clayvm_vm_pop(vm);
+    clayvm_value_t arr_val = clayvm_vm_pop(vm);
+    ClayObject *arr = (ClayObject *)arr_val.as.obj;
+    clay_array_append(arr, vm_to_clay(val));
+    clayvm_vm_push(vm, arr_val); /* return array for chaining */
+    return 0;
+}
+
+/* native_set_method(obj, name_str, method_slot_index) */
+static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t slot_val = clayvm_vm_pop(vm);
+    clayvm_value_t name_val = clayvm_vm_pop(vm);
+    clayvm_value_t obj_val = clayvm_vm_pop(vm);
+
+    int slot_idx = (int)slot_val.as.i64;
+    const char *name = clay_string_data((ClayObject *)name_val.as.obj);
+    ClayObject *obj = (ClayObject *)obj_val.as.obj;
+
+    if (slot_idx >= 0 && slot_idx < 32) {
+        clay_set_method(obj, name, g_method_trampoline_table[slot_idx]);
+    }
+
+    clayvm_vm_push(vm, obj_val);
+    return 0;
+}
+
 /* native_load_global(name_str) */
 static int native_load_global_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
@@ -208,6 +488,10 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     memset(bc, 0, sizeof(*bc));
     bc->vm = vm;
 
+    /* Set global pointers for trampoline access */
+    g_bc = bc;
+    g_vm = vm;
+
     /* Set up globals hash table */
     if (!vm->globals) {
         HashTable *g = ht_create();
@@ -220,7 +504,10 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);
     bc->native_clone = clayvm_native_register(&vm->natives, "clone", native_clone_fn, 1);
     bc->native_set_slot = clayvm_native_register(&vm->natives, "set_slot", native_set_slot_fn, 3);
+    bc->native_set_method = clayvm_native_register(&vm->natives, "set_method", native_set_method_fn, 3);
     bc->native_println = clayvm_native_register(&vm->natives, "println", native_println_fn, 1);
+    bc->native_make_block = clayvm_native_register(&vm->natives, "make_block", native_make_block_fn, 2);
+    bc->native_make_array = clayvm_native_register(&vm->natives, "make_array", native_make_array_fn, 0);
     bc->native_load_global = clayvm_native_register(&vm->natives, "load_global", native_load_global_fn, 1);
     bc->native_store_global = clayvm_native_register(&vm->natives, "store_global", native_store_global_fn, 2);
 
@@ -259,6 +546,72 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
 static void bc_emit_expr(BcCompiler *bc, AstNode *node);
 static void bc_emit_stmt(BcCompiler *bc, AstNode *node);
 
+/* Compile a block/method body into a new bytecode chunk.
+ * Returns the chunk_id, or -1 on error. */
+static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
+    if (bc->chunk_count >= BC_MAX_CHUNKS) {
+        bc->had_error = 1;
+        return -1;
+    }
+
+    int chunk_id = bc->chunk_count;
+
+    /* Allocate chunk on heap */
+    BcChunk *chunk = (BcChunk *)calloc(1, sizeof(BcChunk));
+    chunk->code = (uint8_t *)malloc(BC_CHUNK_CODE);
+
+    /* Record param names (strdup since AST may be freed) */
+    chunk->param_count = params ? params->count : 0;
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        chunk->param_names[i] = strdup(params->items[i]->as.ident.name);
+    }
+
+    /* Save current bytecode */
+    uint8_t *outer_buf = NULL;
+    size_t saved_len = bc->len;
+    if (saved_len > 0) {
+        outer_buf = (uint8_t *)malloc(saved_len);
+        memcpy(outer_buf, bc->code, saved_len);
+    }
+
+    bc->len = 0;
+
+    /* Compile body: intermediate stmts POP, last expr stays on stack */
+    for (int i = 0; i < body->count; i++) {
+        AstNode *stmt = body->items[i];
+        int is_last = (i == body->count - 1);
+        if (is_last && stmt->type != NODE_ASSIGN) {
+            bc_emit_expr(bc, stmt);
+        } else {
+            bc_emit_stmt(bc, stmt);
+        }
+    }
+
+    /* If body was empty, push nil */
+    if (body->count == 0) {
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+    }
+
+    emit_op(bc, CLAYVM_OP_HALT);
+
+    /* Copy compiled bytecode to chunk */
+    chunk->len = bc->len;
+    if (chunk->len > BC_CHUNK_CODE) chunk->len = BC_CHUNK_CODE;
+    memcpy(chunk->code, bc->code, chunk->len);
+
+    /* Restore outer code buffer */
+    bc->len = saved_len;
+    if (outer_buf) {
+        memcpy(bc->code, outer_buf, saved_len);
+        free(outer_buf);
+    }
+
+    bc->chunks[chunk_id] = chunk;
+    bc->chunk_count++;
+    return chunk_id;
+}
+
 static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
     if (!node || bc->had_error) return;
 
@@ -286,9 +639,12 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_SELF: {
-            /* In REPL context, self is rarely used; emit nil */
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            /* Load self from globals (set by method trampoline) */
+            int name_idx = add_constant_string(bc, "self");
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_load_global);
+            emit_byte(bc, 1);
             break;
         }
 
@@ -352,17 +708,41 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_BLOCK: {
-            /* Blocks in the REPL are complex — for now, fall through to send */
-            /* TODO: proper block compilation */
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            /* Compile block body to a new chunk */
+            int chunk_id = bc_compile_chunk(bc, &node->as.block.body, &node->as.block.params);
+            if (chunk_id < 0) {
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+                    (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+                break;
+            }
+            /* Emit: push chunk_id, push param_count, call native_make_block */
+            int id_idx = add_constant_int(bc, chunk_id);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)id_idx);
+            int pc_idx = add_constant_int(bc, node->as.block.params.count);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)pc_idx);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_make_block);
+            emit_byte(bc, 2);
             break;
         }
 
         case NODE_ARRAY_LIT: {
-            /* TODO: array literal compilation */
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            /* Create empty array via native */
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_make_array);
+            emit_byte(bc, 0);
+            /* For each element: DUP array, compile element, send append */
+            int append_idx = add_constant_string(bc, "append");
+            for (int i = 0; i < node->as.array_lit.elements.count; i++) {
+                emit_op(bc, CLAYVM_OP_DUP); /* keep array on stack */
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)append_idx);
+                bc_emit_expr(bc, node->as.array_lit.elements.items[i]);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_send);
+                emit_byte(bc, 3); /* arr, "append", elem */
+                emit_op(bc, CLAYVM_OP_POP); /* discard send result */
+            }
+            /* Array is left on stack */
             break;
         }
 
@@ -385,8 +765,29 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_u16(bc, (uint16_t)bc->native_set_slot);
                     emit_byte(bc, 3);
                     emit_op(bc, CLAYVM_OP_POP); /* discard set_slot return */
+                } else if (member->type == NODE_METHOD_DEF) {
+                    /* Compile method body to a chunk */
+                    int chunk_id = bc_compile_chunk(bc,
+                        &member->as.method_def.body,
+                        &member->as.method_def.params);
+                    if (chunk_id < 0 || g_method_slot_count >= 32) continue;
+
+                    /* Register in method slot table */
+                    int slot_idx = g_method_slot_count++;
+                    g_method_slots[slot_idx].chunk_id = chunk_id;
+                    g_method_slots[slot_idx].param_count = member->as.method_def.params.count;
+
+                    /* Emit: DUP obj, push name, push slot_idx, call set_method */
+                    emit_op(bc, CLAYVM_OP_DUP);
+                    int name_idx = add_constant_string(bc, member->as.method_def.name);
+                    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+                    int slot_const = add_constant_int(bc, slot_idx);
+                    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)slot_const);
+                    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                    emit_u16(bc, (uint16_t)bc->native_set_method);
+                    emit_byte(bc, 3);
+                    emit_op(bc, CLAYVM_OP_POP); /* discard set_method return */
                 }
-                /* METHOD_DEF skipped for now — needs block compilation */
             }
             break;
         }

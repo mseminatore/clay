@@ -12,6 +12,17 @@
 
 #define BC_MAX_CODE   65536
 #define BC_MAX_GLOBALS 256
+#define BC_MAX_CHUNKS  256
+#define BC_CHUNK_CODE  4096
+#define BC_MAX_METHOD_SLOTS 128
+
+/* A compiled bytecode chunk (block or method body) */
+typedef struct {
+    uint8_t *code;       /* dynamically allocated */
+    size_t  len;
+    int     param_count;
+    char   *param_names[16]; /* up to 16 params */
+} BcChunk;
 
 /* Bytecode compilation context */
 typedef struct {
@@ -23,6 +34,10 @@ typedef struct {
     /* Global variable name tracking */
     char *global_names[BC_MAX_GLOBALS];
     int   global_count;
+
+    /* Bytecode chunks for blocks/methods (heap-allocated) */
+    BcChunk *chunks[BC_MAX_CHUNKS];
+    int     chunk_count;
 
     /* Native function indices (pre-registered) */
     int native_send;      /* clay_send bridge */
