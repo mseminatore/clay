@@ -54,6 +54,37 @@ static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue 
     return CLAY_NIL;
 }
 
+static ClayValue object_type(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    const char *name;
+    if (self == &clay_true_obj || self == &clay_false_obj) {
+        name = "Boolean";
+    } else {
+        switch (self->type) {
+            case CLAY_TYPE_STRING: name = "String"; break;
+            case CLAY_TYPE_ARRAY:  name = "Array"; break;
+            case CLAY_TYPE_BLOCK:  name = "Block"; break;
+            case CLAY_TYPE_FLOAT:  name = "Float"; break;
+            case CLAY_TYPE_DICT:   name = "Dict"; break;
+            default:
+                /* Tagged ints are wrapped with parent=clay_Number */
+                if (self->parent == clay_Number) name = "Number";
+                else if (self->parent == clay_Error || self->type == CLAY_TYPE_OBJECT) {
+                    /* Check if it's an Error by walking parent chain */
+                    ClayObject *p = self->parent;
+                    name = "Object";
+                    while (p) {
+                        if (p == clay_Error) { name = "Error"; break; }
+                        p = p->parent;
+                    }
+                }
+                else name = "Object";
+                break;
+        }
+    }
+    return CLAY_VAL(clay_string_new(name));
+}
+
 static void collect_methods_chain(ClayObject *obj, ClayObject *arr, HashTable *seen, int inherited) {
     if (!obj) return;
     if (obj->methods) {
@@ -199,6 +230,11 @@ static ClayValue nil_toString(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(clay_string_new("nil"));
 }
 
+static ClayValue nil_type(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv; (void)self;
+    return CLAY_VAL(clay_string_new("Nil"));
+}
+
 void clay_bootstrap(void) {
     /* Create root Object prototype */
     clay_Object = clay_object_new();
@@ -211,6 +247,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Object, "methods", object_methods);
     clay_set_method(clay_Object, "slots", object_slots);
     clay_set_method(clay_Object, "inspect", object_inspect);
+    clay_set_method(clay_Object, "type", object_type);
 
     /* Number prototype */
     clay_Number = clay_object_new();
@@ -262,6 +299,7 @@ void clay_bootstrap(void) {
     clay_Nil->parent = clay_Object;
     clay_Nil->refcount = 1000000;
     clay_set_method(clay_Nil, "toString", nil_toString);
+    clay_set_method(clay_Nil, "type", nil_type);
 
     /* Error prototype */
     clay_Error = clay_object_new();
