@@ -11,6 +11,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+/* Minimal Win32 console API declarations to avoid windows.h name conflicts */
+typedef void *HANDLE;
+typedef unsigned long DWORD;
+#define STD_OUTPUT_HANDLE ((DWORD)-11)
+#define STD_ERROR_HANDLE  ((DWORD)-12)
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+__declspec(dllimport) HANDLE __stdcall GetStdHandle(DWORD);
+__declspec(dllimport) int __stdcall GetConsoleMode(HANDLE, DWORD *);
+__declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
+#else
+#include <unistd.h>
+#endif
 #include "lexer.h"
 #include "parser.h"
 #include "codegen.h"
@@ -375,8 +388,39 @@ cleanup:
 
 /* --- VM-based REPL (bytecode interpreter) --- */
 
+/* ANSI color codes */
+#define C_RESET   "\033[0m"
+#define C_CYAN    "\033[36m"
+#define C_GREEN   "\033[32m"
+#define C_RED     "\033[31m"
+#define C_BOLD    "\033[1m"
+#define C_DIM     "\033[2m"
+
+static int g_use_color = 0;
+
+static void repl_enable_color(void) {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (GetConsoleMode(h, &mode)) {
+        SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        g_use_color = 1;
+    }
+    /* Also enable for stderr */
+    h = GetStdHandle(STD_ERROR_HANDLE);
+    if (GetConsoleMode(h, &mode)) {
+        SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+#else
+    if (isatty(fileno(stdout))) g_use_color = 1;
+#endif
+}
+
+#define C(code) (g_use_color ? (code) : "")
+
 static int run_vm_repl(void) {
     clay_bootstrap();
+    repl_enable_color();
 
     clayvm_vm_t vm;
     clayvm_vm_init(&vm);
@@ -384,8 +428,9 @@ static int run_vm_repl(void) {
     BcCompiler bc;
     bc_compiler_init(&bc, &vm);
 
-    printf("Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)\n");
-    printf(">>> ");
+    printf("%s%sClay VM REPL%s v0.1 (type 'quit' or 'exit' to leave)\n",
+           C(C_BOLD), C(C_CYAN), C(C_RESET));
+    printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
     fflush(stdout);
 
     char line[4096];
@@ -420,7 +465,7 @@ static int run_vm_repl(void) {
         }
 
         if (brace_depth > 0 || paren_depth > 0) {
-            printf("... ");
+            printf("%s...%s ", C(C_DIM), C(C_RESET));
             fflush(stdout);
             continue;
         }
@@ -431,12 +476,12 @@ static int run_vm_repl(void) {
         AstNode *program = parser_parse(&parser);
 
         if (!program || parser.had_error) {
-            fprintf(stderr, "clay: parse error\n");
+            fprintf(stderr, "%s%sclay: parse error%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             if (program) ast_free(program);
             input_len = 0;
             brace_depth = 0;
             paren_depth = 0;
-            printf(">>> ");
+            printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
             fflush(stdout);
             continue;
         }
@@ -450,7 +495,7 @@ static int run_vm_repl(void) {
             fprintf(stderr, "clay: compilation error\n");
             ast_free(program);
             input_len = 0;
-            printf(">>> ");
+            printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
             fflush(stdout);
             continue;
         }
@@ -463,9 +508,10 @@ static int run_vm_repl(void) {
             ClayValue err = clay_error_stack.current_error;
             if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
                 ClayValue msg = clay_send_val(err, "message", 0, NULL);
-                fprintf(stderr, "Error: %s\n", clay_string_data(CLAY_OBJ(msg)));
+                fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
+                        clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
             } else {
-                fprintf(stderr, "Error: unknown\n");
+                fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             }
         } else {
             int result = clayvm_vm_run(&vm, bc.code, bc.len);
@@ -477,14 +523,14 @@ static int run_vm_repl(void) {
                 if (top.type != CLAYVM_VAL_NIL) {
                     ClayValue cv = vm_to_clay(top);
                     if (CLAY_IS_INT(cv)) {
-                        printf("=> %ld\n", (long)clay_to_int(cv));
+                        printf("%s=>%s %ld\n", C(C_GREEN), C(C_RESET), (long)clay_to_int(cv));
                     } else if (cv == CLAY_TRUE) {
-                        printf("=> true\n");
+                        printf("%s=>%s true\n", C(C_GREEN), C(C_RESET));
                     } else if (cv == CLAY_FALSE) {
-                        printf("=> false\n");
+                        printf("%s=>%s false\n", C(C_GREEN), C(C_RESET));
                     } else if (!CLAY_IS_NIL(cv)) {
                         ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
-                        printf("=> %s\n", clay_string_data(CLAY_OBJ(sv)));
+                        printf("%s=>%s %s\n", C(C_GREEN), C(C_RESET), clay_string_data(CLAY_OBJ(sv)));
                     }
                 }
             }
@@ -494,11 +540,11 @@ static int run_vm_repl(void) {
         input_len = 0;
         brace_depth = 0;
         paren_depth = 0;
-        printf(">>> ");
+        printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
         fflush(stdout);
     }
 
-    printf("Bye!\n");
+    printf("%sBye!%s\n", C(C_DIM), C(C_RESET));
     return 0;
 }
 
