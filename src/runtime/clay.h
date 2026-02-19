@@ -155,6 +155,7 @@ extern ClayObject *clay_Nil;
 extern ClayObject *clay_Boolean;
 extern ClayObject *clay_Error;
 extern ClayObject *clay_Dict;
+extern ClayObject *clay_Math;
 
 void clay_bootstrap(void);
 void clay_shutdown(void);
