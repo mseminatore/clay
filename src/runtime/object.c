@@ -35,6 +35,19 @@ ClayObject *clay_clone(ClayObject *proto) {
     obj->parent = proto;
     if (proto) {
         clay_retain(proto);
+        obj->type = proto->type;
+    }
+
+    /* Type-specific init for clones */
+    if (proto && proto->type == CLAY_TYPE_DICT) {
+        obj->as.dict.map = ht_create();
+        ht_set_hash_func(obj->as.dict.map, HT_HASH_STRING);
+        extern int dict_str_compare(ht_key_t a, ht_key_t b);
+        ht_set_compare_func(obj->as.dict.map, dict_str_compare);
+    } else if (proto && proto->type == CLAY_TYPE_ARRAY) {
+        obj->as.array.items = (ClayValue *)malloc(sizeof(ClayValue) * 8);
+        obj->as.array.size = 0;
+        obj->as.array.capacity = 8;
     }
 
     /* Copy slots from prototype */

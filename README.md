@@ -243,6 +243,29 @@ s replace("world", "Clay")          // "hello Clay"
 /* block comment */
 ```
 
+### Dict (HashMap)
+
+```clay
+d = Dict clone()
+d set("name", "Clay")
+d set("version", 1)
+
+d get("name") println()     // "Clay"
+d has("name") println()     // true
+d size() println()          // 2
+d remove("version")
+
+// Iteration
+d each({ |key, value|
+  "${key}: ${value toString()}" println()
+})
+
+// Inspect
+d keys() println()          // [name]
+d values() println()        // [Clay]
+d toString() println()      // {name: Clay}
+```
+
 ### Error handling
 
 Clay provides `try`/`catch` blocks and `raise` for error handling:
@@ -290,6 +313,7 @@ Proxy = Object clone({
 | Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
 | Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
 | Error | `message()`, `type()`, `toString()` |
+| Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `toString()` |
 
 ## Generated C
 

@@ -306,6 +306,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Nil") == 0 ||
            strcmp(name, "Boolean") == 0 ||
            strcmp(name, "Error") == 0 ||
+           strcmp(name, "Dict") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -320,6 +321,7 @@ static const char *builtin_c_expr(const char *name) {
     if (strcmp(name, "Nil") == 0)     return "CLAY_VAL(clay_Nil)";
     if (strcmp(name, "Boolean") == 0) return "CLAY_VAL(clay_Boolean)";
     if (strcmp(name, "Error") == 0)   return "CLAY_VAL(clay_Error)";
+    if (strcmp(name, "Dict") == 0)    return "CLAY_VAL(clay_Dict)";
     if (strcmp(name, "true") == 0)    return "CLAY_TRUE";
     if (strcmp(name, "false") == 0)   return "CLAY_FALSE";
     if (strcmp(name, "nil") == 0)     return "CLAY_NIL";

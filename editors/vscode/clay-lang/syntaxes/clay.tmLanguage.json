@@ -98,7 +98,7 @@
       "patterns": [
         {
           "name": "support.class.clay",
-          "match": "\\b(Object|Number|String|Array|Block|Boolean|Error|Nil)\\b"
+          "match": "\\b(Object|Number|String|Array|Block|Boolean|Error|Dict|Nil)\\b"
         }
       ]
     },

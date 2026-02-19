@@ -59,7 +59,8 @@ typedef enum {
     CLAY_TYPE_OBJECT = 0,
     CLAY_TYPE_STRING,
     CLAY_TYPE_ARRAY,
-    CLAY_TYPE_BLOCK
+    CLAY_TYPE_BLOCK,
+    CLAY_TYPE_DICT
 } ClayType;
 
 struct ClayObject {
@@ -87,6 +88,10 @@ struct ClayObject {
             ClayValue     *env;
             int            env_size;
         } block;
+
+        struct {
+            HashTable *map;
+        } dict;
     } as;
 };
 
@@ -137,6 +142,7 @@ extern ClayObject *clay_Block;
 extern ClayObject *clay_Nil;
 extern ClayObject *clay_Boolean;
 extern ClayObject *clay_Error;
+extern ClayObject *clay_Dict;
 
 void clay_bootstrap(void);
 void clay_shutdown(void);
@@ -154,6 +160,14 @@ size_t      clay_array_size(ClayObject *arr);
 
 /* --- Block helpers --- */
 ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size);
+
+/* --- Dict helpers --- */
+ClayObject *clay_dict_new(void);
+void        clay_dict_set(ClayObject *dict, const char *key, ClayValue val);
+ClayValue   clay_dict_get(ClayObject *dict, const char *key);
+int         clay_dict_has(ClayObject *dict, const char *key);
+void        clay_dict_remove(ClayObject *dict, const char *key);
+size_t      clay_dict_size(ClayObject *dict);
 
 /* --- Debug --- */
 void        clay_inspect(ClayObject *obj);

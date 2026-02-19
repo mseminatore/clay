@@ -1,0 +1,37 @@
+// Test Dict (HashMap) support
+
+// Create and populate a dict
+d = Dict clone()
+d set("name", "Clay")
+d set("version", 1)
+d set("awesome", true)
+
+// Basic access
+d get("name") println()       // Clay
+d get("version") println()    // 1
+d size() println()            // 3
+
+// has / missing key
+d has("name") println()       // true
+d has("missing") println()    // false
+d get("missing") println()    // nil
+
+// Overwrite
+d set("version", 2)
+d get("version") println()    // 2
+
+// Remove
+d remove("awesome")
+d size() println()            // 2
+
+// keys and values
+d keys() println()
+d values() println()
+
+// each
+d each({ |key, value|
+  "${key} => ${value toString()}" println()
+})
+
+// toString
+d toString() println()

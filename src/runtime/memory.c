@@ -16,7 +16,8 @@ static int clay_is_singleton(ClayObject *obj) {
            obj == clay_Array ||
            obj == clay_Block ||
            obj == clay_Nil ||
-           obj == clay_Boolean;
+           obj == clay_Boolean ||
+           obj == clay_Dict;
 }
 
 ClayObject *clay_retain(ClayObject *obj) {
@@ -87,6 +88,21 @@ static void clay_dealloc(ClayObject *obj) {
                     }
                 }
                 free(obj->as.block.env);
+            }
+            break;
+        case CLAY_TYPE_DICT:
+            if (obj->as.dict.map) {
+                size_t dpos = 0;
+                ht_key_t dkey;
+                ht_value_t dval;
+                while (ht_next(obj->as.dict.map, &dpos, &dkey, &dval)) {
+                    free((void *)dkey);
+                    ClayValue cv = (ClayValue)(uintptr_t)dval;
+                    if (CLAY_IS_PTR(cv) && !CLAY_IS_NIL(cv) && cv != CLAY_TRUE && cv != CLAY_FALSE) {
+                        clay_release(CLAY_OBJ(cv));
+                    }
+                }
+                ht_free(obj->as.dict.map);
             }
             break;
         default:

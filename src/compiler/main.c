@@ -115,6 +115,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
             "\"%s\\src\\runtime\\block.c\" "
             "\"%s\\src\\runtime\\array.c\" "
             "\"%s\\src\\runtime\\error.c\" "
+            "\"%s\\src\\runtime\\clay_dict.c\" "
             "\"%s\\src\\runtime\\bootstrap.c\" "
             "\"%s\\deps\\hash\\hash.c\" "
             "/Fe:\"%s\" %s\"",
@@ -123,7 +124,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
             clay_dir, clay_dir,
             c_file,
             clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir, clay_dir,clay_dir,
             clay_dir, clay_dir, clay_dir,
             output_name,
             quiet ? ">nul 2>&1" : "");
@@ -142,6 +143,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "\"%s/src/runtime/block.c\" "
         "\"%s/src/runtime/array.c\" "
         "\"%s/src/runtime/error.c\" "
+        "\"%s/src/runtime/clay_dict.c\" "
         "\"%s/src/runtime/bootstrap.c\" "
         "\"%s/deps/hash/hash.c\" "
         "-o \"%s\"",
@@ -150,7 +152,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         c_file,
         clay_dir, clay_dir, clay_dir, clay_dir,
         clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, clay_dir,
         output_name);
 #endif
     return system(cmd);

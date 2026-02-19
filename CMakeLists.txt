@@ -27,6 +27,7 @@ set(RUNTIME_SOURCES
     src/runtime/block.c
     src/runtime/array.c
     src/runtime/error.c
+    src/runtime/clay_dict.c
     src/runtime/bootstrap.c
 )
 

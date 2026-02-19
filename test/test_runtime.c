@@ -521,6 +521,66 @@ static void test_error_handling(void) {
     clay_release(CLAY_OBJ(etype));
 }
 
+static void test_dict(void) {
+    SUITE("Dict");
+
+    COMMENT("create and set/get...");
+    ClayObject *d = clay_dict_new();
+    TEST(d != NULL);
+    TEST(clay_dict_size(d) == 0);
+
+    clay_dict_set(d, "name", CLAY_VAL(clay_string_new("Clay")));
+    clay_dict_set(d, "version", clay_int(1));
+    TEST(clay_dict_size(d) == 2);
+
+    ClayValue name = clay_dict_get(d, "name");
+    TEST(!CLAY_IS_NIL(name));
+    TEST(strcmp(clay_string_data(CLAY_OBJ(name)), "Clay") == 0);
+
+    ClayValue ver = clay_dict_get(d, "version");
+    TEST(CLAY_IS_INT(ver));
+    TEST(clay_to_int(ver) == 1);
+
+    COMMENT("has and missing key...");
+    TEST(clay_dict_has(d, "name"));
+    TEST(!clay_dict_has(d, "missing"));
+    ClayValue miss = clay_dict_get(d, "missing");
+    TEST(CLAY_IS_NIL(miss));
+
+    COMMENT("overwrite existing key...");
+    clay_dict_set(d, "name", CLAY_VAL(clay_string_new("Clay2")));
+    ClayValue name2 = clay_dict_get(d, "name");
+    TEST(strcmp(clay_string_data(CLAY_OBJ(name2)), "Clay2") == 0);
+    TEST(clay_dict_size(d) == 2);
+
+    COMMENT("remove...");
+    clay_dict_remove(d, "version");
+    TEST(clay_dict_size(d) == 1);
+    TEST(!clay_dict_has(d, "version"));
+
+    COMMENT("keys and values via methods...");
+    clay_dict_set(d, "a", clay_int(10));
+    ClayValue keys = clay_send(d, "keys", 0, NULL);
+    TEST(clay_array_size(CLAY_OBJ(keys)) == 2);
+    ClayValue vals = clay_send(d, "values", 0, NULL);
+    TEST(clay_array_size(CLAY_OBJ(vals)) == 2);
+
+    COMMENT("toString...");
+    ClayObject *d2 = clay_dict_new();
+    clay_dict_set(d2, "x", clay_int(42));
+    ClayValue ts = clay_send(d2, "toString", 0, NULL);
+    TEST(!CLAY_IS_NIL(ts));
+    const char *s = clay_string_data(CLAY_OBJ(ts));
+    TEST(s[0] == '{');
+    TEST(s[strlen(s) - 1] == '}');
+
+    clay_release(CLAY_OBJ(ts));
+    clay_release(CLAY_OBJ(keys));
+    clay_release(CLAY_OBJ(vals));
+    clay_release(d2);
+    clay_release(d);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -539,6 +599,7 @@ void test_main(int argc, char *argv[]) {
     test_prototype_chain();
     test_deep_prototype_chain();
     test_error_handling();
+    test_dict();
 
     clay_shutdown();
 }

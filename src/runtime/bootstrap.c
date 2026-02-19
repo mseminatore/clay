@@ -12,6 +12,7 @@ ClayObject *clay_Block   = NULL;
 ClayObject *clay_Nil     = NULL;
 ClayObject *clay_Boolean = NULL;
 ClayObject *clay_Error   = NULL;
+ClayObject *clay_Dict    = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -19,6 +20,7 @@ extern void clay_string_init_methods(ClayObject *proto);
 extern void clay_array_init_methods(ClayObject *proto);
 extern void clay_block_init_methods(ClayObject *proto);
 extern void clay_error_init_methods(ClayObject *proto);
+extern void clay_dict_init_methods(ClayObject *proto);
 
 /* Object base methods */
 
@@ -204,6 +206,13 @@ void clay_bootstrap(void) {
     clay_Error->parent = clay_Object;
     clay_Error->refcount = 1000000;
     clay_error_init_methods(clay_Error);
+
+    /* Dict prototype */
+    clay_Dict = clay_object_new();
+    clay_Dict->parent = clay_Object;
+    clay_Dict->type = CLAY_TYPE_DICT;
+    clay_Dict->refcount = 1000000;
+    clay_dict_init_methods(clay_Dict);
 }
 
 void clay_shutdown(void) {
