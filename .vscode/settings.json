@@ -1,0 +1,14 @@
+{
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureOnOpen": true,
+    "cmake.generator": "Visual Studio 18 2025",
+    "files.associations": {
+        "*.clay": "clay"
+    },
+    "files.exclude": {
+        "**/*.obj": true,
+        "**/*.exe": true,
+        "**/*.ilk": true,
+        "**/*.pdb": true
+    }
+}

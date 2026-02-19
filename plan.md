@@ -276,7 +276,7 @@ d toString() println()        // {name: Clay, version: 1}
 
 42. **dict-tests** — Unit tests in test_runtime.c: create, set/get, has/remove, size, keys/values, each, toString. Clay test program exercising Dict. Update README with Dict docs.
 
-## Phase 11: Bytecode VM REPL (using vmgen)
+## Phase 11: Bytecode VM REPL (using vmgen) ✅
 
 ### Problem
 The current REPL works by accumulating Clay source, recompiling to C, invoking MSVC, and re-executing the entire program on every input. This is slow (~2-3 seconds per keystroke round-trip) and fragile.
@@ -307,32 +307,40 @@ Clay Source → [Lexer] → [Parser] → [AST] →┬→ [C CodeGen]   → .c fi
 
 The existing lexer, parser, and AST are reused. Only a new bytecode codegen backend is needed, plus a Clay VM spec for vmgen.
 
-### Tasks
+### Implementation Status (DONE)
 
-43. **clay-vm-spec** — Write `specs/clay.yaml` for vmgen defining Clay's bytecode instruction set:
-    - Types: int64, double, bool, string, object, nil
-    - Stack: dynamic, tagged_union
-    - Features: mark_sweep GC, closures, interned_strings, debug_tracing
-    - Instructions: PUSH_CONST, PUSH_NIL, PUSH_TRUE, PUSH_FALSE, POP, DUP, LOAD_LOCAL, STORE_LOCAL, LOAD_GLOBAL, STORE_GLOBAL, ADD, SUB, MUL, DIV, MOD, EQ, NEQ, LT, GT, LTE, GTE, NOT, NEGATE, JUMP, JUMP_IF_FALSE, CALL, RETURN, SEND (message dispatch), CLONE, SET_SLOT, GET_SLOT, SET_METHOD, MAKE_BLOCK, MAKE_ARRAY, RAISE, TRY_PUSH, TRY_POP, HALT
-    - Native functions: println, print, toString (bridge to Clay runtime)
+- ✅ **clay-vm-spec** — `src/vm/clay.yaml` with 22 opcodes, `clayvm` prefix to avoid runtime collision
+- ✅ **generate-clay-vm** — 22 generated files in `src/vm/generated/`, compiled as `clayvm` library
+- ✅ **bytecode-codegen** — `src/compiler/bc_compiler.c` compiles AST to bytecode. Handles: int/string literals, identifiers (global load), assignments (global store), binary ops, message sends, clone with slots
+- ✅ **native-bridge** — 6 native functions: send, clone, set_slot, println, load_global, store_global. Clay runtime prototypes pre-registered as globals.
+- ✅ **vm-repl** — `clay --vm-repl` launches bytecode REPL. Variables persist, auto-print results, error recovery via setjmp/longjmp.
 
-44. **generate-clay-vm** — Run vmgen on the spec to produce generated C files. Integrate into CMakeLists.txt as a library. Verify the generated VM compiles and basic smoke tests pass.
+### Key decisions made
+- **Object model sharing**: VM wraps `ClayObject*` in `CLAYVM_VAL_OBJECT`. All Clay operations go through CALL_NATIVE to bridge functions.
+- **Slot access fallback**: Added to `dispatch.c` — when method lookup fails, checks slots before `doesNotUnderstand`. This enables bytecode-created objects to work without explicit accessor methods.
+- **Byte order**: Generated VM uses little-endian `READ_UINT16`, so `emit_u16` writes little-endian to match.
+- **Generated VM fixes**: PUSH_CONST and DUP were coercing all values to INT64 — fixed to preserve value types.
 
-45. **bytecode-codegen** — New compiler backend (`src/compiler/bc_codegen.c`) that walks the AST and emits bytecode instead of C. Handles: literals, variables (local/global), message sends via SEND opcode, binary ops, blocks/closures, clone expressions, try/catch, raise. Manages a constant pool and local variable table.
+### Known limitations
+- Blocks/closures not yet compiled to bytecode (emit nil)
+- Array literals not compiled
+- Method definitions in clone bodies skipped
+- try/catch/raise not handled in bytecode
+- No import handling
+- No local variable scoping (everything is global)
 
-46. **native-bridge** — Register Clay runtime functions (clay_clone, clay_send, clay_string_new, etc.) as native functions in the generated VM. The SEND opcode calls into the existing Clay dispatch system. This preserves full compatibility with the runtime object model.
+## VS Code Integration ✅
 
-47. **vm-repl** — Replace the accumulate-and-recompile REPL loop with: parse input → compile to bytecode → execute in persistent VM instance. Variables live in the VM's global table across inputs. Results auto-print. Errors caught by the VM's error handler (no process crash).
+Full IDE support via `.vscode/` configuration:
 
-48. **vm-repl-tests** — Test the bytecode REPL: arithmetic, string operations, object creation, method calls, closures, error handling, multi-line input. Verify parity with the C-compilation REPL.
+- **settings.json** — CMake auto-configure on open, `.clay` file association, hide build artifacts
+- **tasks.json** — 6 tasks: CMake Configure, Build All (default build, Ctrl+Shift+B), Run Tests (default test), Compile Current .clay File, Compile to C Only, Launch VM REPL
+- **launch.json** — 5 debug configs: Test Runner, VM REPL, Compile .clay File (debug the compiler), Run Compiled .clay Program (debug user code), Classic REPL
+- **c_cpp_properties.json** — IntelliSense with include paths for runtime, compiler, VM, and deps
 
-### Key design decisions needed
-- **Object model sharing**: The VM's `object` type should wrap `ClayObject*` pointers, reusing the existing runtime. The SEND opcode delegates to `clay_send_val()`. This avoids reimplementing the entire object model.
-- **GC coordination**: vmgen's mark-sweep GC manages VM stack roots; Clay's refcounting manages object lifetimes. Need a bridge where VM-reachable objects are retained.
-- **Compilation mode**: `clay file.clay` still compiles to C (production). `clay` (no args) or `clay --repl` uses the bytecode VM. Both share the same parser.
+**Prerequisites:** CMake Tools + C/C++ extensions (both installed).
 
 ## Phase 12+ (Future)
-- HashMap/Dict object (expose hash tables at Clay level)
 - Optional type annotations
 - Inline caching for dispatch performance
 - Self-hosting compiler

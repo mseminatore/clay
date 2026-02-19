@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "MSVC",
+            "includePath": [
+                "${workspaceFolder}/src/runtime",
+                "${workspaceFolder}/src/compiler",
+                "${workspaceFolder}/src/vm/generated",
+                "${workspaceFolder}/deps/hash",
+                "${workspaceFolder}/deps/testy"
+            ],
+            "defines": [
+                "_CRT_SECURE_NO_WARNINGS",
+                "_MSC_VER"
+            ],
+            "cStandard": "c99",
+            "intelliSenseMode": "windows-msvc-x64",
+            "compilerPath": "cl.exe"
+        }
+    ],
+    "version": 4
+}
