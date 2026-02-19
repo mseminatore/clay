@@ -531,7 +531,7 @@ int main(int argc, char *argv[]) {
             printf("  --repl        Launch interactive REPL (compiles to C)\n");
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
             printf("  -h, --help    Show this help message\n");
-            printf("\nWith no arguments, launches the REPL.\n");
+            printf("\nWith no arguments, launches the VM REPL.\n");
             return 0;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "clay: unknown option '%s'\n", argv[i]);
@@ -542,7 +542,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (!source_file && !repl_mode && !vm_repl_mode) {
-        repl_mode = 1; /* default to REPL if no source file */
+        vm_repl_mode = 1; /* default to VM REPL if no source file */
     }
 
     if (vm_repl_mode) {
