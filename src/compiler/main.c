@@ -5,7 +5,8 @@
  *   -o <output>   Output binary name (default: a.out / a.exe)
  *   -c            Emit C code only (don't compile)
  *   --ast         Print AST and exit
- *   --repl        Interactive REPL (also activates with no source file)
+ *   --repl        Interactive REPL (C compilation, also activates with no source file)
+ *   --vm-repl     Interactive REPL (bytecode VM, faster)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "codegen.h"
+#include "bc_compiler.h"
 #include "ast.h"
 
 #ifdef _MSC_VER
@@ -371,12 +373,142 @@ cleanup:
     return 0;
 }
 
+/* --- VM-based REPL (bytecode interpreter) --- */
+
+static int run_vm_repl(void) {
+    clay_bootstrap();
+
+    clayvm_vm_t vm;
+    clayvm_vm_init(&vm);
+
+    BcCompiler bc;
+    bc_compiler_init(&bc, &vm);
+
+    printf("Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)\n");
+    printf(">>> ");
+    fflush(stdout);
+
+    char line[4096];
+    char input[16384];
+    int input_len = 0;
+    int brace_depth = 0;
+    int paren_depth = 0;
+
+    while (fgets(line, sizeof(line), stdin)) {
+        /* Check for quit */
+        char *trimmed = line;
+        while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+        if (strcmp(trimmed, "quit\n") == 0 || strcmp(trimmed, "exit\n") == 0 ||
+            strcmp(trimmed, "quit\r\n") == 0 || strcmp(trimmed, "exit\r\n") == 0) {
+            break;
+        }
+
+        /* Append to input buffer */
+        size_t ll = strlen(line);
+        if (input_len + (int)ll < (int)sizeof(input) - 1) {
+            memcpy(input + input_len, line, ll);
+            input_len += (int)ll;
+            input[input_len] = '\0';
+        }
+
+        /* Track braces/parens for multi-line */
+        for (size_t i = 0; i < ll; i++) {
+            if (line[i] == '{') brace_depth++;
+            else if (line[i] == '}') brace_depth--;
+            else if (line[i] == '(') paren_depth++;
+            else if (line[i] == ')') paren_depth--;
+        }
+
+        if (brace_depth > 0 || paren_depth > 0) {
+            printf("... ");
+            fflush(stdout);
+            continue;
+        }
+
+        /* Parse the input */
+        Parser parser;
+        parser_init(&parser, input, "<repl>");
+        AstNode *program = parser_parse(&parser);
+
+        if (!program || parser.had_error) {
+            fprintf(stderr, "clay: parse error\n");
+            if (program) ast_free(program);
+            input_len = 0;
+            brace_depth = 0;
+            paren_depth = 0;
+            printf(">>> ");
+            fflush(stdout);
+            continue;
+        }
+
+        /* Reset bytecode (keep constants & globals) */
+        bc.len = 0;
+        bc.had_error = 0;
+
+        /* Compile to bytecode */
+        if (bc_compile(&bc, program) != 0) {
+            fprintf(stderr, "clay: compilation error\n");
+            ast_free(program);
+            input_len = 0;
+            printf(">>> ");
+            fflush(stdout);
+            continue;
+        }
+
+        /* Execute with error recovery */
+        vm.sp = 0;
+        int caught = clay_try_push();
+        if (caught != 0) {
+            /* An error was raised during execution */
+            ClayValue err = clay_error_stack.current_error;
+            if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+                ClayValue msg = clay_send_val(err, "message", 0, NULL);
+                fprintf(stderr, "Error: %s\n", clay_string_data(CLAY_OBJ(msg)));
+            } else {
+                fprintf(stderr, "Error: unknown\n");
+            }
+        } else {
+            int result = clayvm_vm_run(&vm, bc.code, bc.len);
+            clay_try_pop();
+
+            if (result == 0 && vm.sp > 0) {
+                /* Auto-print result */
+                clayvm_value_t top = vm.stack[vm.sp - 1];
+                if (top.type != CLAYVM_VAL_NIL) {
+                    ClayValue cv = vm_to_clay(top);
+                    if (CLAY_IS_INT(cv)) {
+                        printf("=> %ld\n", (long)clay_to_int(cv));
+                    } else if (cv == CLAY_TRUE) {
+                        printf("=> true\n");
+                    } else if (cv == CLAY_FALSE) {
+                        printf("=> false\n");
+                    } else if (!CLAY_IS_NIL(cv)) {
+                        ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
+                        printf("=> %s\n", clay_string_data(CLAY_OBJ(sv)));
+                    }
+                }
+            }
+        }
+
+        ast_free(program);
+        input_len = 0;
+        brace_depth = 0;
+        paren_depth = 0;
+        printf(">>> ");
+        fflush(stdout);
+    }
+
+    printf("Bye!\n");
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     const char *source_file = NULL;
     const char *output_name = NULL;
     int c_only = 0;
     int print_ast = 0;
     int repl_mode = 0;
+    int vm_repl_mode = 0;
 
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -388,6 +520,8 @@ int main(int argc, char *argv[]) {
             print_ast = 1;
         } else if (strcmp(argv[i], "--repl") == 0) {
             repl_mode = 1;
+        } else if (strcmp(argv[i], "--vm-repl") == 0) {
+            vm_repl_mode = 1;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "clay: unknown option '%s'\n", argv[i]);
             return 1;
@@ -396,8 +530,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (!source_file && !repl_mode) {
+    if (!source_file && !repl_mode && !vm_repl_mode) {
         repl_mode = 1; /* default to REPL if no source file */
+    }
+
+    if (vm_repl_mode) {
+        return run_vm_repl();
     }
 
     if (repl_mode) {

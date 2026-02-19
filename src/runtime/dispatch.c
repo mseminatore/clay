@@ -43,6 +43,14 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         return func(obj, argc, argv);
     }
 
+    /* Slot access fallback: if a slot exists with this name, return its value */
+    if (argc == 0 && obj->slots) {
+        ht_value_t slot = ht_find(obj->slots, (ht_key_t)selector);
+        if (slot) {
+            return (ClayValue)(uintptr_t)slot;
+        }
+    }
+
     /* Try doesNotUnderstand */
     ClayMethodFunc dnu = clay_lookup_method(obj, "doesNotUnderstand");
     if (dnu) {

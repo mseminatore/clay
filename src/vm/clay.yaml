@@ -1,0 +1,163 @@
+vm:
+  name: "clayvm"
+  version: "1.0"
+
+  stack:
+    type: "dynamic"
+    max_depth: 4096
+    value_type: "tagged_union"
+
+  types:
+    - int64
+    - double
+    - bool
+    - string
+    - object
+
+  features:
+    interned_strings: true
+    garbage_collection:
+      enabled: false
+    closures: false
+    modules:
+      enabled: false
+    coroutines: false
+    debug_tracing: true
+    nan_boxing: false
+
+  dispatch: "auto"
+
+  instructions:
+    # Stack manipulation
+    - name: PUSH_CONST
+      operands: [{ name: index, type: uint16 }]
+      description: "Push constant at index onto stack"
+      action: "push constants[$index]"
+
+    - name: POP
+      operands: []
+      description: "Pop and discard top of stack"
+      action: "pop _"
+
+    - name: DUP
+      operands: []
+      description: "Duplicate top of stack"
+      action: "peek a; push a"
+
+    # Arithmetic
+    - name: ADD
+      operands: []
+      description: "Pop two values, push their sum"
+      action: "pop b; pop a; push a + b"
+      stack_effect: -1
+
+    - name: SUB
+      operands: []
+      description: "Pop two values, push their difference"
+      action: "pop b; pop a; push a - b"
+      stack_effect: -1
+
+    - name: MUL
+      operands: []
+      description: "Pop two values, push their product"
+      action: "pop b; pop a; push a * b"
+      stack_effect: -1
+
+    - name: DIV
+      operands: []
+      description: "Pop two values, push their quotient"
+      action: "pop b; pop a; push a / b"
+      stack_effect: -1
+
+    - name: MOD
+      operands: []
+      description: "Pop two values, push remainder"
+      action_c: |
+        int64_t b = clayvm_vm_pop(vm).as.i64;
+        int64_t a = clayvm_vm_pop(vm).as.i64;
+        clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+      stack_effect: -1
+
+    - name: NEGATE
+      operands: []
+      description: "Negate top of stack"
+      action: "pop a; push -a"
+
+    # Comparison
+    - name: EQ
+      operands: []
+      description: "Pop two values, push true if equal"
+      action: "pop b; pop a; push a == b"
+      stack_effect: -1
+
+    - name: NEQ
+      operands: []
+      description: "Pop two values, push true if not equal"
+      action: "pop b; pop a; push a != b"
+      stack_effect: -1
+
+    - name: LT
+      operands: []
+      description: "Pop two values, push true if a < b"
+      action: "pop b; pop a; push a < b"
+      stack_effect: -1
+
+    - name: GT
+      operands: []
+      description: "Pop two values, push true if a > b"
+      action: "pop b; pop a; push a > b"
+      stack_effect: -1
+
+    - name: LTE
+      operands: []
+      description: "Pop two values, push true if a <= b"
+      action: "pop b; pop a; push a <= b"
+      stack_effect: -1
+
+    - name: GTE
+      operands: []
+      description: "Pop two values, push true if a >= b"
+      action: "pop b; pop a; push a >= b"
+      stack_effect: -1
+
+    - name: NOT
+      operands: []
+      description: "Logical not"
+      action: "pop a; push !a"
+
+    # Control flow
+    - name: JUMP
+      operands: [{ name: offset, type: int16 }]
+      description: "Unconditional jump by offset"
+      action: "jump $offset"
+
+    - name: JUMP_IF_FALSE
+      operands: [{ name: offset, type: int16 }]
+      description: "Pop and jump by offset if falsy"
+      action: "pop a; jump_if_zero a $offset"
+
+    - name: CALL
+      operands: [{ name: func_index, type: uint16 }, { name: arity, type: uint8 }]
+      description: "Call function at index with arity arguments"
+      action: "call $func_index $arity"
+
+    - name: CALL_NATIVE
+      operands: [{ name: func_index, type: uint16 }, { name: arity, type: uint8 }]
+      description: "Call native function"
+      action_c: |
+        clayvm_native_call(&vm->natives, func_index, vm, arity);
+
+    - name: RETURN
+      operands: []
+      description: "Return from current function"
+      action: "return"
+
+    - name: HALT
+      operands: []
+      description: "Stop execution"
+      action: "halt"
+
+  constants:
+    - int64
+    - double
+    - string
