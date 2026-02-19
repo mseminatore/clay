@@ -622,6 +622,12 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             break;
         }
 
+        case NODE_FLOAT_LIT: {
+            int idx = add_constant_obj(bc, clay_float_new(node->as.float_lit.value));
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)idx);
+            break;
+        }
+
         case NODE_STRING_LIT: {
             int idx = add_constant_string(bc, node->as.string_lit.value);
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)idx);

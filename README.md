@@ -244,6 +244,19 @@ arr size()                    // 4
 arr each({ |item| item println() })
 ```
 
+### Numbers
+
+Integers are tagged values (fast, no allocation). Floats are heap-allocated objects. Mixed operations promote to float.
+
+```clay
+42                            // integer
+3.14                          // float
+10 / 3                        // 3 (integer division)
+10 toFloat / 3                // 3.33333 (float division)
+3.14 + 2                      // 5.14 (mixed → float)
+3.14 toInt                    // 3 (truncation)
+```
+
 ### Strings
 
 ```clay
@@ -327,7 +340,7 @@ Proxy = Object clone({
 | Prototype | Methods |
 |-----------|---------|
 | Object | `clone()`, `toString()`, `println()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
-| Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toString()`, `println()` |
+| Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `each(block)`, `toString()` |
 | Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |

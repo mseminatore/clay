@@ -4,6 +4,7 @@
 typedef enum {
     NODE_PROGRAM,       /* top-level list of statements */
     NODE_INT_LIT,       /* integer literal: 42 */
+    NODE_FLOAT_LIT,     /* float literal: 3.14 */
     NODE_STRING_LIT,    /* string literal: "hello" */
     NODE_IDENT,         /* identifier: foo */
     NODE_SELF,          /* self keyword */
@@ -36,6 +37,9 @@ struct AstNode {
     union {
         /* NODE_INT_LIT */
         struct { long value; } int_lit;
+
+        /* NODE_FLOAT_LIT */
+        struct { float value; } float_lit;
 
         /* NODE_STRING_LIT */
         struct { char *value; } string_lit;

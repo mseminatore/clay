@@ -94,6 +94,14 @@ static Token lex_number(Lexer *lexer, const char *start) {
     while (isdigit((unsigned char)peek(lexer))) {
         advance(lexer);
     }
+    /* Check for decimal point followed by digit */
+    if (peek(lexer) == '.' && isdigit((unsigned char)lexer->current[1])) {
+        advance(lexer); /* consume '.' */
+        while (isdigit((unsigned char)peek(lexer))) {
+            advance(lexer);
+        }
+        return make_token(lexer, TOK_FLOAT, start, (int)(lexer->current - start));
+    }
     return make_token(lexer, TOK_INT, start, (int)(lexer->current - start));
 }
 
@@ -188,6 +196,7 @@ Token lexer_next(Lexer *lexer) {
 const char *token_type_name(TokenType type) {
     switch (type) {
         case TOK_INT:        return "INT";
+        case TOK_FLOAT:      return "FLOAT";
         case TOK_STRING:     return "STRING";
         case TOK_INTERP_STRING: return "INTERP_STRING";
         case TOK_IDENT:      return "IDENT";

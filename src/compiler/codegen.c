@@ -268,6 +268,13 @@ static char *emit_int_lit(CodeGen *cg, AstNode *node) {
     return t;
 }
 
+static char *emit_float_lit(CodeGen *cg, AstNode *node) {
+    char *t = temp_name(cg);
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_float_new(%gf));\n", t, node->as.float_lit.value);
+    return t;
+}
+
 static char *emit_string_lit(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
@@ -367,6 +374,7 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             /* Don't descend into nested blocks — they capture separately */
             break;
         case NODE_INT_LIT:
+        case NODE_FLOAT_LIT:
         case NODE_STRING_LIT:
         case NODE_SELF:
             break;
@@ -741,6 +749,7 @@ static char *emit_expr(CodeGen *cg, AstNode *node) {
     if (!node) return NULL;
     switch (node->type) {
         case NODE_INT_LIT:    return emit_int_lit(cg, node);
+        case NODE_FLOAT_LIT:  return emit_float_lit(cg, node);
         case NODE_STRING_LIT: return emit_string_lit(cg, node);
         case NODE_IDENT:      return emit_ident(cg, node);
         case NODE_SELF:       return emit_self(cg, node);

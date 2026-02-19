@@ -37,6 +37,10 @@ int       clay_is_int(ClayValue v);
 /* Forward declaration */
 typedef struct ClayObject ClayObject;
 
+/* Float helpers (CLAY_IS_FLOAT macro defined after struct ClayObject) */
+ClayObject *clay_float_new(float v);
+float      clay_to_float(ClayValue v);
+
 /* Method function signature: receiver, argc, argv -> return value */
 typedef ClayValue (*ClayMethodFunc)(ClayObject *self, int argc, ClayValue *argv);
 
@@ -60,7 +64,8 @@ typedef enum {
     CLAY_TYPE_STRING,
     CLAY_TYPE_ARRAY,
     CLAY_TYPE_BLOCK,
-    CLAY_TYPE_DICT
+    CLAY_TYPE_DICT,
+    CLAY_TYPE_FLOAT
 } ClayType;
 
 struct ClayObject {
@@ -92,6 +97,10 @@ struct ClayObject {
         struct {
             HashTable *map;
         } dict;
+
+        struct {
+            float value;
+        } number_float;
     } as;
 };
 
@@ -102,6 +111,9 @@ struct ClayObject {
 /* Nil value */
 #define CLAY_NIL        ((ClayValue)0)
 #define CLAY_IS_NIL(v)  ((v) == CLAY_NIL)
+
+/* Float type check (needs full struct definition) */
+#define CLAY_IS_FLOAT(v) (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && CLAY_OBJ(v)->type == CLAY_TYPE_FLOAT)
 
 /* Boolean singletons */
 extern ClayObject clay_true_obj;

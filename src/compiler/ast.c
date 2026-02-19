@@ -105,6 +105,9 @@ void ast_print(AstNode *node, int indent) {
         case NODE_INT_LIT:
             printf("Int(%ld)\n", node->as.int_lit.value);
             break;
+        case NODE_FLOAT_LIT:
+            printf("Float(%g)\n", node->as.float_lit.value);
+            break;
         case NODE_STRING_LIT:
             printf("String(\"%s\")\n", node->as.string_lit.value);
             break;

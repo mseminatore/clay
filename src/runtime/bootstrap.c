@@ -293,6 +293,7 @@ void clay_inspect(ClayObject *obj) {
         case CLAY_TYPE_STRING: type_name = "String"; break;
         case CLAY_TYPE_ARRAY:  type_name = "Array"; break;
         case CLAY_TYPE_BLOCK:  type_name = "Block"; break;
+        case CLAY_TYPE_FLOAT:  type_name = "Float"; break;
         default:               type_name = "Object"; break;
     }
     fprintf(stderr, "[%s @%p refcount=%d parent=%p", type_name, (void *)obj, obj->refcount, (void *)obj->parent);

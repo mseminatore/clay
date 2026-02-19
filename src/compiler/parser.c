@@ -139,9 +139,13 @@ static AstNode *parse_primary(Parser *p) {
         int line = p->previous.line;
         AstNode *operand = parse_primary(p);
         if (!operand) return NULL;
-        /* Optimize: fold negative integer literals */
+        /* Optimize: fold negative integer/float literals */
         if (operand->type == NODE_INT_LIT) {
             operand->as.int_lit.value = -operand->as.int_lit.value;
+            return operand;
+        }
+        if (operand->type == NODE_FLOAT_LIT) {
+            operand->as.float_lit.value = -operand->as.float_lit.value;
             return operand;
         }
         /* General case: 0 - operand */
@@ -171,6 +175,15 @@ static AstNode *parse_primary(Parser *p) {
         AstNode *node = ast_new(NODE_INT_LIT, p->previous.line);
         char *s = token_strdup(&p->previous);
         node->as.int_lit.value = strtol(s, NULL, 10);
+        free(s);
+        return node;
+    }
+
+    /* Float literal */
+    if (match(p, TOK_FLOAT)) {
+        AstNode *node = ast_new(NODE_FLOAT_LIT, p->previous.line);
+        char *s = token_strdup(&p->previous);
+        node->as.float_lit.value = (float)strtod(s, NULL);
         free(s);
         return node;
     }

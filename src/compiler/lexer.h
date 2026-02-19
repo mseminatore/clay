@@ -4,6 +4,7 @@
 typedef enum {
     /* Literals */
     TOK_INT,            /* 42 */
+    TOK_FLOAT,          /* 3.14 */
     TOK_STRING,         /* "hello" */
     TOK_INTERP_STRING,  /* "hello ${name}" - contains interpolation */
     TOK_IDENT,          /* foo, Bar, clone */
