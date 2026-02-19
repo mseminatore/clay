@@ -522,6 +522,17 @@ int main(int argc, char *argv[]) {
             repl_mode = 1;
         } else if (strcmp(argv[i], "--vm-repl") == 0) {
             vm_repl_mode = 1;
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("Usage: clay [options] [source.clay]\n\n");
+            printf("Options:\n");
+            printf("  -o <output>   Output binary name\n");
+            printf("  -c            Emit C code only (no compile)\n");
+            printf("  --ast         Print AST and exit\n");
+            printf("  --repl        Launch interactive REPL (compiles to C)\n");
+            printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
+            printf("  -h, --help    Show this help message\n");
+            printf("\nWith no arguments, launches the REPL.\n");
+            return 0;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "clay: unknown option '%s'\n", argv[i]);
             return 1;
