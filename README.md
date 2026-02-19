@@ -241,7 +241,23 @@ arr = [1, 2, 3]
 arr at(0)                     // 1
 arr append(4)
 arr size()                    // 4
+arr first                     // 1
+arr last                      // 3
 arr each({ |item| item println() })
+
+// Functional methods
+arr map({ |x| x * 2 })       // [2, 4, 6]
+arr filter({ |x| x > 1 })    // [2, 3]
+arr reduce(0, { |acc, x| acc + x })  // 6
+arr find({ |x| x > 2 })      // 3
+
+// Utility methods
+arr reverse                   // [3, 2, 1]
+arr sort                      // [1, 2, 3]
+arr join(", ")                // "1, 2, 3"
+arr contains(2)               // true
+arr indexOf(2)                // 1
+arr removeAt(0)               // removes first element
 ```
 
 ### Numbers
@@ -267,6 +283,15 @@ s contains("world")                 // true
 s slice(0, 5)                       // "hello"
 s split(" ")                        // ["hello", "world"]
 s replace("world", "Clay")          // "hello Clay"
+s toInt                             // error (not a number)
+"42" toInt                          // 42
+"3.14" toFloat                      // 3.14
+"  hello  " trim                    // "hello"
+"hello" upper                       // "HELLO"
+"HELLO" lower                       // "hello"
+"hello" startsWith("he")            // true
+"hello" endsWith("lo")              // true
+"hello" reverse                     // "olleh"
 ```
 
 ### Comments
@@ -339,14 +364,15 @@ Proxy = Object clone({
 
 | Prototype | Methods |
 |-----------|---------|
-| Object | `clone()`, `toString()`, `println()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
+| Object | `clone()`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
-| String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `print()`, `println()`, `toString()` |
-| Array | `at(i)`, `append(val)`, `size()`, `each(block)`, `toString()` |
+| String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `print()`, `println()`, `toString()` |
+| Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `toString()` |
 | Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
 | Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
 | Error | `message()`, `type()`, `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `toString()` |
+| Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
 
 ## Generated C
 

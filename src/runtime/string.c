@@ -2,6 +2,7 @@
  * string.c - String object implementation
  */
 #include "clay.h"
+#include <ctype.h>
 
 ClayObject *clay_string_new(const char *str) {
     return clay_string_new_len(str, strlen(str));
@@ -200,6 +201,87 @@ static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+static ClayValue string_toInt(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    char *end;
+    long val = strtol(self->as.string.data, &end, 10);
+    if (end == self->as.string.data) {
+        clay_raise(CLAY_VAL(clay_error_new("invalid integer string", "TypeError")));
+    }
+    return clay_int((intptr_t)val);
+}
+
+static ClayValue string_toFloat(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    char *end;
+    float val = (float)strtod(self->as.string.data, &end);
+    if (end == self->as.string.data) {
+        clay_raise(CLAY_VAL(clay_error_new("invalid float string", "TypeError")));
+    }
+    return CLAY_VAL(clay_float_new(val));
+}
+
+static ClayValue string_trim(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    const char *s = self->as.string.data;
+    const char *start = s;
+    const char *end = s + self->as.string.length;
+    while (start < end && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r')) start++;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n' || end[-1] == '\r')) end--;
+    return CLAY_VAL(clay_string_new_len(start, (size_t)(end - start)));
+}
+
+static ClayValue string_upper(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    char *buf = (char *)malloc(self->as.string.length + 1);
+    for (size_t i = 0; i < self->as.string.length; i++) {
+        buf[i] = (char)toupper((unsigned char)self->as.string.data[i]);
+    }
+    buf[self->as.string.length] = '\0';
+    ClayObject *result = clay_string_new_len(buf, self->as.string.length);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
+static ClayValue string_lower(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    char *buf = (char *)malloc(self->as.string.length + 1);
+    for (size_t i = 0; i < self->as.string.length; i++) {
+        buf[i] = (char)tolower((unsigned char)self->as.string.data[i]);
+    }
+    buf[self->as.string.length] = '\0';
+    ClayObject *result = clay_string_new_len(buf, self->as.string.length);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
+static ClayValue string_startsWith(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_FALSE;
+    ClayObject *prefix = CLAY_OBJ(argv[0]);
+    if (prefix->as.string.length > self->as.string.length) return CLAY_FALSE;
+    return CLAY_BOOL(memcmp(self->as.string.data, prefix->as.string.data, prefix->as.string.length) == 0);
+}
+
+static ClayValue string_endsWith(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_FALSE;
+    ClayObject *suffix = CLAY_OBJ(argv[0]);
+    if (suffix->as.string.length > self->as.string.length) return CLAY_FALSE;
+    size_t offset = self->as.string.length - suffix->as.string.length;
+    return CLAY_BOOL(memcmp(self->as.string.data + offset, suffix->as.string.data, suffix->as.string.length) == 0);
+}
+
+static ClayValue string_reverse(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    char *buf = (char *)malloc(self->as.string.length + 1);
+    for (size_t i = 0; i < self->as.string.length; i++) {
+        buf[i] = self->as.string.data[self->as.string.length - 1 - i];
+    }
+    buf[self->as.string.length] = '\0';
+    ClayObject *result = clay_string_new_len(buf, self->as.string.length);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
 void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "println", string_println);
     clay_set_method(proto, "print", string_print);
@@ -212,4 +294,12 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "slice", string_slice);
     clay_set_method(proto, "split", string_split);
     clay_set_method(proto, "replace", string_replace);
+    clay_set_method(proto, "toInt", string_toInt);
+    clay_set_method(proto, "toFloat", string_toFloat);
+    clay_set_method(proto, "trim", string_trim);
+    clay_set_method(proto, "upper", string_upper);
+    clay_set_method(proto, "lower", string_lower);
+    clay_set_method(proto, "startsWith", string_startsWith);
+    clay_set_method(proto, "endsWith", string_endsWith);
+    clay_set_method(proto, "reverse", string_reverse);
 }
