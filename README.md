@@ -326,7 +326,7 @@ Proxy = Object clone({
 
 | Prototype | Methods |
 |-----------|---------|
-| Object | `clone()`, `toString()`, `println()`, `doesNotUnderstand(name, args)` |
+| Object | `clone()`, `toString()`, `println()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `each(block)`, `toString()` |

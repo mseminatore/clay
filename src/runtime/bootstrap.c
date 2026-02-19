@@ -54,6 +54,65 @@ static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue 
     return CLAY_NIL;
 }
 
+static void collect_methods_chain(ClayObject *obj, ClayObject *arr, HashTable *seen, int inherited) {
+    if (!obj) return;
+    if (obj->methods) {
+        size_t pos = 0;
+        ht_key_t key;
+        while (ht_next(obj->methods, &pos, &key, NULL)) {
+            if (ht_find(seen, key) != NULL) continue;
+            ht_insert(seen, key, (ht_value_t)1);
+            if (inherited) {
+                /* Mark inherited methods with trailing * */
+                size_t len = strlen((const char *)key);
+                char *buf = malloc(len + 2);
+                memcpy(buf, (const char *)key, len);
+                buf[len] = '*';
+                buf[len + 1] = '\0';
+                clay_array_append(arr, CLAY_VAL(clay_string_new(buf)));
+                free(buf);
+            } else {
+                clay_array_append(arr, CLAY_VAL(clay_string_new((const char *)key)));
+            }
+        }
+    }
+    collect_methods_chain(obj->parent, arr, seen, 1);
+}
+
+static int str_compare(ht_key_t a, ht_key_t b) {
+    return strcmp((const char *)a, (const char *)b) == 0;
+}
+
+static ClayValue object_methods(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayObject *arr = clay_array_new();
+    HashTable *seen = ht_create();
+    ht_set_hash_func(seen, HT_HASH_STRING);
+    ht_set_compare_func(seen, str_compare);
+    collect_methods_chain(self, arr, seen, 0);
+    ht_free(seen);
+    return CLAY_VAL(arr);
+}
+
+static ClayValue object_slots(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayObject *arr = clay_array_new();
+    if (self->slots) {
+        size_t pos = 0;
+        ht_key_t key;
+        while (ht_next(self->slots, &pos, &key, NULL)) {
+            clay_array_append(arr, CLAY_VAL(clay_string_new((const char *)key)));
+        }
+    }
+    return CLAY_VAL(arr);
+}
+
+static ClayValue object_inspect(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    clay_inspect(self);
+    return CLAY_VAL(self);
+}
+
 /* Boolean methods */
 
 /*
@@ -149,6 +208,9 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Object, "toString", object_toString);
     clay_set_method(clay_Object, "println", object_println);
     clay_set_method(clay_Object, "doesNotUnderstand", object_doesNotUnderstand);
+    clay_set_method(clay_Object, "methods", object_methods);
+    clay_set_method(clay_Object, "slots", object_slots);
+    clay_set_method(clay_Object, "inspect", object_inspect);
 
     /* Number prototype */
     clay_Number = clay_object_new();
