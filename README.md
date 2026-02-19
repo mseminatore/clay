@@ -99,12 +99,13 @@ Integers, strings, booleans, arrays, blocks — all objects. All operations are 
 
 ### Message passing
 
-Messages use IO-style syntax: `receiver message(args)`. Unary messages have no parentheses.
+Messages use IO-style syntax: `receiver message(args)`. Parentheses are optional for zero-argument messages.
 
 ```clay
-"hello" println()         // unary with parens
-"hello" length()          // returns 5
-arr at(0)                 // message with one arg
+"hello" println          // no parens (preferred for unary)
+"hello" println()        // parens also work
+"hello" length()         // returns 5
+arr at(0)                // message with one arg
 arr each({ |x| x println() })  // message with block arg
 ```
 
