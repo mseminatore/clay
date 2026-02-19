@@ -18,8 +18,8 @@ This produces:
 ## Usage
 
 ```
-clay [options] <source.clay>
-clay              # start interactive REPL
+clay [options] [source.clay]
+clay              # start VM REPL (default)
 ```
 
 | Option | Description |
@@ -27,30 +27,49 @@ clay              # start interactive REPL
 | `-c` | Emit C code only (don't compile to binary) |
 | `-o <name>` | Set output binary name |
 | `--ast` | Print the AST and exit |
-| `--repl` | Start interactive REPL (also activates with no arguments) |
+| `--vm-repl` | Launch bytecode VM REPL (instant evaluation, default) |
+| `--repl` | Launch classic REPL (compiles to C each input) |
+| `-h`, `--help` | Show help message |
 
-### REPL
+### VM REPL
 
-Run `clay` with no arguments to start the interactive REPL:
+Run `clay` with no arguments to start the bytecode VM REPL. Expressions are compiled to bytecode and evaluated instantly — no C compiler invocation needed.
 
 ```
 $ clay
-Clay REPL (type 'quit' or Ctrl+Z to exit)
-
-clay> 1 + 2
+Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)
+>>> 1 + 2
+=> 3
+>>> name = "World"
+>>> "Hello, ${name}!"
+=> Hello, World!
+>>> doubler = { |x| x * 2 }
+>>> doubler value(5)
+=> 10
+>>> [1, 2, 3] each({ |n| n println() })
+1
+2
 3
-clay> name = "World"
-clay> "Hello, ${name}!"
-Hello, World!
-clay> Point = Object clone({
-  ...   x = 0
-  ...   y = 0
-  ... })
-clay> quit
+=> [1, 2, 3]
+>>> (10 > 5) ifTrue({ "yes" }) ifFalse({ "no" })
+=> yes
+>>> Point = Object clone({
+...   x = 0
+...   y = 0
+...   getX() { self x() }
+... })
+>>> p = Point clone({})
+>>> p getX()
+=> 0
+>>> quit
 Bye!
 ```
 
-Variables and object definitions persist across inputs. Bare expressions are automatically printed. Multi-line input is detected via brace/paren matching.
+Variables and object definitions persist across inputs. Bare expressions are automatically printed. Multi-line input is detected via brace/paren matching. Errors are caught and reported without exiting.
+
+### Classic REPL
+
+The classic REPL (`clay --repl`) accumulates source and recompiles to C on each input. It supports the full language but is slower due to C compiler invocation on every line.
 
 ### Examples
 
@@ -336,12 +355,18 @@ The generated C includes `#line` directives mapping back to the `.clay` source, 
 ## Architecture
 
 ```
-.clay source → [Lexer] → [Parser] → [CodeGen] → .c file → [C Compiler] → binary
-                                                                ↑
-                                                         Clay Runtime (linked)
+.clay source → [Lexer] → [Parser] → [AST] ─┬→ [C CodeGen]  → .c → [C Compiler] → binary
+                                            │                          ↑
+                                            │                   Clay Runtime (linked)
+                                            │
+                                            └→ [BC CodeGen] → bytecode → [VM] → result
+                                                                          ↑
+                                                                   Clay Runtime (bridged)
 ```
 
-The runtime is a static C library providing the object model, message dispatch, reference counting, and core prototypes.
+**Compile mode** (`clay file.clay`): generates human-readable C with `#line` directives, invokes the system C compiler, and links the Clay runtime as a static library.
+
+**VM REPL mode** (`clay` or `clay --vm-repl`): compiles expressions to bytecode and executes them instantly in an embedded bytecode VM. The VM bridges to the same Clay runtime via native functions, so all core objects and methods work identically.
 
 ## Dependencies
 
@@ -354,7 +379,7 @@ Included as git submodules under `deps/`:
 
 ### VS Code
 
-A syntax highlighting extension is included at `editors/vscode/clay-lang/`. To install:
+**Syntax highlighting:** A TextMate grammar extension is included at `editors/vscode/clay-lang/`. To install:
 
 ```powershell
 # Windows (PowerShell as Admin) — create a junction
@@ -363,3 +388,16 @@ New-Item -ItemType Junction -Path $ext -Target (Resolve-Path "editors\vscode\cla
 ```
 
 Then restart VS Code. See [`editors/vscode/clay-lang/README.md`](editors/vscode/clay-lang/README.md) for details.
+
+**Build, run & debug:** The `.vscode/` folder provides ready-to-use integration (requires CMake Tools and C/C++ extensions):
+
+| Feature | How |
+|---------|-----|
+| Build all | `Ctrl+Shift+B` (default build task) |
+| Run tests | `Ctrl+Shift+P` → "Run Test Task" |
+| Debug test runner | Launch: "Debug: Test Runner" |
+| Debug VM REPL | Launch: "Debug: VM REPL" |
+| Debug compiled .clay | Launch: "Debug: Run Compiled .clay Program" |
+| Compile current .clay | Task: "Compile Current .clay File" |
+
+In compiled mode, `#line` directives map generated C back to `.clay` source lines, so the Visual Studio debugger steps through Clay code directly.
