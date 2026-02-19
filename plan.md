@@ -322,9 +322,9 @@ The existing lexer, parser, and AST are reused. Only a new bytecode codegen back
 - **Generated VM fixes**: PUSH_CONST and DUP were coercing all values to INT64 — fixed to preserve value types.
 
 ### Known limitations
-- Blocks/closures not yet compiled to bytecode (emit nil)
-- Array literals not compiled
-- Method definitions in clone bodies skipped
+- Blocks/closures not yet compiled to bytecode (emit nil) — **Phase 12 addresses this**
+- Array literals not compiled — **Phase 12 addresses this**
+- Method definitions in clone bodies skipped — **Phase 12 addresses this**
 - try/catch/raise not handled in bytecode
 - No import handling
 - No local variable scoping (everything is global)
@@ -340,9 +340,73 @@ Full IDE support via `.vscode/` configuration:
 
 **Prerequisites:** CMake Tools + C/C++ extensions (both installed).
 
-## Phase 12+ (Future)
+**Compiled-mode debugging:** The C codegen emits `#line` directives mapping generated C back to `.clay` source lines. The MSVC debugger shows stepping through the `.clay` file at statement level when using "Debug: Run Compiled .clay Program".
+
+## Phase 12: VM Blocks, Closures & Method Definitions
+
+### Problem
+The VM REPL is non-functional for real Clay code. Clay has **no control flow keywords** — `ifTrue`, `ifFalse`, `each`, `whileTrue` are all message sends with block arguments. Without block compilation, the VM REPL can't do conditionals, loops, iteration, or method definitions.
+
+### Architecture
+In compiled mode, each block becomes a static C function. For the bytecode VM:
+- Block bodies compile to **separate bytecode chunks** stored in a side table
+- A single static C **trampoline function** re-enters the VM to execute a chunk
+- Captures are detected at compile time via `scan_free_vars()` and stored in the block object's `env` array
+- `env[0]` holds the chunk ID (as tagged int), `env[1..n]` hold captured values
+- A global `g_vm` pointer lets the trampoline access the VM instance
+
+### Tasks
+
+49. **vm-block-chunks** — Add bytecode chunk storage to BcCompiler. A chunk is: `{ uint8_t *code, size_t len, int param_count }`. Store in a growable array `bc->chunks[]` with a `chunk_count`. When compiling NODE_BLOCK, save current code buffer, compile body to a fresh buffer, store as a new chunk, restore the outer buffer.
+
+50. **vm-capture-scan** — Port `scan_free_vars()` from `codegen.c` to `bc_compiler.c`. Given a block body AST and the current global variable names, identify free variables (identifiers used in body that aren't params, builtins, or block-local). Return a list of capture names.
+
+51. **vm-block-trampoline** — Create `bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv)` in `bc_compiler.c`:
+    - Read chunk_id from `self->as.block.env[0]` (tagged int)
+    - Look up bytecode chunk from global chunk table
+    - Save VM state (sp, ip)
+    - Push captured vars from `self->as.block.env[1..n]` as pseudo-locals (store to globals with mangled names)
+    - Push params from `argv` as locals
+    - Run the bytecode chunk
+    - Restore VM state, return result
+
+52. **vm-make-block** — In `bc_emit_expr` for NODE_BLOCK: compile body to a new chunk, scan for captures, emit bytecode that pushes chunk_id + captured values, calls `native_make_block(chunk_id, capture_count, captures...)`. The native creates a ClayObject block with the trampoline function + env array.
+
+53. **vm-method-defs** — Compile NODE_METHOD_DEF inside NODE_CLONE. Methods are named blocks bound to an object. After creating the block object (same mechanism as task 52), call `clay_set_method(obj, name, block_trampoline)` to register it. Handle `self` access inside methods.
+
+54. **vm-array-literal** — Compile NODE_ARRAY_LIT: emit `native_make_array()` to create an empty array, then for each element compile the value and emit `native_send(arr, "append", element)`.
+
+55. **vm-block-tests** — Test full block functionality in VM REPL: `ifTrue`/`ifFalse`, `each` on arrays, closures with capture (`x = 10; f = { x + 1 }; f value()`), method definitions in clone, nested blocks. Verify the `blocks.clay` test program's expressions work in the REPL.
+
+### Dependencies
+```
+vm-block-chunks → vm-capture-scan → vm-block-trampoline → vm-make-block → vm-method-defs
+                                                                        → vm-array-literal
+                                                        → vm-block-tests
+```
+
+## Phase 13: Clay Source-Level Debugging
+
+### Problem
+The VM REPL has no source-level debugging. The generated VM has `step_callback`, `trace_enabled`, and `clayvm_vm_step()` APIs but no line mapping from bytecode to `.clay` source.
+
+### Tasks
+
+49. **bytecode-tracing** — Add a `--trace` flag to the VM REPL that sets `vm.trace_enabled = 1`, printing each opcode as it executes (PUSH_CONST, CALL_NATIVE, etc.). Quick win for understanding execution flow. Add to `--help` output.
+
+50. **source-line-mapping** — Record which `.clay` source line each bytecode instruction came from in `bc_compiler.c`. Use a parallel `int line_map[BC_MAX_CODE]` array that stores the AST node's `line` field for each emitted byte. When the VM's `step_callback` fires, look up the source line and print it (or the source text) when the line changes from the previous step. This gives line-by-line stepping in the VM REPL via a `--step` flag.
+
+51. **stepping-commands** — Add interactive stepping commands to the VM REPL when in step mode: `n` (next line), `c` (continue to end), `s` (show current stack), `v` (show variables/globals), `q` (quit). Use `clayvm_vm_step()` for single-instruction execution, coalescing steps within the same source line for `n`.
+
+### Design notes
+- The generated VM already has `vm.trace_enabled`, `clayvm_vm_step()`, and `void (*step_callback)(void *vm, size_t ip)` — all generated by vmgen.
+- Line mapping only needs to track the bytecode offset → source line relationship. The `linemap.c`/`linemap.h` generated files may already provide infrastructure for this.
+- For DAP (Debug Adapter Protocol) integration in the future, this source mapping work is a prerequisite.
+
+## Phase 14+ (Future)
 - Optional type annotations
 - Inline caching for dispatch performance
 - Self-hosting compiler
 - Concurrency (actors or green threads)
 - Package manager
+- DAP debug adapter for VS Code native breakpoints/watches
