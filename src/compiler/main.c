@@ -28,6 +28,7 @@ __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
 #include "parser.h"
 #include "codegen.h"
 #include "bc_compiler.h"
+#include "bricks.h"
 #include "ast.h"
 
 #ifdef _MSC_VER
@@ -733,6 +734,11 @@ int main(int argc, char *argv[]) {
     int step_mode = 0;
     int mem_stats = 0;
 
+    /* Handle bricks subcommand */
+    if (argc >= 2 && strcmp(argv[1], "bricks") == 0) {
+        return brick_command(argc - 2, argv + 2);
+    }
+
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
@@ -765,6 +771,8 @@ int main(int argc, char *argv[]) {
             printf("  --step        VM REPL with interactive stepping\n");
             printf("  --mem-stats   Show memory stats on REPL exit\n");
             printf("  -h, --help    Show this help message\n");
+            printf("\nSubcommands:\n");
+            printf("  bricks        Package manager (clay bricks --help)\n");
             printf("\nWith no arguments, launches the VM REPL.\n");
             return 0;
         } else if (argv[i][0] == '-') {

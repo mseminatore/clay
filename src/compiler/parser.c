@@ -19,10 +19,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #ifdef _MSC_VER
 #define strdup _strdup
 #endif
+
+#include "bricks.h"
 
 /* --- File reading helper --- */
 
@@ -702,7 +705,37 @@ void parser_init(Parser *p, const char *source, const char *filename) {
 
 /* Parse an imported file and return its statements */
 static AstNode *parse_import_file(Parser *parent, const char *import_path) {
-    char *resolved = resolve_import_path(parent->filename, import_path);
+    char *resolved = NULL;
+
+    /* Check if this is a brick import (no path separators, no .clay extension) */
+    if (!strchr(import_path, '/') && !strchr(import_path, '\\') &&
+        !strstr(import_path, ".clay")) {
+        /* Try bricks/<name>/brick.json for main entry point */
+        char manifest_path[BRICK_MAX_PATH];
+        snprintf(manifest_path, sizeof(manifest_path), "bricks/%s/brick.json", import_path);
+        BrickManifest bm;
+        if (brick_parse(manifest_path, &bm) == 0 && bm.main_file[0]) {
+            char brick_main[BRICK_MAX_PATH];
+            snprintf(brick_main, sizeof(brick_main), "bricks/%s/%s", import_path, bm.main_file);
+            struct stat st;
+            if (stat(brick_main, &st) == 0) {
+                resolved = strdup(brick_main);
+            }
+        }
+        /* Fallback: bricks/<name>/src/main.clay */
+        if (!resolved) {
+            char fallback[BRICK_MAX_PATH];
+            snprintf(fallback, sizeof(fallback), "bricks/%s/src/main.clay", import_path);
+            struct stat st;
+            if (stat(fallback, &st) == 0) {
+                resolved = strdup(fallback);
+            }
+        }
+    }
+
+    if (!resolved) {
+        resolved = resolve_import_path(parent->filename, import_path);
+    }
 
     if (already_imported(parent, resolved)) {
         free(resolved);

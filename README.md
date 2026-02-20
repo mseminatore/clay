@@ -263,9 +263,10 @@ Use `import` to include definitions from another Clay file:
 ```clay
 import("math.clay")        // relative to the importing file
 import("lib/utils.clay")   // subdirectory paths work too
+import("my-brick")         // brick import (see Bricks below)
 ```
 
-Imports are resolved at parse time. Duplicate imports of the same file are silently skipped.
+Imports are resolved at parse time. Duplicate imports of the same file are silently skipped. Brick imports (no extension, no path separator) resolve via the `bricks/` directory.
 
 ### Unary minus
 
@@ -490,6 +491,69 @@ The generated C includes `#line` directives mapping back to the `.clay` source, 
 **Compile mode** (`clay file.clay`): generates human-readable C with `#line` directives, invokes the system C compiler, and links the Clay runtime as a static library.
 
 **VM REPL mode** (`clay` or `clay --vm-repl`): compiles expressions to bytecode and executes them instantly in an embedded bytecode VM. The VM bridges to the same Clay runtime via native functions, so all core objects and methods work identically.
+
+## Bricks (Package Manager)
+
+Bricks is Clay's built-in package manager. Packages ("bricks") are Git repositories with a `brick.json` manifest. Any Git URL works — no central registry needed.
+
+### Quick start
+
+```sh
+clay bricks init                              # create brick.json
+clay bricks add github.com/user/some-lib      # add + install a dependency
+clay bricks install                           # install all deps from brick.json
+clay bricks list                              # show project info
+clay bricks remove some-lib                   # remove a dependency
+```
+
+### brick.json
+
+```json
+{
+  "name": "my-project",
+  "version": "0.1.0",
+  "description": "A Clay project",
+  "main": "src/main.clay",
+  "deps": {
+    "some-lib": "github.com/user/some-lib@v1.0"
+  }
+}
+```
+
+Dependencies are pinned to a Git tag, branch, or commit via `@ref`. URLs are automatically prefixed with `https://` if no protocol is specified.
+
+### Using bricks
+
+Import a brick by name (no `.clay` extension, no path separator):
+
+```clay
+import("some-lib")    // resolves to bricks/some-lib/ using brick.json main
+import("utils.clay")  // regular file import (unchanged)
+```
+
+Brick resolution: reads `bricks/<name>/brick.json` to find the `main` entry point. Falls back to `bricks/<name>/src/main.clay` if no manifest exists.
+
+### Publishing a brick
+
+Any Git repository with a `brick.json` is a valid brick. To publish:
+1. Add a `brick.json` to your repo (`clay bricks init`)
+2. Push to GitHub (or any Git host)
+3. Tag releases with semver (`git tag v1.0.0`)
+4. Others install with `clay bricks add github.com/you/your-brick@v1.0.0`
+
+### Local layout
+
+```
+my-project/
+  brick.json              # project manifest
+  src/main.clay            # your code
+  bricks/                  # dependencies (gitignore this)
+    some-lib/
+      brick.json
+      src/main.clay
+```
+
+The `bricks/` directory should be gitignored — it's recreated by `clay bricks install`.
 
 ## Dependencies
 

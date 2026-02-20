@@ -67,6 +67,7 @@ add_library(clay_compiler_lib STATIC
     src/compiler/ast.c
     src/compiler/codegen.c
     src/compiler/bc_compiler.c
+    src/compiler/bricks.c
 )
 target_include_directories(clay_compiler_lib PUBLIC src/compiler src/vm/generated src/runtime)
 target_compile_definitions(clay_compiler_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
