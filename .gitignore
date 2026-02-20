@@ -1,6 +1,9 @@
 # Directories
 build/
 
+# Generated C from Clay compiler
+test/programs/*.c
+
 # Prerequisites
 *.d
 
