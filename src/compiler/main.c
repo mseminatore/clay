@@ -120,6 +120,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
             "cl /nologo %s "
             "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" "
             "/D_CRT_SECURE_NO_WARNINGS "
+            "/Fo\"%%TEMP%%\\\\\" "
             "\"%s\" "
             "\"%s\\src\\runtime\\object.c\" "
             "\"%s\\src\\runtime\\memory.c\" "
