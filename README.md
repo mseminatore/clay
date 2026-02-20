@@ -177,6 +177,51 @@ p toString() println()   // (3, 4)
 
 Inside methods, bare identifiers are looked up as slots on `self`. Parameters shadow slot names.
 
+### Slot access
+
+Read a slot by sending its name as a zero-argument message:
+
+```clay
+p = Point clone()
+p x             // => 0 (reads the 'x' slot)
+```
+
+Write a slot with assignment syntax on the receiver:
+
+```clay
+p x = 42        // sets slot 'x' to 42
+p x             // => 42
+```
+
+Slot reads walk the prototype chain — if the object doesn't have the slot, its parent is checked, and so on.
+
+### Constructors
+
+Define an `init` method on a prototype, then create instances with `new`:
+
+```clay
+Point = Object clone({
+  x = 0
+  y = 0
+  init(x, y) {
+    self x = x
+    self y = y
+  }
+})
+
+p = Point new(3, 4)
+p x             // => 3
+p y             // => 4
+```
+
+`new` clones the prototype and calls `init(args...)` on the clone if an `init` method exists. If there is no `init`, `new` just clones:
+
+```clay
+Cat = Object clone({ name = "kitty" })
+c = Cat new     // clones Cat, no init called
+c name          // => "kitty"
+```
+
 ### Blocks
 
 Blocks are closures. Parameters go between pipes:
@@ -399,7 +444,7 @@ Proxy = Object clone({
 
 | Prototype | Methods |
 |-----------|---------|
-| Object | `clone()`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
+| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `toString()` |

@@ -581,6 +581,114 @@ static void test_dict(void) {
     clay_release(d);
 }
 
+/* Constructor init helpers */
+static ClayValue point_init(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc >= 2) {
+        clay_set_slot(self, "x", argv[0]);
+        clay_set_slot(self, "y", argv[1]);
+    }
+    return CLAY_NIL;
+}
+
+static ClayValue greeter_init(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc >= 1)
+        clay_set_slot(self, "name", argv[0]);
+    return CLAY_NIL;
+}
+
+static void test_slot_access(void) {
+    SUITE("Slot Access");
+
+    COMMENT("slot read via message dispatch...");
+    ClayObject *obj = clay_clone(clay_Object);
+    clay_set_slot(obj, "x", clay_int(42));
+    ClayValue r = clay_send_val(CLAY_VAL(obj), "x", 0, NULL);
+    TEST(CLAY_IS_INT(r));
+    TEST(clay_to_int(r) == 42);
+
+    COMMENT("slot read walks prototype chain...");
+    ClayObject *child = clay_clone(obj);
+    r = clay_send_val(CLAY_VAL(child), "x", 0, NULL);
+    TEST(clay_to_int(r) == 42);
+
+    COMMENT("slot write on child doesn't affect parent...");
+    clay_set_slot(child, "x", clay_int(99));
+    TEST(clay_to_int(clay_send_val(CLAY_VAL(child), "x", 0, NULL)) == 99);
+    TEST(clay_to_int(clay_send_val(CLAY_VAL(obj), "x", 0, NULL)) == 42);
+
+    COMMENT("method takes priority over slot...");
+    clay_set_method(obj, "x", animal_legs); /* returns 4 */
+    r = clay_send_val(CLAY_VAL(obj), "x", 0, NULL);
+    TEST(clay_to_int(r) == 4);
+
+    clay_release(child);
+    clay_release(obj);
+}
+
+static void test_constructors(void) {
+    SUITE("Constructors");
+
+    COMMENT("new without init just clones...");
+    ClayObject *Proto = clay_clone(clay_Object);
+    clay_set_slot(Proto, "val", clay_int(10));
+    ClayValue inst = clay_send(Proto, "new", 0, NULL);
+    TEST(!CLAY_IS_NIL(inst));
+    TEST(CLAY_OBJ(inst)->parent == Proto);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(inst), "val")) == 10);
+    clay_release(CLAY_OBJ(inst));
+
+    COMMENT("new with init calls init...");
+    ClayObject *Point = clay_clone(clay_Object);
+    clay_set_slot(Point, "x", clay_int(0));
+    clay_set_slot(Point, "y", clay_int(0));
+    clay_set_method(Point, "init", point_init);
+
+    ClayValue args[2] = { clay_int(3), clay_int(4) };
+    ClayValue p = clay_send(Point, "new", 2, args);
+    TEST(!CLAY_IS_NIL(p));
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(p), "x")) == 3);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(p), "y")) == 4);
+    TEST(CLAY_OBJ(p)->parent == Point);
+    clay_release(CLAY_OBJ(p));
+
+    COMMENT("new passes args to init...");
+    ClayObject *Greeter = clay_clone(clay_Object);
+    clay_set_slot(Greeter, "name", CLAY_VAL(clay_string_new("world")));
+    clay_set_method(Greeter, "init", greeter_init);
+
+    ClayValue name_arg = CLAY_VAL(clay_string_new("Clay"));
+    ClayValue g = clay_send(Greeter, "new", 1, &name_arg);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(clay_get_slot(CLAY_OBJ(g), "name"))), "Clay") == 0);
+    clay_release(CLAY_OBJ(g));
+
+    COMMENT("init inherited from parent prototype...");
+    ClayObject *Point3D = clay_clone(Point);
+    clay_set_slot(Point3D, "z", clay_int(0));
+    /* Point3D inherits init from Point */
+    ClayValue args3[2] = { clay_int(7), clay_int(8) };
+    ClayValue p3 = clay_send(Point3D, "new", 2, args3);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(p3), "x")) == 7);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(p3), "y")) == 8);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(p3), "z")) == 0);
+    clay_release(CLAY_OBJ(p3));
+
+    COMMENT("multiple instances are independent...");
+    ClayValue a1[2] = { clay_int(1), clay_int(2) };
+    ClayValue a2[2] = { clay_int(10), clay_int(20) };
+    ClayValue i1 = clay_send(Point, "new", 2, a1);
+    ClayValue i2 = clay_send(Point, "new", 2, a2);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(i1), "x")) == 1);
+    TEST(clay_to_int(clay_get_slot(CLAY_OBJ(i2), "x")) == 10);
+    TEST(CLAY_OBJ(i1) != CLAY_OBJ(i2));
+    clay_release(CLAY_OBJ(i1));
+    clay_release(CLAY_OBJ(i2));
+
+    clay_release(Point3D);
+    clay_release(Greeter);
+    clay_release(Point);
+    clay_release(Proto);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -600,6 +708,8 @@ void test_main(int argc, char *argv[]) {
     test_deep_prototype_chain();
     test_error_handling();
     test_dict();
+    test_slot_access();
+    test_constructors();
 
     clay_shutdown();
 }
