@@ -168,11 +168,21 @@ Token lexer_next(Lexer *lexer) {
             if (match(lexer, '|')) return make_token(lexer, TOK_OR, start, 2);
             return make_token(lexer, TOK_PIPE, start, 1);
         case ';': return make_token(lexer, TOK_SEMICOLON, start, 1);
-        case '+': return make_token(lexer, TOK_PLUS, start, 1);
-        case '-': return make_token(lexer, TOK_MINUS, start, 1);
-        case '*': return make_token(lexer, TOK_STAR, start, 1);
-        case '/': return make_token(lexer, TOK_SLASH, start, 1);
-        case '%': return make_token(lexer, TOK_PERCENT, start, 1);
+        case '+':
+            if (match(lexer, '=')) return make_token(lexer, TOK_PLUS_ASSIGN, start, 2);
+            return make_token(lexer, TOK_PLUS, start, 1);
+        case '-':
+            if (match(lexer, '=')) return make_token(lexer, TOK_MINUS_ASSIGN, start, 2);
+            return make_token(lexer, TOK_MINUS, start, 1);
+        case '*':
+            if (match(lexer, '=')) return make_token(lexer, TOK_STAR_ASSIGN, start, 2);
+            return make_token(lexer, TOK_STAR, start, 1);
+        case '/':
+            if (match(lexer, '=')) return make_token(lexer, TOK_SLASH_ASSIGN, start, 2);
+            return make_token(lexer, TOK_SLASH, start, 1);
+        case '%':
+            if (match(lexer, '=')) return make_token(lexer, TOK_PERCENT_ASSIGN, start, 2);
+            return make_token(lexer, TOK_PERCENT, start, 1);
         case '=':
             if (match(lexer, '=')) return make_token(lexer, TOK_EQUAL, start, 2);
             return make_token(lexer, TOK_ASSIGN, start, 1);
@@ -231,6 +241,11 @@ const char *token_type_name(TokenType type) {
         case TOK_BANG:       return "!";
         case TOK_AND:        return "&&";
         case TOK_OR:         return "||";
+        case TOK_PLUS_ASSIGN:    return "+=";
+        case TOK_MINUS_ASSIGN:   return "-=";
+        case TOK_STAR_ASSIGN:    return "*=";
+        case TOK_SLASH_ASSIGN:   return "/=";
+        case TOK_PERCENT_ASSIGN: return "%=";
         case TOK_EOF:        return "EOF";
         case TOK_ERROR:      return "ERROR";
         default:             return "???";

@@ -982,6 +982,8 @@ static void emit_method_bodies(CodeGen *cg) {
                         fprintf(cg->out, "    _result = %s;\n", val);
                         free(val);
                     }
+                } else if (stmt->type == NODE_SLOT_ASSIGN) {
+                    emit_stmt(cg, stmt);
                 } else {
                     char *val = emit_expr(cg, stmt);
                     if (val) {
@@ -1027,6 +1029,8 @@ static void emit_method_bodies(CodeGen *cg) {
                         fprintf(cg->out, "    _result = %s;\n", val);
                         free(val);
                     }
+                } else if (stmt->type == NODE_SLOT_ASSIGN) {
+                    emit_stmt(cg, stmt);
                 } else {
                     char *val = emit_expr(cg, stmt);
                     if (val) {
@@ -1085,10 +1089,20 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
 
 /* First pass: collect all variable names from assignments for declaration */
 static void collect_vars(AstNode *program, FILE *out) {
+    const char *declared[256];
+    int decl_count = 0;
     for (int i = 0; i < program->as.program.stmts.count; i++) {
         AstNode *stmt = program->as.program.stmts.items[i];
         if (stmt->type == NODE_ASSIGN) {
-            fprintf(out, "    ClayValue %s = CLAY_NIL;\n", stmt->as.assign.name);
+            /* Skip if already declared */
+            int found = 0;
+            for (int j = 0; j < decl_count; j++) {
+                if (strcmp(declared[j], stmt->as.assign.name) == 0) { found = 1; break; }
+            }
+            if (!found && decl_count < 256) {
+                declared[decl_count++] = stmt->as.assign.name;
+                fprintf(out, "    ClayValue %s = CLAY_NIL;\n", stmt->as.assign.name);
+            }
         }
     }
 }

@@ -636,6 +636,18 @@ static AstNode *parse_expression(Parser *p) {
 
 /* --- Statement --- */
 
+/* Returns the binary operator string for a compound assignment token, or NULL */
+static const char *compound_assign_op(TokenType type) {
+    switch (type) {
+        case TOK_PLUS_ASSIGN:    return "+";
+        case TOK_MINUS_ASSIGN:   return "-";
+        case TOK_STAR_ASSIGN:    return "*";
+        case TOK_SLASH_ASSIGN:   return "/";
+        case TOK_PERCENT_ASSIGN: return "%";
+        default:                 return NULL;
+    }
+}
+
 static AstNode *parse_statement(Parser *p) {
     if (p->had_error) return NULL;
 
@@ -669,6 +681,25 @@ static AstNode *parse_statement(Parser *p) {
             return node;
         }
 
+        /* Check for compound assignment: IDENT += expr → IDENT = IDENT + expr */
+        const char *cop = compound_assign_op(p->current.type);
+        if (cop) {
+            parser_advance(p); /* consume += etc. */
+            AstNode *lhs = ast_new(NODE_IDENT, name_tok.line);
+            lhs->as.ident.name = token_strdup(&name_tok);
+
+            AstNode *rhs = parse_expression(p);
+            AstNode *binop = ast_new(NODE_BINARY, name_tok.line);
+            binop->as.binary.left = lhs;
+            binop->as.binary.op = strdup(cop);
+            binop->as.binary.right = rhs;
+
+            AstNode *node = ast_new(NODE_ASSIGN, name_tok.line);
+            node->as.assign.name = token_strdup(&name_tok);
+            node->as.assign.value = binop;
+            return node;
+        }
+
         /* Not an assignment — backtrack and parse as expression */
         p->lexer = saved_lexer;
         p->current = saved_current;
@@ -690,6 +721,37 @@ static AstNode *parse_statement(Parser *p) {
         free(expr);
         return node;
     }
+
+    /* Check for compound slot assignment: obj slot += expr → obj slot = obj slot + expr */
+    if (expr && expr->type == NODE_SEND && expr->as.send.args.count == 0) {
+        const char *cop = compound_assign_op(p->current.type);
+        if (cop) {
+            parser_advance(p); /* consume += etc. */
+
+            /* Build RHS: obj slot + expr → NODE_BINARY(NODE_SEND(recv, slot), op, expr) */
+            AstNode *read_slot = ast_new(NODE_SEND, expr->line);
+            read_slot->as.send.receiver = expr->as.send.receiver;
+            read_slot->as.send.message = strdup(expr->as.send.message);
+            nodelist_init(&read_slot->as.send.args);
+
+            AstNode *rhs = parse_expression(p);
+            AstNode *binop = ast_new(NODE_BINARY, expr->line);
+            binop->as.binary.left = read_slot;
+            binop->as.binary.op = strdup(cop);
+            binop->as.binary.right = rhs;
+
+            AstNode *node = ast_new(NODE_SLOT_ASSIGN, expr->line);
+            node->as.slot_assign.receiver = expr->as.send.receiver;
+            node->as.slot_assign.slot_name = expr->as.send.message;
+            node->as.slot_assign.value = binop;
+            /* Detach from expr so free doesn't recurse into reused pointers */
+            expr->as.send.receiver = NULL;
+            expr->as.send.message = NULL;
+            free(expr);
+            return node;
+        }
+    }
+
     return expr;
 }
 

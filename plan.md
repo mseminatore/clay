@@ -894,3 +894,111 @@ All → brick-docs
 - **Transitive deps** — `brick-recursive` handles installing deps of deps, but flattened into a single `bricks/` directory (not nested).
 - **Single binary** — all `bricks` subcommands are built into the `clay` executable. No separate tool to install.
 - **Future enhancements** — lockfile (`brick-lock.json`), semver range resolution, `clay bricks publish` (create GitHub release), `clay bricks search` (GitHub API query).
+
+## Phase 21: Compound Assignment Operators
+
+**Goal:** Add `+=`, `-=`, `*=`, `/=`, `%=` operators so `self x = self x + 1` can be written as `self x += 1`.
+
+### Approach
+
+Compound assignment is syntactic sugar. `a += b` desugars to `a = a + b` at the AST level. For slot assignment, `obj slot += expr` desugars to `obj slot = obj slot + expr`. This keeps the runtime and VM unchanged — all work is in the lexer and parser.
+
+### Tasks
+
+- [ ] **lex-compound-ops** — Add tokens `TOK_PLUS_ASSIGN`, `TOK_MINUS_ASSIGN`, `TOK_STAR_ASSIGN`, `TOK_SLASH_ASSIGN`, `TOK_PERCENT_ASSIGN` to lexer. Recognize `+=`, `-=`, `*=`, `/=`, `%=` as two-character tokens.
+- [ ] **parse-compound-assign** — In the parser's assignment handling, when a compound operator is seen after an identifier or slot access, desugar to `NODE_ASSIGN` / `NODE_SLOT_ASSIGN` with the RHS wrapped in the corresponding `NODE_SEND` (e.g., `+` message). For slot assignment: `obj slot += expr` → `NODE_SLOT_ASSIGN(obj, slot, NODE_SEND(NODE_SEND(obj, slot), "+", [expr]))`.
+- [ ] **test-compound-ops** — Add unit tests: local variable compound assignment (`x += 1`), slot compound assignment (`self x *= factor`), all 5 operators, edge cases (compound assign on undefined variable should error).
+- [ ] **test-clay-programs** — Add `test/programs/compound_ops.clay` exercising compound assignment in realistic code (e.g., Vector2d `scaleInPlace` method using `self x *= factor`).
+
+### Design notes
+- **Pure desugar** — no new AST node types, no new opcodes, no runtime changes. The parser rewrites compound assignment into existing nodes.
+- **Evaluation order** — for `obj slot += expr`, `obj` is evaluated once (not twice). The parser should handle this by reusing the receiver AST node.
+- **Precedence** — compound assignment has the same precedence as regular assignment (lowest).
+- **Chaining** — `a += b += c` is not supported (assignment doesn't return a value in statement position). Keep it simple.
+
+## Phase 22: Implicit Self Slot Resolution
+
+**Goal:** Reconcile a behavioral difference between the C codegen and VM bytecode backends. In C codegen, bare identifiers inside methods fall back to `clay_get_slot(self, "x")` when not found as locals — effectively providing implicit `self`. In the VM backend, bare identifiers fall back to global lookup instead, so `self` must be explicit.
+
+### Problem
+
+```clay
+Point = Object clone
+Point x = 0
+Point y = 0
+Point toString() {
+    "(" + x + ", " + y + ")"   // Works in C codegen, fails in VM
+    "(" + self x + ", " + self y + ")"  // Works in both — current requirement
+}
+```
+
+### Approach
+
+Add implicit self resolution to the VM bytecode compiler so both backends behave the same. When compiling `NODE_IDENT` inside a method body:
+1. Check local variables first (existing)
+2. Check upvalues / closures (existing)
+3. **New:** If inside a method and not found as local/upvalue, emit a `self` slot lookup instead of a global lookup
+
+This matches the C codegen behavior and makes Clay feel more natural — you don't need to write `self` for every slot access.
+
+### Tasks
+
+- [ ] **implicit-self-vm** — In `bc_compiler.c`'s `NODE_IDENT` handler, when inside a method (`bc->in_method` or equivalent flag) and the identifier is not a local or upvalue, emit bytecode equivalent to `self <slot>` (push self, then send the slot name as a zero-arg message) instead of a global lookup.
+- [ ] **implicit-self-flag** — Track whether compilation is inside a method body. If `bc->in_method` doesn't already exist, add it. Set it when entering a method definition, clear it on exit.
+- [ ] **implicit-self-tests** — Add tests verifying: bare slot access works in VM methods, locals still shadow slots, method parameters shadow slots, global fallback still works outside methods.
+- [ ] **implicit-self-clay** — Add `test/programs/implicit_self.clay` demonstrating the feature works end-to-end in both compilation paths.
+
+### Design notes
+- **Locals always win** — if a local variable `x` exists, it shadows any slot `x` on `self`. This matches the C codegen behavior.
+- **Methods only** — implicit self applies inside method bodies, not top-level code or standalone blocks.
+- **No ambiguity** — the lookup order is deterministic: local → upvalue → self slot (in method) → global (outside method).
+- **Write requires explicit self** — `x = 5` inside a method is a local variable assignment, not `self x = 5`. Slot writes always require explicit `self x = expr` to avoid confusion.
+
+## Phase 23: True Lua-Style Upvalues & Closure Memory Fixes
+
+**Goal:** Replace the VM's capture-by-value-with-write-back approach with true Lua-style by-reference upvalues, fix cell memory leaks in the C codegen path, and verify the closures.clay test program runs correctly.
+
+### Problem
+
+The current closure implementation has three issues:
+
+1. **VM path uses value + write-back, not true by-reference.** Captured variables are copied into the block's `env[]` array at creation time, and written back after execution. This breaks when two closures capture the same variable — mutations through one aren't visible to the other until write-back occurs. True Lua-style upvalues use pointer indirection so all closures sharing a variable see mutations immediately.
+
+2. **C codegen path leaks ClayCell memory.** `clay_cell_new()` allocates heap cells for boxed captures, but nothing ever calls `clay_cell_release()`. Every closure that captures a variable leaks the cell.
+
+3. **closures.clay test program was never run.** It compiled but was never executed to verify correctness.
+
+### Approach
+
+#### Part A: VM true upvalues
+
+Replace env-array value copying with the vmgen-generated `clayvm_upvalue_t` / `clayvm_closure_t` infrastructure (already generated when `closures: true` was set, but not yet wired in). Upvalues work like Lua:
+- **Open upvalue**: points to a stack slot while the enclosing scope is still active
+- **Closed upvalue**: when the enclosing scope exits, the value is copied from the stack into the upvalue's own `closed` field, and the pointer is redirected to it
+- Multiple closures sharing a captured variable share the same upvalue object → true by-reference
+
+#### Part B: Cell memory management
+
+Add proper lifetime tracking for `ClayCell` objects in the C codegen path:
+- Cells are retained by blocks that reference them (via env pointers)
+- When a block is released, its cells are released too
+- When cell refcount hits 0, the cell is freed
+
+#### Part C: Verification
+
+Run and fix the closures.clay test program, and add a stress test for shared-capture mutation.
+
+### Tasks
+
+- [ ] **vm-open-upvalues** — Wire the vmgen-generated `clayvm_upvalue_t` into bc_compiler. When a block captures a variable: allocate an upvalue pointing to the stack slot (open). Emit `GET_UPVALUE`/`SET_UPVALUE` opcodes inside the block body instead of `GET_LOCAL` for captured vars. Store upvalue pointers in the block's env (replacing raw value copies).
+- [ ] **vm-close-upvalues** — When a scope exits (function/block returns), emit `CLOSE_UPVALUE` for each local that has been captured. This copies the value from the stack into the upvalue's `closed` field and redirects the pointer. Use the VM's open upvalue list to find which upvalues need closing.
+- [ ] **vm-shared-capture** — Ensure two closures capturing the same variable share one upvalue. Maintain an open-upvalue list on the VM or compiler so that if a variable already has an upvalue, the second closure reuses it rather than creating a new one.
+- [ ] **cell-release** — Add cell cleanup to block deallocation in the C codegen path. When a codegen'd block is freed (via `clay_release`), iterate its env and release any cells. Track which env slots are cells vs. regular values (e.g., with a bitmask or convention that all env slots in a capturing block are cells).
+- [ ] **verify-closures-clay** — Run `test/programs/closures.clay` end-to-end (both `clay run` and `clay build`+execute). Fix any failures. Add a shared-capture test case: two closures from the same scope mutating a shared counter, verifying both see each other's changes.
+- [ ] **vm-upvalue-tests** — Add unit tests to test_runtime.c for: shared upvalue mutation, upvalue closing on scope exit, nested upvalue chains (3-level closure), upvalue with block passed to higher-order function (escaping closure).
+
+### Design notes
+- **vmgen already generated the types.** `closures.h` / `closures.c` define `clayvm_upvalue_t` and `clayvm_closure_t`. The infrastructure is there — it just needs to be wired into `bc_compiler.c`'s block creation and trampoline dispatch.
+- **Open upvalue list** — the VM (or compiler) maintains a linked list of open upvalues sorted by stack slot index. When closing, walk the list and close any upvalue pointing at or above the exiting scope's base.
+- **C codegen is already by-reference** — the cell boxing approach is correct in principle. Only the memory leak needs fixing.
+- **Backward compatible** — blocks with zero captures should continue to work exactly as before (no upvalue overhead).

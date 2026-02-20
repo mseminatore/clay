@@ -824,6 +824,52 @@ static void test_vm_captures(void) {
     }
 }
 
+static void test_compound_assignment(void) {
+    SUITE("Compound Assignment");
+
+    COMMENT("+=");
+    {
+        ClayValue r = vm_eval("x = 10\nx += 5\nx");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 15);
+    }
+
+    COMMENT("-=");
+    {
+        ClayValue r = vm_eval("x = 10\nx -= 3\nx");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 7);
+    }
+
+    COMMENT("*=");
+    {
+        ClayValue r = vm_eval("x = 6\nx *= 4\nx");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 24);
+    }
+
+    COMMENT("/=");
+    {
+        ClayValue r = vm_eval("x = 20\nx /= 5\nx");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 4);
+    }
+
+    COMMENT("modulo assign %%=");
+    {
+        ClayValue r = vm_eval("x = 17\nx %= 5\nx");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 2);
+    }
+
+    COMMENT("chained compound assignment");
+    {
+        ClayValue r = vm_eval("x = 1\nx += 2\nx *= 3\nx -= 1\nx");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 8);
+    }
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -846,6 +892,7 @@ void test_main(int argc, char *argv[]) {
     test_slot_access();
     test_constructors();
     test_vm_captures();
+    test_compound_assignment();
 
     clay_shutdown();
 }

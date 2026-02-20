@@ -1,0 +1,28 @@
+//
+// A simple 2D vector class
+//
+Vector2d = Object clone({
+    x = 0 // Default value for x
+    y = 0 // Default value for y
+
+    init (x, y) {
+        self x = x
+        self y = y
+    }
+
+    add (other) {
+        Vector2d new (self x + other x, self y + other y)
+    }
+
+    toString () {
+        "Vector2d(" + self x + ", " + self y + ")"
+    }
+
+    scale (factor) {
+        Vector2d new (self x * factor, self y * factor)
+    }
+
+    magnitude () {
+        ((self x * self x) + (self y * self y)) sqrt
+    }
+})

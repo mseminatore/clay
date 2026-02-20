@@ -1,0 +1,46 @@
+// compound_ops.clay - Test compound assignment operators
+
+// 1. Local variable compound assignment
+x = 10
+x += 5
+x println()
+x -= 3
+x println()
+x *= 2
+x println()
+x /= 6
+x println()
+x %= 3
+x println()
+
+// 2. Slot compound assignment
+Counter = Object clone({
+    count = 0
+    increment() {
+        self count += 1
+        self
+    }
+    add(n) {
+        self count += n
+        self
+    }
+    scale(factor) {
+        self count *= factor
+        self
+    }
+    toString() {
+        "Counter(" + self count + ")"
+    }
+})
+
+c = Counter clone
+c increment()
+c increment()
+c increment()
+c toString() println()
+
+c add(7)
+c toString() println()
+
+c scale(2)
+c toString() println()
