@@ -342,71 +342,404 @@ Full IDE support via `.vscode/` configuration:
 
 **Compiled-mode debugging:** The C codegen emits `#line` directives mapping generated C back to `.clay` source lines. The MSVC debugger shows stepping through the `.clay` file at statement level when using "Debug: Run Compiled .clay Program".
 
-## Phase 12: VM Blocks, Closures & Method Definitions
+## Phase 12: VM Blocks, Closures & Method Definitions ✅
+
+### Implementation (DONE)
+
+All block/closure features implemented and tested in the VM REPL:
+
+- **Block chunks**: Block bodies compile to separate heap-allocated bytecode chunks in `bc->chunks[]`
+- **Block trampoline**: `bc_block_trampoline` re-enters VM to execute chunks (re-entrant safe — saves/restores full VM state)
+- **Method trampolines**: 32 static C functions via `METHOD_TRAMP(N)` macro for `clay_set_method` registration
+- **Closures**: Blocks access globals directly (reference semantics). Param names strdup'd to survive AST free.
+- **Array literals**: `[1, 2, 3]` creates array + appends elements via send
+- **Method defs in clone**: `Object clone({ getX() { self x() } })` compiles body to chunk, registers via method trampoline
+
+### Verified working
+- `{ |x| x * 2 } value(5)` → 10
+- `(3 > 1) ifTrue({ "yes" }) ifFalse({ "no" })` → "yes"
+- `[10, 20, 30] each({ |item| item println() })` → prints 10, 20, 30
+- `Object clone({ x = 0; getX() { self x() } })` → method dispatch works
+- `x = 10; { x + 1 } value()` → 11 (closure via globals)
+- `{ i < 5 } whileTrue({ sum = sum + i; i = i + 1 })` → sum=10
+
+### Known limitations
+- No true closure capture (blocks read globals directly)
+- Method trampoline pool limited to 32 methods
+- Block code buffer limited to 4096 bytes
+- Nested blocks may have param name collision via globals
+
+## Phase 13: Clay Source-Level Debugging ✅ COMPLETE
+
+All 3 debugging tasks implemented:
+- `--trace` flag for bytecode tracing
+- `--step` flag for interactive stepping with source line display
+- Step commands: n (next), c (continue), s (stack), q (quit)
+- Source line mapping via `line_map[]` in BcCompiler
+
+Committed as `b273bf4`.
+
+## Documentation Update (Needed)
+
+The README.md is outdated and needs these updates:
+
+1. **CLI options table** — Add `--vm-repl`, `--repl`, `--help`; document that no-args defaults to VM REPL
+2. **REPL section** — Add VM REPL section showing `>>>` prompt, instant evaluation, blocks/closures working. Keep classic REPL as alternative (`--repl`)
+3. **Architecture diagram** — Add bytecode VM path alongside compile-to-C path
+4. **VS Code section** — Add build tasks (Ctrl+Shift+B), debug configurations (5 launch configs), not just syntax extension
+
+## Phase 14: Floating-Point Numbers ✅
 
 ### Problem
-The VM REPL is non-functional for real Clay code. Clay has **no control flow keywords** — `ifTrue`, `ifFalse`, `each`, `whileTrue` are all message sends with block arguments. Without block compilation, the VM REPL can't do conditionals, loops, iteration, or method definitions.
+Clay only supports tagged integers. There is no float/double type — `3.14` is a parse error, `10 / 3` returns `3` (integer division), and there's no way to represent fractional values. The VM's generated value type has `CLAYVM_VAL_DOUBLE` but the Clay runtime has no float path.
 
-### Architecture
-In compiled mode, each block becomes a static C function. For the bytecode VM:
-- Block bodies compile to **separate bytecode chunks** stored in a side table
-- A single static C **trampoline function** re-enters the VM to execute a chunk
-- Captures are detected at compile time via `scan_free_vars()` and stored in the block object's `env` array
-- `env[0]` holds the chunk ID (as tagged int), `env[1..n]` hold captured values
-- A global `g_vm` pointer lets the trampoline access the VM instance
+### Design
+Floats will be heap-allocated `ClayObject` values with `CLAY_TYPE_FLOAT`, since `ClayValue` is a tagged `uintptr_t` that can't hold a float inline. Integer arithmetic stays fast (tagged, no allocation). Mixed int/float operations promote to float.
+
+### Syntax
+```clay
+x = 3.14
+y = 2.0
+z = x + y          // 5.14
+10 / 3              // 3 (integer division)
+10 toFloat / 3      // 3.333...
+3.14 toString       // "3.14"
+3.14 toInt          // 3
+```
 
 ### Tasks
 
-49. **vm-block-chunks** — Add bytecode chunk storage to BcCompiler. A chunk is: `{ uint8_t *code, size_t len, int param_count }`. Store in a growable array `bc->chunks[]` with a `chunk_count`. When compiling NODE_BLOCK, save current code buffer, compile body to a fresh buffer, store as a new chunk, restore the outer buffer.
+1. **float-lexer** — Add `TOK_FLOAT` token. Lexer recognizes `digits.digits` (e.g., `3.14`, `0.5`, `.25`). Distinguish from `digits` (TOK_INT).
 
-50. **vm-capture-scan** — Port `scan_free_vars()` from `codegen.c` to `bc_compiler.c`. Given a block body AST and the current global variable names, identify free variables (identifiers used in body that aren't params, builtins, or block-local). Return a list of capture names.
+2. **float-ast** — Add `NODE_FLOAT_LIT` AST node with `float` value. Parser creates it for `TOK_FLOAT` tokens.
 
-51. **vm-block-trampoline** — Create `bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv)` in `bc_compiler.c`:
-    - Read chunk_id from `self->as.block.env[0]` (tagged int)
-    - Look up bytecode chunk from global chunk table
-    - Save VM state (sp, ip)
-    - Push captured vars from `self->as.block.env[1..n]` as pseudo-locals (store to globals with mangled names)
-    - Push params from `argv` as locals
-    - Run the bytecode chunk
-    - Restore VM state, return result
+3. **float-runtime** — Add `CLAY_TYPE_FLOAT` to ClayType enum. Add `struct { float value; } number_float;` to ClayObject union. Add `clay_float_new(float)`, `clay_to_float(ClayValue)`, `CLAY_IS_FLOAT(v)` helpers. Float objects have parent=clay_Number.
 
-52. **vm-make-block** — In `bc_emit_expr` for NODE_BLOCK: compile body to a new chunk, scan for captures, emit bytecode that pushes chunk_id + captured values, calls `native_make_block(chunk_id, capture_count, captures...)`. The native creates a ClayObject block with the trampoline function + env array.
+4. **float-number-methods** — Update Number prototype arithmetic (`+`, `-`, `*`, `/`, `%`, comparisons) to handle mixed int/float: if either operand is float, promote both to float and return float. Integer-only operations stay tagged. Add `toFloat` method on integers, `toInt` method on floats (truncation).
 
-53. **vm-method-defs** — Compile NODE_METHOD_DEF inside NODE_CLONE. Methods are named blocks bound to an object. After creating the block object (same mechanism as task 52), call `clay_set_method(obj, name, block_trampoline)` to register it. Handle `self` access inside methods.
+5. **float-codegen** — C codegen emits `clay_float_new(3.14f)` for float literals. Generated C is still readable.
 
-54. **vm-array-literal** — Compile NODE_ARRAY_LIT: emit `native_make_array()` to create an empty array, then for each element compile the value and emit `native_send(arr, "append", element)`.
+6. **float-bc-compiler** — Bytecode compiler handles `NODE_FLOAT_LIT`: push as `CLAYVM_VAL_DOUBLE` constant (VM uses double internally, Clay wraps as float).
 
-55. **vm-block-tests** — Test full block functionality in VM REPL: `ifTrue`/`ifFalse`, `each` on arrays, closures with capture (`x = 10; f = { x + 1 }; f value()`), method definitions in clone, nested blocks. Verify the `blocks.clay` test program's expressions work in the REPL.
+7. **float-tostring** — Float `toString` formats with minimal precision (no trailing zeros). E.g., `3.14` not `3.140000`.
+
+8. **float-tests** — Unit tests: float creation, arithmetic, mixed int/float, comparisons, toString, toInt/toFloat conversions. Clay test program with float math. VM REPL verification.
 
 ### Dependencies
 ```
-vm-block-chunks → vm-capture-scan → vm-block-trampoline → vm-make-block → vm-method-defs
-                                                                        → vm-array-literal
-                                                        → vm-block-tests
+float-lexer → float-ast → float-runtime → float-number-methods → float-codegen
+                                         → float-bc-compiler
+                                         → float-tostring
+                                                              → float-tests
 ```
 
-## Phase 13: Clay Source-Level Debugging
+## Phase 15: Standard Library Enhancements
 
 ### Problem
-The VM REPL has no source-level debugging. The generated VM has `step_callback`, `trace_enabled`, and `clayvm_vm_step()` APIs but no line mapping from bytecode to `.clay` source.
+Clay's standard library is minimal — Arrays lack `map`/`filter`/`sort`, Strings can't parse numbers or change case, there's no math, no console input, no file I/O, and no type introspection. This limits Clay's usefulness as a general-purpose language.
 
-### Tasks
+### 15a: Type Checking
 
-49. **bytecode-tracing** — Add a `--trace` flag to the VM REPL that sets `vm.trace_enabled = 1`, printing each opcode as it executes (PUSH_CONST, CALL_NATIVE, etc.). Quick win for understanding execution flow. Add to `--help` output.
+Add a `type` method to Object that returns the type name as a String.
 
-50. **source-line-mapping** — Record which `.clay` source line each bytecode instruction came from in `bc_compiler.c`. Use a parallel `int line_map[BC_MAX_CODE]` array that stores the AST node's `line` field for each emitted byte. When the VM's `step_callback` fires, look up the source line and print it (or the source text) when the line changes from the previous step. This gives line-by-line stepping in the VM REPL via a `--step` flag.
+```clay
+42 type            // "Number"
+3.14 type          // "Float"
+"hello" type       // "String"
+[1, 2] type        // "Array"
+true type          // "Boolean"
+nil type           // "Nil"
+{ 1 } type         // "Block"
+Object clone() type // "Object"
+```
 
-51. **stepping-commands** — Add interactive stepping commands to the VM REPL when in step mode: `n` (next line), `c` (continue to end), `s` (show current stack), `v` (show variables/globals), `q` (quit). Use `clayvm_vm_step()` for single-instruction execution, coalescing steps within the same source line for `n`.
+**Tasks:**
+1. **type-method** — Add `type` method to Object prototype returning type name string. Handle tagged ints (via dispatch wrapper), floats, strings, arrays, blocks, booleans, nil, dicts, errors, and plain objects. Works in compiled mode and VM REPL.
 
-### Design notes
-- The generated VM already has `vm.trace_enabled`, `clayvm_vm_step()`, and `void (*step_callback)(void *vm, size_t ip)` — all generated by vmgen.
-- Line mapping only needs to track the bytecode offset → source line relationship. The `linemap.c`/`linemap.h` generated files may already provide infrastructure for this.
-- For DAP (Debug Adapter Protocol) integration in the future, this source mapping work is a prerequisite.
+### 15b: Math Library
 
-## Phase 14+ (Future)
+Add a `Math` object with common math functions. Uses C `<math.h>` internally.
+
+```clay
+Math abs(-5)          // 5
+Math sqrt(16.0)       // 4
+Math pow(2, 10)       // 1024
+Math min(3, 7)        // 3
+Math max(3, 7)        // 7
+Math floor(3.7)       // 3
+Math ceil(3.2)        // 4
+Math round(3.5)       // 4
+Math random           // 0.0–1.0 (float)
+Math pi               // 3.14159...
+```
+
+**Tasks:**
+2. **math-object** — Create `src/runtime/math.c` with `clay_Math` global object. Methods: `abs`, `sqrt`, `pow`, `min`, `max`, `floor`, `ceil`, `round`, `random`, `sin`, `cos`. Slots: `pi`, `e`. Register in bootstrap, add to codegen builtins, add to VM REPL globals.
+
+### 15c: Array Methods
+
+Extend Array with functional-style operations.
+
+```clay
+arr = [1, 2, 3, 4, 5]
+arr map({ |x| x * 2 })           // [2, 4, 6, 8, 10]
+arr filter({ |x| x > 2 })        // [3, 4, 5]
+arr reduce(0, { |acc, x| acc + x }) // 15
+arr find({ |x| x > 3 })          // 4
+arr sort                          // [1, 2, 3, 4, 5]
+arr reverse                      // [5, 4, 3, 2, 1]
+arr first                        // 1
+arr last                         // 5
+arr join(", ")                   // "1, 2, 3, 4, 5"
+arr contains(3)                  // true
+arr indexOf(3)                   // 2
+```
+
+**Tasks:**
+3. **array-functional** — Add `map`, `filter`, `reduce`, `find` to Array. Each takes a block argument, returns a new array (or value for reduce/find).
+4. **array-utility** — Add `sort` (natural ordering), `reverse`, `first`, `last`, `join(separator)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `length` (alias for size).
+
+### 15d: String Methods
+
+Extend String with parsing and case conversion.
+
+```clay
+"42" toInt               // 42
+"3.14" toFloat           // 3.14
+"  hello  " trim         // "hello"
+"hello" upper            // "HELLO"
+"HELLO" lower            // "hello"
+"hello" startsWith("he") // true
+"hello" endsWith("lo")   // true
+"hello" reverse          // "olleh"
+"hello" charAt(0)        // 104 (ASCII code)
+```
+
+**Tasks:**
+5. **string-parsing** — Add `toInt` and `toFloat` on String. Return the parsed number or raise an error on invalid input.
+6. **string-case** — Add `trim`, `upper`, `lower`, `startsWith`, `endsWith`, `reverse`.
+
+### 15e: Console I/O
+
+Add console input methods for interactive programs.
+
+```clay
+name = readLine               // reads a line from stdin
+age = prompt("Your age? ")    // prints prompt, reads line
+```
+
+**Tasks:**
+7. **console-input** — Add `readLine` as a global function (or method on a Console/System object). Add `prompt(msg)` that prints the message and reads a line. Returns a String. Works in compiled mode and VM REPL.
+
+### 15f: File I/O
+
+Add file reading/writing for basic scripting capability.
+
+```clay
+// Reading
+contents = File read("data.txt")
+lines = File readLines("data.txt")
+
+// Writing
+File write("output.txt", "hello world")
+File append("log.txt", "new entry\n")
+
+// Checking
+File exists("data.txt")        // true/false
+```
+
+**Tasks:**
+8. **file-io** — Create `src/runtime/file.c` with `clay_File` global object. Methods: `read(path)` (returns String), `readLines(path)` (returns Array of Strings), `write(path, content)`, `append(path, content)`, `exists(path)` (returns Boolean). Register in bootstrap, codegen builtins, VM REPL globals.
+
+### Implementation Order
+```
+type-method → math-object → string-parsing → string-case
+                           → array-functional → array-utility
+                           → console-input → file-io
+```
+
+Start with type-method (smallest, most useful for debugging), then math and array/string extensions (pure library work), then I/O (requires more design decisions).
+
+## Phase 15 Status: ✅ COMPLETE
+All 8 tasks implemented and committed.
+
+## Phase 16: String Escape Sequences
+
+**Problem:** Clay string literals do not process C-style escape sequences. `"hello\nworld"` stores the literal characters `\n` (backslash + n), not a newline. This affects Console I/O, File I/O, and general string use.
+
+**Approach:** Add escape processing in the parser's `token_strdup` path for string literals (or a dedicated `process_escapes` helper). The lexer already skips `\X` pairs correctly — we just need to translate them when building the string value.
+
+**Supported escapes:**
+- `\n` → newline (0x0A)
+- `\t` → tab (0x09)
+- `\r` → carriage return (0x0D)
+- `\\` → literal backslash
+- `\"` → literal double quote
+- `\0` → null byte
+
+## Phase 16 Status: ✅ COMPLETE
+String escape sequences implemented and committed.
+
+## Phase 16+ (Future)
 - Optional type annotations
 - Inline caching for dispatch performance
 - Self-hosting compiler
 - Concurrency (actors or green threads)
 - Package manager
 - DAP debug adapter for VS Code native breakpoints/watches
+
+## Phase 17: Slot Assignment & Constructors ✅
+
+### Problem
+Clay objects have slots (data fields), but there's no way to read or write them from Clay code after creation. Slots can only be set inside `clone({...})` bodies. This means:
+- No mutable object state (`p x = 5` doesn't work)
+- No constructor pattern (`Point new(3, 4)` can't set slots)
+- Objects are effectively immutable after creation
+
+### Research: How Other Languages Handle This
+
+**Io** (closest to Clay's design):
+- `:=` creates a new slot: `obj name := "Alice"`
+- `=` updates an existing slot: `obj name = "Bob"` (error if slot doesn't exist)
+- `init` method is auto-called after `clone`: `Dog := Animal clone` triggers `Dog init`
+- Slot access is a message: `obj name` returns the slot value (no parens needed)
+
+**Self** (pioneer of prototype OOP):
+- Slots have paired getter/setter: defining slot `x` creates `x` (getter) and `x:` (setter)
+- `obj x: 5` calls the setter, `obj x` calls the getter
+- `copy` + slot assignment replaces constructors
+
+**Smalltalk** (class-based, but Clay's syntax ancestor):
+- `obj x: 5` keyword message for setting
+- `initialize` method called by `new`
+- Factory methods: `Point x: 3 y: 4`
+
+**JavaScript** (prototype-based, familiar):
+- `obj.x = 5` direct property assignment
+- `constructor()` in classes, or manual init in prototype pattern
+
+### Design for Clay
+
+**Approach: Io-inspired slot access + Self-inspired setter messages**
+
+Clay already resolves unknown messages via `doesNotUnderstand`. We can make slot access automatic:
+
+1. **Slot read as message** — `obj x` already works if `x` is a method. Make it also check slots. If a slot `x` exists, return its value. This is the "slot-as-getter" pattern.
+
+2. **Slot write via setter message** — `obj setX(5)` calls a generated or runtime setter. Alternatively, support `obj x = 5` syntax (parsed as assignment-to-slot-on-receiver).
+
+3. **Constructor convention** — `init` method auto-called after clone (Io pattern). Or a `new(args)` factory method pattern.
+
+**Syntax options for slot assignment:**
+
+```clay
+// Option A: setter messages (Io/Self style)
+p setX(5)                    // explicit setter
+p x = 5                      // sugar for setX(5) — needs parser work
+
+// Option B: direct slot syntax (Io := style)
+p x := 5                     // creates/updates slot
+
+// Option C: slot send with assignment (simplest parser change)
+p x = 5                      // receiver slot assignment
+```
+
+**Recommended: Option C** (`obj slot = value`)
+- Minimal new syntax — `receiver ident = expr` when receiver is explicit
+- Consistent with existing `x = 5` for locals/globals
+- `p x` reads the slot (falls through dispatch to slot lookup)
+- `p x = 5` writes the slot
+
+**Constructor pattern:**
+
+```clay
+Point = Object clone({
+  x = 0
+  y = 0
+  init(x, y) {
+    self x = x
+    self y = y
+  }
+})
+
+p = Point new(3, 4)     // clone + call init
+```
+
+Where `new(args...)` is a built-in method on Object that does:
+1. `clone` self
+2. Call `init(args...)` on the clone (if init exists)
+3. Return the clone
+
+### Tasks
+
+1. ~~**slot-read** — Dispatch falls through to `clay_get_slot()` when no method found (dispatch.c).~~ ✅ DONE
+2. ~~**slot-write-syntax** — `NODE_SLOT_ASSIGN` in parser for `receiver ident = expr`.~~ ✅ DONE
+3. ~~**slot-write-codegen** — `clay_set_slot` emission in codegen.c and bc_compiler.c.~~ ✅ DONE
+4. ~~**object-new** — `new(args...)` on Object: clone + call init. Fixed VM re-entrancy (stack save/restore in bc_method_dispatch).~~ ✅ DONE (commit 4bb4ba2)
+5. **constructor-tests** — Test full pattern: prototype with init, new(), slot read/write, inheritance of init, new with no init.
+6. **slot-docs** — Update README with slot access, slot assignment, constructor patterns, and examples.
+
+### Examples (target behavior)
+
+```clay
+// Define a prototype with slots and constructor
+Point = Object clone({
+  x = 0
+  y = 0
+  init(x, y) {
+    self x = x
+    self y = y
+  }
+  toString() {
+    "(" + x toString + ", " + y toString + ")"
+  }
+})
+
+p = Point new(3, 4)
+p x                          // 3
+p y                          // 4
+p toString                   // "(3, 4)"
+p x = 10                     // mutate slot
+p x                          // 10
+
+// Inheritance works
+Point3D = Point clone({
+  z = 0
+  init(x, y, z) {
+    self x = x
+    self y = y
+    self z = z
+  }
+})
+
+q = Point3D new(1, 2, 3)
+q z                          // 3
+```
+
+## Phase 18: Refcount Correctness & Memory Diagnostics ✅
+
+### Problem
+Multiple refcounting bugs exist across the VM REPL and runtime:
+1. **Global variable assignment** doesn't retain/release — `Cat = Dog` leaves refcount at 1
+2. **toString leaks** — temporary strings from `toString` calls never released in several places
+3. **Singleton list incomplete** — `clay_is_singleton()` missing Error, Math, Console, File prototypes
+4. **No memory diagnostics** — no way to validate refcounts or detect leaks
+
+### Approach
+Fix all refcount bugs, then add `--mem-stats` flag for leak detection.
+
+### Tasks
+
+1. **fix-store-global** — In `native_store_global_fn` (bc_compiler.c): retain new object values, release old object values when overwriting. Add helper to check if a clayvm_value_t holds an object pointer.
+
+2. **fix-tostring-leaks** — Release temporary toString results in:
+   - `native_println_fn` (bc_compiler.c)
+   - REPL auto-print in main.c (two places: step mode + normal mode)
+   - `array_toString` (array.c)
+   - `array_join` (array.c)
+   - `array_sort_compare` (array.c)
+   - `dict_toString` (clay_dict.c)
+
+3. **fix-singleton-list** — Add `clay_Error`, `clay_Math`, `clay_Console`, `clay_File` to `clay_is_singleton()` in memory.c.
+
+4. **add-mem-stats** — Add global allocation/deallocation counters in memory.c. Add `--mem-stats` CLI flag that prints object stats on REPL exit.
