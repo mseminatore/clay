@@ -14,6 +14,8 @@ ClayObject *clay_Boolean = NULL;
 ClayObject *clay_Error   = NULL;
 ClayObject *clay_Dict    = NULL;
 ClayObject *clay_Math   = NULL;
+ClayObject *clay_Console = NULL;
+ClayObject *clay_File    = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -23,6 +25,7 @@ extern void clay_block_init_methods(ClayObject *proto);
 extern void clay_error_init_methods(ClayObject *proto);
 extern void clay_dict_init_methods(ClayObject *proto);
 extern void clay_math_init(ClayObject *proto);
+extern void clay_file_init(ClayObject *proto);
 
 /* Object base methods */
 
@@ -237,6 +240,31 @@ static ClayValue nil_type(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(clay_string_new("Nil"));
 }
 
+/* Console methods */
+static ClayValue console_readLine(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    char buf[4096];
+    if (fgets(buf, sizeof(buf), stdin)) {
+        size_t len = strlen(buf);
+        if (len > 0 && buf[len - 1] == '\n') buf[--len] = '\0';
+        if (len > 0 && buf[len - 1] == '\r') buf[--len] = '\0';
+        return CLAY_VAL(clay_string_new(buf));
+    }
+    return CLAY_NIL;
+}
+
+static ClayValue console_prompt(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
+        ClayObject *msg = CLAY_OBJ(argv[0]);
+        if (msg->type == CLAY_TYPE_STRING) {
+            printf("%s", clay_string_data(msg));
+            fflush(stdout);
+        }
+    }
+    return console_readLine(self, 0, NULL);
+}
+
 void clay_bootstrap(void) {
     /* Create root Object prototype */
     clay_Object = clay_object_new();
@@ -321,6 +349,19 @@ void clay_bootstrap(void) {
     clay_Math->parent = clay_Object;
     clay_Math->refcount = 1000000;
     clay_math_init(clay_Math);
+
+    /* Console object */
+    clay_Console = clay_object_new();
+    clay_Console->parent = clay_Object;
+    clay_Console->refcount = 1000000;
+    clay_set_method(clay_Console, "readLine", console_readLine);
+    clay_set_method(clay_Console, "prompt", console_prompt);
+
+    /* File object */
+    clay_File = clay_object_new();
+    clay_File->parent = clay_Object;
+    clay_File->refcount = 1000000;
+    clay_file_init(clay_File);
 }
 
 void clay_shutdown(void) {

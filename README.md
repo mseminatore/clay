@@ -373,6 +373,8 @@ Proxy = Object clone({
 | Error | `message()`, `type()`, `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
+| Console | `readLine()`, `prompt(msg)` |
+| File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)` |
 
 ## Generated C
 
