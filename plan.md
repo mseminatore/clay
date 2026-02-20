@@ -781,7 +781,24 @@ Clay has no way to share or reuse code beyond `import("path")` with relative fil
 
 ### Design
 
-**Bricks** is Clay's package manager. Each package (a "brick") is a GitHub repository containing Clay source files and a `brick.json` manifest. The system is intentionally simple — no central registry, no complex version resolution.
+**Bricks** is Clay's package manager, built directly into the `clay` binary as subcommands. Each package (a "brick") is any Git repository containing Clay source files and a `brick.json` manifest. There is no central registry — any GitHub (or other Git) URL is a valid package source, similar to Go modules.
+
+**Why arbitrary repos (no registry):**
+- Zero infrastructure to maintain — no server, no account signup
+- Any Git repo with a `brick.json` is instantly a valid brick
+- GitHub topics/search provide natural discovery (`topic:clay-brick`)
+- Proven model — Go modules and Deno work this way at massive scale
+
+#### CLI (subcommands of `clay`)
+```
+clay bricks init                              # create brick.json
+clay bricks add github.com/user/some-lib      # add + install dependency
+clay bricks install                           # install all deps from brick.json
+clay bricks list                              # show installed bricks
+clay bricks remove some-lib                   # remove a dependency
+```
+
+No separate binary needed — everything is handled by the `clay` executable.
 
 #### Package structure
 ```
@@ -811,12 +828,14 @@ github.com/user/my-brick/
 - `name`: package name (kebab-case)
 - `version`: semver string
 - `main`: entry point file (what `import("my-brick")` loads)
-- `deps`: dependency map — `name → github_url@tag`
+- `deps`: dependency map — `name → git_url@tag_or_branch`
+
+URLs can be any Git-cloneable URL: `github.com/user/repo`, `gitlab.com/user/repo`, or even local paths. The `@ref` suffix specifies a tag, branch, or commit to check out.
 
 #### How it works
 
 1. **`clay bricks init`** — Create a `brick.json` in the current directory
-2. **`clay bricks add <url>`** — Add a dependency: clone the repo into `bricks/` directory, add to `brick.json`
+2. **`clay bricks add <url>`** — Clone the repo into `bricks/`, read its `brick.json`, add to project deps
 3. **`clay bricks install`** — Clone/update all dependencies from `brick.json` into `bricks/`
 4. **`import("brick-name")`** — Resolve via `bricks/<name>/` directory, load the brick's `main` entry point
 
@@ -868,9 +887,10 @@ All → brick-docs
 ```
 
 ### Design notes
-- **No central registry** — packages are just GitHub repos. Discovery is via GitHub search, READMEs, or community lists.
+- **Any Git URL** — not limited to GitHub. Works with GitLab, Bitbucket, self-hosted Git, or even local paths.
 - **No complex version resolution** — each dep specifies an exact tag/branch. No semver ranges, no diamond dependency resolution. If two bricks need different versions of the same dep, last-installed wins (with a warning).
 - **Git-based** — requires `git` on PATH. No custom download protocol.
 - **`bricks/` directory** — analogous to `node_modules/`. Should be gitignored. Recreated from `brick.json` via `clay bricks install`.
 - **Transitive deps** — `brick-recursive` handles installing deps of deps, but flattened into a single `bricks/` directory (not nested).
+- **Single binary** — all `bricks` subcommands are built into the `clay` executable. No separate tool to install.
 - **Future enhancements** — lockfile (`brick-lock.json`), semver range resolution, `clay bricks publish` (create GitHub release), `clay bricks search` (GitHub API query).
