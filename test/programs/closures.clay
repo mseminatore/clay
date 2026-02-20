@@ -1,0 +1,48 @@
+// closures.clay — Test true closure semantics via C codegen
+
+// Basic capture: inner block reads outer param
+"=== Basic capture ===" println()
+makeAdder = { |n| { |x| n + x } }
+add5 = makeAdder value(5)
+"add5(10) = " print()
+add5 value(10) println()
+
+// Capture survives scope exit
+"=== Scope survival ===" println()
+wrap = { |n| { n } }
+getter = wrap value(42)
+"getter() = " print()
+getter value() println()
+
+// String capture
+"=== String capture ===" println()
+greet = { |g| { |name| g + " " + name } }
+hello = greet value("Hello")
+"hello(World) = " print()
+hello value("World") println()
+
+// Multiple captures
+"=== Multiple captures ===" println()
+pair = { |a, b| { a + b } }
+sum = pair value(10, 20)
+"sum() = " print()
+sum value() println()
+
+// Nested capture (3 levels)
+"=== 3-level nesting ===" println()
+f = { |a| { |b| { a * b } } }
+g = f value(3)
+h = g value(5)
+"3 * 5 = " print()
+h value() println()
+
+// Counter pattern: write-back through cell
+"=== Counter ===" println()
+makeCounter = { |start| { start = start + 1; start } }
+counter = makeCounter value(0)
+"count 1 = " print()
+counter value() println()
+"count 2 = " print()
+counter value() println()
+"count 3 = " print()
+counter value() println()

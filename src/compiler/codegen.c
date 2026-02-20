@@ -308,6 +308,26 @@ static void clear_locals(CodeGen *cg) {
     cg->local_count = 0;
 }
 
+static void push_boxed(CodeGen *cg, const char *name) {
+    if (cg->boxed_count >= cg->boxed_capacity) {
+        cg->boxed_capacity = cg->boxed_capacity == 0 ? 8 : cg->boxed_capacity * 2;
+        cg->boxed_names = (char **)realloc(cg->boxed_names, sizeof(char *) * (size_t)cg->boxed_capacity);
+    }
+    cg->boxed_names[cg->boxed_count++] = strdup(name);
+}
+
+static int is_boxed(CodeGen *cg, const char *name) {
+    for (int i = 0; i < cg->boxed_count; i++) {
+        if (strcmp(cg->boxed_names[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
+static void clear_boxed(CodeGen *cg) {
+    for (int i = 0; i < cg->boxed_count; i++) free(cg->boxed_names[i]);
+    cg->boxed_count = 0;
+}
+
 static int is_builtin_global(const char *name) {
     return strcmp(name, "Object") == 0 ||
            strcmp(name, "Number") == 0 ||
@@ -381,7 +401,22 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             break;
         }
         case NODE_BLOCK:
-            /* Don't descend into nested blocks — they capture separately */
+            /* Scan INTO nested blocks to find transitive captures */
+            {
+                int nested_pc = node->as.block.params.count;
+                int combined_count = param_count + nested_pc;
+                char **combined = NULL;
+                if (combined_count > 0) {
+                    combined = (char **)malloc(sizeof(char *) * (size_t)combined_count);
+                    for (int i = 0; i < param_count; i++)
+                        combined[i] = block_params[i];
+                    for (int i = 0; i < nested_pc; i++)
+                        combined[param_count + i] = node->as.block.params.items[i]->as.ident.name;
+                }
+                scan_free_vars_list(&node->as.block.body,
+                                    combined, combined_count, caps, cg);
+                free(combined);
+            }
             break;
         case NODE_INT_LIT:
         case NODE_FLOAT_LIT:
@@ -434,6 +469,8 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
     emit_indent(cg);
     if (is_builtin_global(node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s;\n", t, builtin_c_expr(node->as.ident.name));
+    } else if (is_boxed(cg, node->as.ident.name)) {
+        fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, node->as.ident.name);
     } else if (cg->in_method && !is_local(cg, node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = clay_get_slot(self, \"%s\");\n",
                 t, node->as.ident.name);
@@ -638,22 +675,37 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
     collect_method_with_captures(fname, NULL, node, &caps);
 
     char *t = temp_name(cg);
-    emit_indent(cg);
 
     /* Find the MethodDef we just added to get its captures */
     MethodDef *md = collected_methods; /* it's the most recent one */
     if (md->captures.count > 0) {
-        /* Build env array */
+        /* Create cells for each captured variable (reuse existing cells) */
+        for (int i = 0; i < md->captures.count; i++) {
+            const char *name = md->captures.names[i];
+            if (!is_boxed(cg, name)) {
+                emit_indent(cg);
+                if (is_local(cg, name)) {
+                    fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(%s);\n", name, name);
+                } else {
+                    /* Variable from an outer scope already boxed — use its cell */
+                    fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(%s);\n", name, name);
+                }
+                push_boxed(cg, name);
+            }
+        }
+        /* Build env array with cell pointers */
+        emit_indent(cg);
         fprintf(cg->out, "ClayValue %s_env[] = {", t);
         for (int i = 0; i < md->captures.count; i++) {
             if (i > 0) fprintf(cg->out, ", ");
-            fprintf(cg->out, "%s", md->captures.names[i]);
+            fprintf(cg->out, "(ClayValue)(uintptr_t)%s_cell", md->captures.names[i]);
         }
         fprintf(cg->out, "};\n");
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, %s_env, %d));\n",
                 t, fname, t, md->captures.count);
     } else {
+        emit_indent(cg);
         fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, NULL, 0));\n", t, fname);
     }
     return t;
@@ -789,13 +841,22 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
         char *val = emit_expr(cg, node->as.assign.value);
         if (!val) return;
         emit_indent(cg);
-        fprintf(cg->out, "%s = %s;\n", node->as.assign.name, val);
+        if (is_boxed(cg, node->as.assign.name)) {
+            fprintf(cg->out, "%s_cell->value = %s;\n", node->as.assign.name, val);
+        } else {
+            fprintf(cg->out, "%s = %s;\n", node->as.assign.name, val);
+        }
         /* Auto-set _name on bare clone: X = Y clone */
         if (node->as.assign.value && node->as.assign.value->type == NODE_SEND &&
             strcmp(node->as.assign.value->as.send.message, "clone") == 0) {
             emit_indent(cg);
-            fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
-                    node->as.assign.name, node->as.assign.name);
+            if (is_boxed(cg, node->as.assign.name)) {
+                fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s_cell->value), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+                        node->as.assign.name, node->as.assign.name);
+            } else {
+                fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+                        node->as.assign.name, node->as.assign.name);
+            }
         }
         free(val);
         return;
@@ -933,11 +994,13 @@ static void emit_method_bodies(CodeGen *cg) {
             cg->indent = saved_indent;
             fprintf(cg->out, "    return _result;\n");
         } else if (node->type == NODE_BLOCK) {
-            /* Declare captured variables from env */
+            /* Declare captured variables from env as cell pointers */
+            int saved_boxed_count = cg->boxed_count;
             for (int i = 0; i < cur->captures.count; i++) {
-                fprintf(cg->out, "    ClayValue %s = self->as.block.env[%d];\n",
+                fprintf(cg->out, "    ClayCell *%s_cell = (ClayCell *)(uintptr_t)self->as.block.env[%d];\n",
                         cur->captures.names[i], i);
                 push_local(cg, cur->captures.names[i]);
+                push_boxed(cg, cur->captures.names[i]);
             }
             /* Register block params as locals */
             for (int i = 0; i < node->as.block.params.count; i++) {
@@ -955,9 +1018,13 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt->as.assign.value);
                     if (val) {
                         emit_indent(cg);
-                        fprintf(cg->out, "ClayValue %s = %s;\n", stmt->as.assign.name, val);
-                        push_local(cg, stmt->as.assign.name);
-                        fprintf(cg->out, "    _result = %s;\n", stmt->as.assign.name);
+                        if (is_boxed(cg, stmt->as.assign.name)) {
+                            fprintf(cg->out, "%s_cell->value = %s;\n", stmt->as.assign.name, val);
+                        } else {
+                            fprintf(cg->out, "ClayValue %s = %s;\n", stmt->as.assign.name, val);
+                            push_local(cg, stmt->as.assign.name);
+                        }
+                        fprintf(cg->out, "    _result = %s;\n", val);
                         free(val);
                     }
                 } else {
@@ -971,6 +1038,12 @@ static void emit_method_bodies(CodeGen *cg) {
             }
             cg->indent = saved_indent;
             fprintf(cg->out, "    return _result;\n");
+
+            /* Clear boxed state for this block scope */
+            while (cg->boxed_count > saved_boxed_count) {
+                cg->boxed_count--;
+                free(cg->boxed_names[cg->boxed_count]);
+            }
         }
 
         /* Restore context */
@@ -1005,6 +1078,9 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->local_names = NULL;
     cg->local_count = 0;
     cg->local_capacity = 0;
+    cg->boxed_names = NULL;
+    cg->boxed_count = 0;
+    cg->boxed_capacity = 0;
 }
 
 /* First pass: collect all variable names from assignments for declaration */

@@ -65,3 +65,32 @@ void clay_block_init_methods(ClayObject *proto) {
     clay_set_method(proto, "whileTrue", block_whileTrue);
     clay_set_method(proto, "whileFalse", block_whileFalse);
 }
+
+/* --- Cell (heap-allocated box for by-reference capture) --- */
+
+ClayCell *clay_cell_new(ClayValue initial) {
+    ClayCell *cell = (ClayCell *)malloc(sizeof(ClayCell));
+    cell->refcount = 1;
+    cell->value = initial;
+    if (CLAY_IS_PTR(initial) && !CLAY_IS_NIL(initial) &&
+        initial != CLAY_TRUE && initial != CLAY_FALSE) {
+        clay_retain(CLAY_OBJ(initial));
+    }
+    return cell;
+}
+
+void clay_cell_retain(ClayCell *cell) {
+    if (cell) cell->refcount++;
+}
+
+void clay_cell_release(ClayCell *cell) {
+    if (!cell) return;
+    if (--cell->refcount <= 0) {
+        ClayValue v = cell->value;
+        if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) &&
+            v != CLAY_TRUE && v != CLAY_FALSE) {
+            clay_release(CLAY_OBJ(v));
+        }
+        free(cell);
+    }
+}

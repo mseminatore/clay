@@ -211,6 +211,16 @@ void clay_raise(ClayValue error);
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 
+/* --- Cell (heap-allocated box for by-reference capture in C codegen) --- */
+typedef struct {
+    int       refcount;
+    ClayValue value;
+} ClayCell;
+
+ClayCell   *clay_cell_new(ClayValue initial);
+void        clay_cell_retain(ClayCell *cell);
+void        clay_cell_release(ClayCell *cell);
+
 #ifdef __cplusplus
 }
 #endif

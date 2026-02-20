@@ -14,6 +14,9 @@ typedef struct {
     char **local_names;  /* parameter/local names in current method scope */
     int local_count;
     int local_capacity;
+    char **boxed_names;  /* variables boxed into cells (by-reference capture) */
+    int boxed_count;
+    int boxed_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen *cg, FILE *out, const char *source_file);
