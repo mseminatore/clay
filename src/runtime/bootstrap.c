@@ -34,6 +34,16 @@ static ClayValue object_clone(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(clay_clone(self));
 }
 
+static ClayValue object_new(ClayObject *self, int argc, ClayValue *argv) {
+    ClayObject *obj = clay_clone(self);
+    /* Call init(args) if the clone has an init method */
+    ClayMethodFunc init_fn = clay_lookup_method(obj, "init");
+    if (init_fn) {
+        init_fn(obj, argc, argv);
+    }
+    return CLAY_VAL(obj);
+}
+
 static ClayValue object_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char buf[64];
@@ -271,6 +281,7 @@ void clay_bootstrap(void) {
     clay_Object->refcount = 1000000; /* never freed */
 
     clay_set_method(clay_Object, "clone", object_clone);
+    clay_set_method(clay_Object, "new", object_new);
     clay_set_method(clay_Object, "toString", object_toString);
     clay_set_method(clay_Object, "println", object_println);
     clay_set_method(clay_Object, "doesNotUnderstand", object_doesNotUnderstand);

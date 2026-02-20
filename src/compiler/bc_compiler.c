@@ -173,8 +173,15 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
     const uint8_t *saved_code = g_vm->code;
     size_t saved_code_len = g_vm->code_len;
     size_t saved_ip = g_vm->ip;
-    size_t saved_sp = g_vm->sp;
+    int saved_sp = g_vm->sp;
     int saved_running = g_vm->running;
+
+    /* Save stack contents — clayvm_vm_run resets sp=0 and overwrites stack */
+    clayvm_value_t *stack_backup = NULL;
+    if (saved_sp > 0) {
+        stack_backup = (clayvm_value_t *)malloc((size_t)saved_sp * sizeof(clayvm_value_t));
+        memcpy(stack_backup, g_vm->stack, (size_t)saved_sp * sizeof(clayvm_value_t));
+    }
 
     int result = clayvm_vm_run(g_vm, chunk->code, chunk->len);
 
@@ -182,7 +189,11 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
     if (result == 0 && g_vm->sp > 0)
         retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
 
-    /* Restore full VM state */
+    /* Restore stack contents and full VM state */
+    if (stack_backup) {
+        memcpy(g_vm->stack, stack_backup, (size_t)saved_sp * sizeof(clayvm_value_t));
+        free(stack_backup);
+    }
     g_vm->code = saved_code;
     g_vm->code_len = saved_code_len;
     g_vm->ip = saved_ip;
@@ -582,7 +593,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
     for (int i = 0; i < body->count; i++) {
         AstNode *stmt = body->items[i];
         int is_last = (i == body->count - 1);
-        if (is_last && stmt->type != NODE_ASSIGN) {
+        if (is_last && stmt->type != NODE_ASSIGN && stmt->type != NODE_SLOT_ASSIGN) {
             bc_emit_expr(bc, stmt);
         } else {
             bc_emit_stmt(bc, stmt);
@@ -855,6 +866,20 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
         return;
     }
 
+    /* Slot assignment: receiver slot = value */
+    if (node->type == NODE_SLOT_ASSIGN) {
+        /* Push receiver, slot name, value → call set_slot */
+        bc_emit_expr(bc, node->as.slot_assign.receiver);
+        int name_idx = add_constant_string(bc, node->as.slot_assign.slot_name);
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+        bc_emit_expr(bc, node->as.slot_assign.value);
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_set_slot);
+        emit_byte(bc, 3);
+        emit_op(bc, CLAYVM_OP_POP);
+        return;
+    }
+
     /* Expression statement */
     bc_emit_expr(bc, node);
     emit_op(bc, CLAYVM_OP_POP);
@@ -870,7 +895,7 @@ int bc_compile(BcCompiler *bc, AstNode *program) {
         AstNode *stmt = program->as.program.stmts.items[i];
         int is_last = (i == program->as.program.stmts.count - 1);
 
-        if (is_last && stmt->type != NODE_ASSIGN) {
+        if (is_last && stmt->type != NODE_ASSIGN && stmt->type != NODE_SLOT_ASSIGN) {
             /* Last expression: leave on stack for REPL auto-print */
             bc_emit_expr(bc, stmt);
         } else {

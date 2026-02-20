@@ -252,6 +252,10 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
         case NODE_RAISE:
             prewalk_assign_names(node->as.raise.expr, parent_name);
             break;
+        case NODE_SLOT_ASSIGN:
+            prewalk_assign_names(node->as.slot_assign.receiver, parent_name);
+            prewalk_assign_names(node->as.slot_assign.value, parent_name);
+            break;
         default:
             break;
     }
@@ -415,6 +419,10 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             break;
         case NODE_RAISE:
             scan_free_vars(node->as.raise.expr, block_params, param_count, caps, cg);
+            break;
+        case NODE_SLOT_ASSIGN:
+            scan_free_vars(node->as.slot_assign.receiver, block_params, param_count, caps, cg);
+            scan_free_vars(node->as.slot_assign.value, block_params, param_count, caps, cg);
             break;
         default:
             break;
@@ -789,6 +797,21 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
             fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
                     node->as.assign.name, node->as.assign.name);
         }
+        free(val);
+        return;
+    }
+
+    /* Slot assignment: receiver slot = value */
+    if (node->type == NODE_SLOT_ASSIGN) {
+        emit_line(cg, node->line);
+        char *recv = emit_expr(cg, node->as.slot_assign.receiver);
+        char *val = emit_expr(cg, node->as.slot_assign.value);
+        if (recv && val) {
+            emit_indent(cg);
+            fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"%s\", %s);\n",
+                    recv, node->as.slot_assign.slot_name, val);
+        }
+        free(recv);
         free(val);
         return;
     }

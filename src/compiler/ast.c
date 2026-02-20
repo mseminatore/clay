@@ -86,6 +86,11 @@ void ast_free(AstNode *node) {
         case NODE_RAISE:
             ast_free(node->as.raise.expr);
             break;
+        case NODE_SLOT_ASSIGN:
+            ast_free(node->as.slot_assign.receiver);
+            free(node->as.slot_assign.slot_name);
+            ast_free(node->as.slot_assign.value);
+            break;
         case NODE_PROGRAM:
             nodelist_free(&node->as.program.stmts);
             break;
@@ -170,6 +175,11 @@ void ast_print(AstNode *node, int indent) {
         case NODE_RAISE:
             printf("Raise\n");
             ast_print(node->as.raise.expr, indent + 1);
+            break;
+        case NODE_SLOT_ASSIGN:
+            printf("SlotAssign(.%s)\n", node->as.slot_assign.slot_name);
+            ast_print(node->as.slot_assign.receiver, indent + 1);
+            ast_print(node->as.slot_assign.value, indent + 1);
             break;
         case NODE_PROGRAM:
             printf("Program(stmts=%d)\n", node->as.program.stmts.count);

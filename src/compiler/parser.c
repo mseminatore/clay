@@ -671,7 +671,23 @@ static AstNode *parse_statement(Parser *p) {
         p->current = saved_current;
     }
 
-    return parse_expression(p);
+    /* Parse as expression, then check for slot assignment pattern:
+     * If result is a zero-arg send (e.g. p x) followed by =, it's slot assignment */
+    AstNode *expr = parse_expression(p);
+    if (expr && expr->type == NODE_SEND && expr->as.send.args.count == 0 &&
+        check(p, TOK_ASSIGN)) {
+        parser_advance(p); /* consume = */
+        AstNode *node = ast_new(NODE_SLOT_ASSIGN, expr->line);
+        node->as.slot_assign.receiver = expr->as.send.receiver;
+        node->as.slot_assign.slot_name = expr->as.send.message; /* steal the string */
+        node->as.slot_assign.value = parse_expression(p);
+        /* Free the send node shell without freeing receiver/message */
+        expr->as.send.receiver = NULL;
+        expr->as.send.message = NULL;
+        free(expr);
+        return node;
+    }
+    return expr;
 }
 
 /* --- Public API --- */

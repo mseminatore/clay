@@ -18,7 +18,8 @@ typedef enum {
     NODE_ARRAY_LIT,     /* [a, b, c] */
     NODE_IMPORT,        /* import("path") */
     NODE_TRY_CATCH,     /* try({ ... }) catch({ |e| ... }) */
-    NODE_RAISE          /* raise(expr) */
+    NODE_RAISE,         /* raise(expr) */
+    NODE_SLOT_ASSIGN    /* receiver slot = expr */
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -106,6 +107,13 @@ struct AstNode {
 
         /* NODE_RAISE */
         struct { AstNode *expr; } raise;
+
+        /* NODE_SLOT_ASSIGN: receiver slot = value */
+        struct {
+            AstNode *receiver;
+            char *slot_name;
+            AstNode *value;
+        } slot_assign;
 
         /* NODE_PROGRAM */
         struct { NodeList stmts; } program;

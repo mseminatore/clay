@@ -44,10 +44,10 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     }
 
     /* Slot access fallback: if a slot exists with this name, return its value */
-    if (argc == 0 && obj->slots) {
-        ht_value_t slot = ht_find(obj->slots, (ht_key_t)selector);
-        if (slot) {
-            return (ClayValue)(uintptr_t)slot;
+    if (argc == 0) {
+        ClayValue slot_val = clay_get_slot(obj, selector);
+        if (!CLAY_IS_NIL(slot_val)) {
+            return slot_val;
         }
     }
 
