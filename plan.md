@@ -895,7 +895,7 @@ All → brick-docs
 - **Single binary** — all `bricks` subcommands are built into the `clay` executable. No separate tool to install.
 - **Future enhancements** — lockfile (`brick-lock.json`), semver range resolution, `clay bricks publish` (create GitHub release), `clay bricks search` (GitHub API query).
 
-## Phase 21: Compound Assignment Operators
+## Phase 21: Compound Assignment Operators ✅
 
 **Goal:** Add `+=`, `-=`, `*=`, `/=`, `%=` operators so `self x = self x + 1` can be written as `self x += 1`.
 
