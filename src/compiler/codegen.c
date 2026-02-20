@@ -782,6 +782,13 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
         if (!val) return;
         emit_indent(cg);
         fprintf(cg->out, "%s = %s;\n", node->as.assign.name, val);
+        /* Auto-set _name on bare clone: X = Y clone */
+        if (node->as.assign.value && node->as.assign.value->type == NODE_SEND &&
+            strcmp(node->as.assign.value->as.send.message, "clone") == 0) {
+            emit_indent(cg);
+            fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+                    node->as.assign.name, node->as.assign.name);
+        }
         free(val);
         return;
     }
@@ -829,6 +836,11 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
                     var_name, member->as.method_def.name, fname);
         }
     }
+
+    /* Auto-set _name slot to variable name */
+    emit_indent(cg);
+    fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+            var_name, var_name);
 }
 
 /* --- Emit method/block function bodies --- */

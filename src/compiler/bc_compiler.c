@@ -809,6 +809,14 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
     }
 }
 
+static int is_clone_expr(AstNode *node) {
+    if (!node) return 0;
+    if (node->type == NODE_CLONE) return 1;
+    if (node->type == NODE_SEND && strcmp(node->as.send.message, "clone") == 0)
+        return 1;
+    return 0;
+}
+
 static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     if (!node || bc->had_error) return;
     bc->current_line = node->line;
@@ -823,6 +831,27 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
         emit_u16(bc, (uint16_t)bc->native_store_global);
         emit_byte(bc, 2);
         emit_op(bc, CLAYVM_OP_POP); /* discard result */
+
+        /* Auto-set _name slot on clone results: Cat = Object clone → Cat._name = "Cat" */
+        if (is_clone_expr(node->as.assign.value)) {
+            /* Load the just-stored global back */
+            int load_name = add_constant_string(bc, node->as.assign.name);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)load_name);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_load_global);
+            emit_byte(bc, 1);
+            /* Push slot name "_name" */
+            int slot_name = add_constant_string(bc, "_name");
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)slot_name);
+            /* Push the variable name as value */
+            int val_name = add_constant_string(bc, node->as.assign.name);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)val_name);
+            /* set_slot(obj, name, value) */
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_set_slot);
+            emit_byte(bc, 3);
+            emit_op(bc, CLAYVM_OP_POP);
+        }
         return;
     }
 

@@ -440,6 +440,12 @@ void clay_inspect(ClayObject *obj) {
                 fprintf(stderr, "%ld", (long)clay_to_int(cv));
             } else if (CLAY_IS_NIL(cv)) {
                 fprintf(stderr, "nil");
+            } else if (cv == CLAY_TRUE) {
+                fprintf(stderr, "true");
+            } else if (cv == CLAY_FALSE) {
+                fprintf(stderr, "false");
+            } else if (CLAY_IS_PTR(cv) && CLAY_OBJ(cv)->type == CLAY_TYPE_STRING) {
+                fprintf(stderr, "\"%s\"", clay_string_data(CLAY_OBJ(cv)));
             } else {
                 fprintf(stderr, "@%p", (void *)(uintptr_t)cv);
             }
