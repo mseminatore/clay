@@ -743,3 +743,134 @@ Fix all refcount bugs, then add `--mem-stats` flag for leak detection.
 3. **fix-singleton-list** — Add `clay_Error`, `clay_Math`, `clay_Console`, `clay_File` to `clay_is_singleton()` in memory.c.
 
 4. **add-mem-stats** — Add global allocation/deallocation counters in memory.c. Add `--mem-stats` CLI flag that prints object stats on REPL exit.
+
+## Phase 19: Cross-Platform CI
+
+### Problem
+Clay is developed on Windows but the codebase targets cross-platform (C99, CMake, `#ifdef _WIN32` paths). There is no automated CI to catch platform-specific build failures or test regressions. Breakage on Linux/macOS could go unnoticed.
+
+### Approach
+Add a GitHub Actions workflow that builds and tests on Windows, Linux, and macOS. Use the CMake build system already in place. The workflow should:
+- Check out with submodules (deps/hash, deps/testy are git submodules)
+- Configure, build, and run `ctest` on all three platforms
+- Run on push to main and on pull requests
+
+### Tasks
+
+1. **ci-workflow** — Create `.github/workflows/ci.yml` with a matrix strategy:
+   - `os: [ubuntu-latest, macos-latest, windows-latest]`
+   - Steps: checkout (with submodules), cmake configure, cmake build, ctest
+   - Use `Debug` config on Windows (MSVC multi-config), default on Unix
+   - Trigger on: push to main, pull_request
+
+2. **fix-platform-issues** — Fix any build/test failures revealed by CI on Linux/macOS:
+   - Check Unix compile path in `main.c` (`cc` command) — may need `-lm` for math
+   - Check `strdup` availability (POSIX, not C99 — may need `_POSIX_C_SOURCE`)
+   - Check `_popen`/`_pclose` vs `popen`/`pclose` usage
+   - Verify `#ifdef _WIN32` guards are complete
+
+### Dependencies
+```
+ci-workflow → fix-platform-issues (CI reveals what needs fixing)
+```
+
+## Phase 20: Bricks — Clay Package Manager
+
+### Problem
+Clay has no way to share or reuse code beyond `import("path")` with relative file paths. There's no standard library distribution, no dependency resolution, and no way to discover/install community packages.
+
+### Design
+
+**Bricks** is Clay's package manager. Each package (a "brick") is a GitHub repository containing Clay source files and a `brick.json` manifest. The system is intentionally simple — no central registry, no complex version resolution.
+
+#### Package structure
+```
+github.com/user/my-brick/
+  brick.json        ← manifest
+  src/              ← Clay source files
+    main.clay
+    utils.clay
+  test/             ← optional tests
+    test_utils.clay
+  README.md
+```
+
+#### Manifest (`brick.json`)
+```json
+{
+  "name": "my-brick",
+  "version": "0.1.0",
+  "description": "A useful Clay library",
+  "main": "src/main.clay",
+  "deps": {
+    "some-lib": "github.com/user/some-lib@v0.2.0"
+  }
+}
+```
+
+- `name`: package name (kebab-case)
+- `version`: semver string
+- `main`: entry point file (what `import("my-brick")` loads)
+- `deps`: dependency map — `name → github_url@tag`
+
+#### How it works
+
+1. **`clay bricks init`** — Create a `brick.json` in the current directory
+2. **`clay bricks add <url>`** — Add a dependency: clone the repo into `bricks/` directory, add to `brick.json`
+3. **`clay bricks install`** — Clone/update all dependencies from `brick.json` into `bricks/`
+4. **`import("brick-name")`** — Resolve via `bricks/<name>/` directory, load the brick's `main` entry point
+
+#### Local layout after install
+```
+my-project/
+  brick.json
+  main.clay
+  bricks/               ← gitignored, created by `clay bricks install`
+    some-lib/            ← cloned from github
+      brick.json
+      src/main.clay
+    another-lib/
+      ...
+```
+
+#### Import resolution (updated)
+Current: `import("path")` resolves relative to the importing file.
+New: if the path has no `/` or `\` and no `.clay` extension, check `bricks/<name>/` and load its `main` from `brick.json`.
+
+```clay
+import("utils.clay")       // relative file import (unchanged)
+import("some-lib")         // brick import → bricks/some-lib/src/main.clay
+```
+
+### Tasks
+
+1. **brick-manifest** — Define `brick.json` schema. Add parsing in a new `src/compiler/bricks.c` file. Parse `name`, `version`, `main`, `deps` fields. Use a simple JSON subset parser (or just key-value scanning since the format is controlled).
+
+2. **brick-init** — `clay bricks init` command: creates a `brick.json` template in the current directory with name derived from the folder name.
+
+3. **brick-install** — `clay bricks install` command: read `brick.json`, for each dep run `git clone <url> bricks/<name>` (or `git pull` if already exists). Handle `@tag` by checking out the specified tag/branch after clone.
+
+4. **brick-add** — `clay bricks add github.com/user/lib` command: clone the repo to `bricks/`, read its `brick.json` for the name, add to the current project's `brick.json` deps.
+
+5. **brick-import** — Modify the import resolver (parser.c) to check `bricks/<name>/` when the import path has no extension. Read the brick's `brick.json` to find its `main` entry point. Fall back to `bricks/<name>/src/main.clay` if no manifest.
+
+6. **brick-recursive** — Recursive dependency install: when installing a brick, also install its deps (from its `brick.json`). Detect and warn on circular dependencies.
+
+7. **brick-docs** — Document Bricks in README: usage, brick.json format, creating/publishing bricks, import syntax.
+
+### Dependencies
+```
+brick-manifest → brick-init
+brick-manifest → brick-install → brick-add
+brick-manifest → brick-import
+brick-install → brick-recursive
+All → brick-docs
+```
+
+### Design notes
+- **No central registry** — packages are just GitHub repos. Discovery is via GitHub search, READMEs, or community lists.
+- **No complex version resolution** — each dep specifies an exact tag/branch. No semver ranges, no diamond dependency resolution. If two bricks need different versions of the same dep, last-installed wins (with a warning).
+- **Git-based** — requires `git` on PATH. No custom download protocol.
+- **`bricks/` directory** — analogous to `node_modules/`. Should be gitignored. Recreated from `brick.json` via `clay bricks install`.
+- **Transitive deps** — `brick-recursive` handles installing deps of deps, but flattened into a single `bricks/` directory (not nested).
+- **Future enhancements** — lockfile (`brick-lock.json`), semver range resolution, `clay bricks publish` (create GitHub release), `clay bricks search` (GitHub API query).
