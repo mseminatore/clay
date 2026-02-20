@@ -124,6 +124,29 @@ static char *token_strdup(Token *tok) {
     return s;
 }
 
+/* Process C-style escape sequences in a string literal */
+static char *process_escapes(const char *raw, int len) {
+    char *out = (char *)malloc((size_t)len + 1);
+    int j = 0;
+    for (int i = 0; i < len; i++) {
+        if (raw[i] == '\\' && i + 1 < len) {
+            switch (raw[i + 1]) {
+                case 'n':  out[j++] = '\n'; i++; break;
+                case 't':  out[j++] = '\t'; i++; break;
+                case 'r':  out[j++] = '\r'; i++; break;
+                case '\\': out[j++] = '\\'; i++; break;
+                case '"':  out[j++] = '"';  i++; break;
+                case '0':  out[j++] = '\0'; i++; break;
+                default:   out[j++] = raw[i]; break;
+            }
+        } else {
+            out[j++] = raw[i];
+        }
+    }
+    out[j] = '\0';
+    return out;
+}
+
 /* --- Forward declarations --- */
 static AstNode *parse_expression(Parser *p);
 static AstNode *parse_statement(Parser *p);
@@ -191,7 +214,7 @@ static AstNode *parse_primary(Parser *p) {
     /* String literal */
     if (match(p, TOK_STRING)) {
         AstNode *node = ast_new(NODE_STRING_LIT, p->previous.line);
-        node->as.string_lit.value = token_strdup(&p->previous);
+        node->as.string_lit.value = process_escapes(p->previous.start, p->previous.length);
         return node;
     }
 
@@ -214,9 +237,7 @@ static AstNode *parse_primary(Parser *p) {
             /* Emit literal fragment if any */
             if (pos > start) {
                 AstNode *lit = ast_new(NODE_STRING_LIT, line);
-                lit->as.string_lit.value = (char *)malloc((size_t)(pos - start + 1));
-                memcpy(lit->as.string_lit.value, raw + start, (size_t)(pos - start));
-                lit->as.string_lit.value[pos - start] = '\0';
+                lit->as.string_lit.value = process_escapes(raw + start, pos - start);
                 if (!result) {
                     result = lit;
                 } else {

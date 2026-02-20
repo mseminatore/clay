@@ -275,6 +275,8 @@ Integers are tagged values (fast, no allocation). Floats are heap-allocated obje
 
 ### Strings
 
+Strings support C-style escape sequences: `\n` (newline), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (quote).
+
 ```clay
 s = "hello world"
 s length()                          // 11
@@ -292,6 +294,8 @@ s toInt                             // error (not a number)
 "hello" startsWith("he")            // true
 "hello" endsWith("lo")              // true
 "hello" reverse                     // "olleh"
+"line1\nline2" println              // prints two lines
+"col1\tcol2" println                // tab-separated
 ```
 
 ### Comments
