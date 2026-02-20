@@ -20,6 +20,9 @@
 static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
 static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
 
+/* Dispatch table from vm.c for direct chunk execution */
+extern int (*clayvm_dispatch_table[])(clayvm_vm_t *vm);
+
 /* --- Block trampoline ---
  * When a block's value() method is called, this trampoline:
  * 1. Reads chunk_id from self->as.block.env[0]
@@ -37,49 +40,69 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     BcChunk *chunk = g_bc->chunks[chunk_id];
 
-    /* Save old global values for params and set new ones */
-    HashTable *globals = (HashTable *)g_vm->globals;
-    ClayValue saved_params[16];
-    int saved_existed[16];
-
-    for (int i = 0; i < chunk->param_count && i < 16; i++) {
-        const char *pname = chunk->param_names[i];
-        saved_existed[i] = 0;
-
-        if (globals) {
-            ht_value_t old = ht_find(globals, (ht_key_t)pname);
-            if (old) {
-                clayvm_value_t *sv = (clayvm_value_t *)old;
-                saved_params[i] = vm_to_clay(*sv);
-                saved_existed[i] = 1;
-            }
-        }
-
-        /* Store param value as global */
-        ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
-        clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-        *stored = clay_to_vm(val);
-
-        if (saved_existed[i]) {
-            ht_value_t old = ht_find(globals, (ht_key_t)pname);
-            if (old) { free((void *)old); ht_remove(globals, (ht_key_t)pname); }
-        }
-        char *key = strdup(pname);
-        ht_add(globals, (ht_key_t)key, (ht_value_t)stored);
-    }
-
-    /* Save full VM state (re-entrant: vm_run called from within vm_run) */
+    /* Save VM state for re-entrant execution */
     const uint8_t *saved_code = g_vm->code;
     size_t saved_code_len = g_vm->code_len;
     size_t saved_ip = g_vm->ip;
     size_t saved_sp = g_vm->sp;
     int saved_running = g_vm->running;
+    int saved_frame_count = g_vm->frame_count;
 
-    int result = clayvm_vm_run(g_vm, chunk->code, chunk->len);
+    /* Set up the chunk's code — keep sp where it is to avoid clobbering
+     * the caller's stack.  Push a call frame with base_sp = current sp
+     * so GET_LOCAL/SET_LOCAL address our locals correctly. */
+    g_vm->code = chunk->code;
+    g_vm->code_len = chunk->len;
+    g_vm->ip = 0;
+    g_vm->running = 1;
+
+    size_t base = g_vm->sp;   /* locals start here */
+
+    if (g_vm->frame_count < CLAYVM_MAX_FRAMES) {
+        g_vm->frames[g_vm->frame_count].return_ip = 0;
+        g_vm->frames[g_vm->frame_count].base_sp = base;
+        g_vm->frames[g_vm->frame_count].func_index = 0;
+        g_vm->frame_count++;
+    }
+
+    /* Push params as stack locals (slots 0, 1, ...) */
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
+        clayvm_vm_push(g_vm, clay_to_vm(val));
+    }
+
+    /* Push captured values as additional locals (slots param_count, param_count+1, ...) */
+    int capture_count = chunk->capture_count;
+    for (int i = 0; i < capture_count; i++) {
+        ClayValue cv = (1 + i < self->as.block.env_size) ?
+                        self->as.block.env[1 + i] : CLAY_NIL;
+        clayvm_vm_push(g_vm, clay_to_vm(cv));
+    }
+
+    /* Run the dispatch loop manually (can't use vm_run — it resets sp) */
+    while (g_vm->running && g_vm->ip < g_vm->code_len) {
+        uint8_t opcode = g_vm->code[g_vm->ip++];
+        if (opcode >= CLAYVM_OP_COUNT) {
+            g_vm->running = 0;
+            break;
+        }
+        if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
+
+        int rc = clayvm_dispatch_table[opcode](g_vm);
+        if (rc != 0) break;
+    }
+
+    /* Write back captured values from locals to env (by-reference semantics) */
+    for (int i = 0; i < capture_count; i++) {
+        size_t slot = base + (size_t)chunk->param_count + (size_t)i;
+        if (slot < g_vm->sp && (1 + i) < self->as.block.env_size) {
+            self->as.block.env[1 + i] = vm_to_clay(g_vm->stack[slot]);
+        }
+    }
 
     /* Get return value (last value on stack) */
     ClayValue retval = CLAY_NIL;
-    if (result == 0 && g_vm->sp > 0) {
+    if (g_vm->sp > base) {
         retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
     }
 
@@ -89,20 +112,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->ip = saved_ip;
     g_vm->sp = saved_sp;
     g_vm->running = saved_running;
-
-    /* Restore old param globals */
-    for (int i = 0; i < chunk->param_count && i < 16; i++) {
-        const char *pname = chunk->param_names[i];
-        ht_value_t cur = ht_find(globals, (ht_key_t)pname);
-        if (cur) { free((void *)cur); ht_remove(globals, (ht_key_t)pname); }
-
-        if (saved_existed[i]) {
-            clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-            *sv = clay_to_vm(saved_params[i]);
-            char *key = strdup(pname);
-            ht_add(globals, (ht_key_t)key, (ht_value_t)sv);
-        }
-    }
+    g_vm->frame_count = saved_frame_count;
 
     return retval;
 }
@@ -127,33 +137,9 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
     if (ms->chunk_id < 0 || ms->chunk_id >= g_bc->chunk_count) return CLAY_NIL;
 
     BcChunk *chunk = g_bc->chunks[ms->chunk_id];
+
+    /* Save and set self as global (methods access self via global) */
     HashTable *globals = (HashTable *)g_vm->globals;
-
-    /* Save and set params as globals */
-    ClayValue saved_params[16];
-    int saved_existed[16];
-
-    for (int i = 0; i < chunk->param_count && i < 16; i++) {
-        const char *pname = chunk->param_names[i];
-        saved_existed[i] = 0;
-        if (globals) {
-            ht_value_t old = ht_find(globals, (ht_key_t)pname);
-            if (old) {
-                saved_params[i] = vm_to_clay(*(clayvm_value_t *)old);
-                saved_existed[i] = 1;
-            }
-        }
-        ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
-        clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-        *stored = clay_to_vm(val);
-        if (saved_existed[i]) {
-            ht_value_t old_v = ht_find(globals, (ht_key_t)pname);
-            if (old_v) { free((void *)old_v); ht_remove(globals, (ht_key_t)pname); }
-        }
-        ht_add(globals, (ht_key_t)strdup(pname), (ht_value_t)stored);
-    }
-
-    /* Save and set self as global */
     ClayValue saved_self = CLAY_NIL;
     int self_existed = 0;
     if (globals) {
@@ -169,36 +155,55 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
     *self_stored = CLAYVM_OBJ(self);
     ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
 
-    /* Save full VM state and run chunk */
+    /* Save full VM state */
     const uint8_t *saved_code = g_vm->code;
     size_t saved_code_len = g_vm->code_len;
     size_t saved_ip = g_vm->ip;
-    int saved_sp = g_vm->sp;
+    size_t saved_sp = g_vm->sp;
     int saved_running = g_vm->running;
+    int saved_frame_count = g_vm->frame_count;
 
-    /* Save stack contents — clayvm_vm_run resets sp=0 and overwrites stack */
-    clayvm_value_t *stack_backup = NULL;
-    if (saved_sp > 0) {
-        stack_backup = (clayvm_value_t *)malloc((size_t)saved_sp * sizeof(clayvm_value_t));
-        memcpy(stack_backup, g_vm->stack, (size_t)saved_sp * sizeof(clayvm_value_t));
+    /* Set up chunk's code — keep sp to avoid clobbering caller's stack */
+    g_vm->code = chunk->code;
+    g_vm->code_len = chunk->len;
+    g_vm->ip = 0;
+    g_vm->running = 1;
+
+    size_t base = g_vm->sp;
+
+    if (g_vm->frame_count < CLAYVM_MAX_FRAMES) {
+        g_vm->frames[g_vm->frame_count].return_ip = 0;
+        g_vm->frames[g_vm->frame_count].base_sp = base;
+        g_vm->frames[g_vm->frame_count].func_index = 0;
+        g_vm->frame_count++;
     }
 
-    int result = clayvm_vm_run(g_vm, chunk->code, chunk->len);
+    /* Push params as stack locals (slots 0, 1, ...) */
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
+        clayvm_vm_push(g_vm, clay_to_vm(val));
+    }
+
+    /* Run the dispatch loop */
+    while (g_vm->running && g_vm->ip < g_vm->code_len) {
+        uint8_t opcode = g_vm->code[g_vm->ip++];
+        if (opcode >= CLAYVM_OP_COUNT) { g_vm->running = 0; break; }
+        if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
+        int rc = clayvm_dispatch_table[opcode](g_vm);
+        if (rc != 0) break;
+    }
 
     ClayValue retval = CLAY_NIL;
-    if (result == 0 && g_vm->sp > 0)
+    if (g_vm->sp > base)
         retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
 
-    /* Restore stack contents and full VM state */
-    if (stack_backup) {
-        memcpy(g_vm->stack, stack_backup, (size_t)saved_sp * sizeof(clayvm_value_t));
-        free(stack_backup);
-    }
+    /* Restore full VM state */
     g_vm->code = saved_code;
     g_vm->code_len = saved_code_len;
     g_vm->ip = saved_ip;
     g_vm->sp = saved_sp;
     g_vm->running = saved_running;
+    g_vm->frame_count = saved_frame_count;
 
     /* Restore self */
     ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
@@ -207,18 +212,6 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
         clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
         *sv = clay_to_vm(saved_self);
         ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)sv);
-    }
-
-    /* Restore params */
-    for (int i = 0; i < chunk->param_count && i < 16; i++) {
-        const char *pname = chunk->param_names[i];
-        ht_value_t cur = ht_find(globals, (ht_key_t)pname);
-        if (cur) { free((void *)cur); ht_remove(globals, (ht_key_t)pname); }
-        if (saved_existed[i]) {
-            clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-            *sv = clay_to_vm(saved_params[i]);
-            ht_add(globals, (ht_key_t)strdup(pname), (ht_value_t)sv);
-        }
     }
 
     return retval;
@@ -386,20 +379,35 @@ static int native_make_string_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
-/* native_make_block(chunk_id, param_count) */
+/* native_make_block(chunk_id, param_count, capture0, ..., captureN, capture_count) */
 static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
-    (void)argc;
+    /* Pop capture_count (last arg) */
+    clayvm_value_t cc_val = clayvm_vm_pop(vm);
+    int capture_count = (int)cc_val.as.i64;
+
+    /* Pop captured values in reverse order */
+    clayvm_value_t captured[16];
+    for (int i = capture_count - 1; i >= 0; i--) {
+        captured[i] = clayvm_vm_pop(vm);
+    }
+
+    /* Pop param_count and chunk_id */
     clayvm_value_t pc_val = clayvm_vm_pop(vm);
     clayvm_value_t id_val = clayvm_vm_pop(vm);
     int chunk_id = (int)id_val.as.i64;
-    int param_count = (int)pc_val.as.i64;
 
-    /* Create env: env[0] = chunk_id as tagged int */
-    ClayValue *env = (ClayValue *)malloc(sizeof(ClayValue) * 1);
+    (void)pc_val;
+    (void)argc;
+
+    /* Create env: env[0] = chunk_id, env[1..n] = captured values */
+    int env_size = 1 + capture_count;
+    ClayValue *env = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)env_size);
     env[0] = clay_int(chunk_id);
+    for (int i = 0; i < capture_count; i++) {
+        env[1 + i] = vm_to_clay(captured[i]);
+    }
 
-    ClayObject *block = clay_block_new(bc_block_trampoline, env, 1);
-    (void)param_count;
+    ClayObject *block = clay_block_new(bc_block_trampoline, env, env_size);
     clayvm_vm_push(vm, CLAYVM_OBJ(block));
     return 0;
 }
@@ -559,15 +567,221 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
 static void bc_emit_expr(BcCompiler *bc, AstNode *node);
 static void bc_emit_stmt(BcCompiler *bc, AstNode *node);
 
+/* --- Local variable helpers --- */
+
+static int bc_resolve_local(BcCompiler *bc, const char *name) {
+    for (int i = bc->local_count - 1; i >= 0; i--) {
+        if (strcmp(bc->locals[i].name, name) == 0)
+            return bc->locals[i].slot;
+    }
+    return -1; /* not a local */
+}
+
+static int bc_add_local(BcCompiler *bc, const char *name) {
+    if (bc->local_count >= BC_MAX_LOCALS) return -1;
+    int slot = bc->local_count;
+    bc->locals[slot].name = strdup(name);
+    bc->locals[slot].slot = slot;
+    bc->locals[slot].depth = bc->scope_depth;
+    bc->locals[slot].is_captured = 0;
+    bc->local_count++;
+    return slot;
+}
+
+static void bc_begin_scope(BcCompiler *bc) {
+    bc->scope_depth++;
+}
+
+static void bc_end_scope(BcCompiler *bc) {
+    while (bc->local_count > 0 &&
+           bc->locals[bc->local_count - 1].depth >= bc->scope_depth) {
+        bc->local_count--;
+        free(bc->locals[bc->local_count].name);
+        bc->locals[bc->local_count].name = NULL;
+    }
+    bc->scope_depth--;
+}
+
+/* --- Capture scanning --- */
+
+typedef struct {
+    char **names;
+    int   *slots;  /* enclosing scope slot indices */
+    int    count;
+    int    capacity;
+} BcCaptureList;
+
+static void bc_capture_init(BcCaptureList *cl) {
+    cl->names = NULL;
+    cl->slots = NULL;
+    cl->count = 0;
+    cl->capacity = 0;
+}
+
+static int bc_capture_has(BcCaptureList *cl, const char *name) {
+    for (int i = 0; i < cl->count; i++)
+        if (strcmp(cl->names[i], name) == 0) return 1;
+    return 0;
+}
+
+static void bc_capture_add(BcCaptureList *cl, const char *name, int slot) {
+    if (bc_capture_has(cl, name)) return;
+    if (cl->count >= cl->capacity) {
+        cl->capacity = cl->capacity == 0 ? 4 : cl->capacity * 2;
+        cl->names = (char **)realloc(cl->names, sizeof(char *) * (size_t)cl->capacity);
+        cl->slots = (int *)realloc(cl->slots, sizeof(int) * (size_t)cl->capacity);
+    }
+    cl->names[cl->count] = strdup(name);
+    cl->slots[cl->count] = slot;
+    cl->count++;
+}
+
+static void bc_capture_free(BcCaptureList *cl) {
+    for (int i = 0; i < cl->count; i++) free(cl->names[i]);
+    free(cl->names);
+    free(cl->slots);
+    cl->names = NULL;
+    cl->slots = NULL;
+    cl->count = 0;
+    cl->capacity = 0;
+}
+
+static int bc_is_builtin_global(const char *name) {
+    return strcmp(name, "Object") == 0 || strcmp(name, "Number") == 0 ||
+           strcmp(name, "String") == 0 || strcmp(name, "Array") == 0 ||
+           strcmp(name, "Block") == 0 || strcmp(name, "Nil") == 0 ||
+           strcmp(name, "Boolean") == 0 || strcmp(name, "Error") == 0 ||
+           strcmp(name, "Dict") == 0 || strcmp(name, "Math") == 0 ||
+           strcmp(name, "Console") == 0 || strcmp(name, "File") == 0 ||
+           strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
+           strcmp(name, "nil") == 0;
+}
+
+static int bc_name_in_list(const char *name, char **list, int count) {
+    for (int i = 0; i < count; i++)
+        if (strcmp(list[i], name) == 0) return 1;
+    return 0;
+}
+
+/* Resolve a name against the current scope's locals (for capture scanning).
+ * Called from NODE_BLOCK before entering bc_compile_chunk, so bc->locals
+ * contains the enclosing scope's locals.
+ * Returns the slot index if found, -1 otherwise. */
+static int bc_resolve_enclosing(BcCompiler *bc, const char *name) {
+    for (int i = bc->local_count - 1; i >= 0; i--) {
+        if (strcmp(bc->locals[i].name, name) == 0)
+            return bc->locals[i].slot;
+    }
+    return -1; /* not in enclosing scope */
+}
+
+static void bc_scan_free_vars(AstNode *node, char **block_params, int param_count,
+                              BcCaptureList *caps, BcCompiler *bc);
+
+static void bc_scan_free_vars_list(NodeList *list, char **block_params, int param_count,
+                                   BcCaptureList *caps, BcCompiler *bc) {
+    for (int i = 0; i < list->count; i++)
+        bc_scan_free_vars(list->items[i], block_params, param_count, caps, bc);
+}
+
+static void bc_scan_free_vars(AstNode *node, char **block_params, int param_count,
+                              BcCaptureList *caps, BcCompiler *bc) {
+    if (!node) return;
+    switch (node->type) {
+        case NODE_IDENT: {
+            const char *name = node->as.ident.name;
+            if (bc_is_builtin_global(name)) break;
+            if (bc_name_in_list(name, block_params, param_count)) break;
+            if (bc_capture_has(caps, name)) break;
+            /* Check if it's a local in the enclosing scope */
+            int slot = bc_resolve_enclosing(bc, name);
+            if (slot >= 0) {
+                bc_capture_add(caps, name, slot);
+            }
+            break;
+        }
+        case NODE_BLOCK:
+            /* Scan INTO nested blocks to find transitive captures.
+             * Variables used in a nested block that aren't the nested
+             * block's own params still need to be captured at THIS level
+             * so they're available when the nested block captures them. */
+            {
+                int nested_pc = node->as.block.params.count;
+                char **nested_params = NULL;
+                /* Build combined exclusion list: current params + nested params */
+                int combined_count = param_count + nested_pc;
+                char **combined = NULL;
+                if (combined_count > 0) {
+                    combined = (char **)malloc(sizeof(char *) * (size_t)combined_count);
+                    for (int i = 0; i < param_count; i++)
+                        combined[i] = block_params[i];
+                    for (int i = 0; i < nested_pc; i++)
+                        combined[param_count + i] = node->as.block.params.items[i]->as.ident.name;
+                    nested_params = combined;
+                }
+                bc_scan_free_vars_list(&node->as.block.body,
+                                       nested_params, combined_count, caps, bc);
+                free(combined);
+            }
+            break;
+        case NODE_INT_LIT:
+        case NODE_FLOAT_LIT:
+        case NODE_STRING_LIT:
+        case NODE_SELF:
+            break;
+        case NODE_SEND:
+            bc_scan_free_vars(node->as.send.receiver, block_params, param_count, caps, bc);
+            bc_scan_free_vars_list(&node->as.send.args, block_params, param_count, caps, bc);
+            break;
+        case NODE_BINARY:
+            bc_scan_free_vars(node->as.binary.left, block_params, param_count, caps, bc);
+            bc_scan_free_vars(node->as.binary.right, block_params, param_count, caps, bc);
+            break;
+        case NODE_ASSIGN:
+            bc_scan_free_vars(node->as.assign.value, block_params, param_count, caps, bc);
+            break;
+        case NODE_CLONE:
+            bc_scan_free_vars(node->as.clone.proto, block_params, param_count, caps, bc);
+            bc_scan_free_vars_list(&node->as.clone.members, block_params, param_count, caps, bc);
+            break;
+        case NODE_METHOD_DEF:
+            bc_scan_free_vars_list(&node->as.method_def.body, block_params, param_count, caps, bc);
+            break;
+        case NODE_SLOT_DEF:
+            bc_scan_free_vars(node->as.slot_def.value, block_params, param_count, caps, bc);
+            break;
+        case NODE_ARRAY_LIT:
+            bc_scan_free_vars_list(&node->as.array_lit.elements, block_params, param_count, caps, bc);
+            break;
+        case NODE_TRY_CATCH:
+            bc_scan_free_vars(node->as.try_catch.try_block, block_params, param_count, caps, bc);
+            if (node->as.try_catch.catch_block)
+                bc_scan_free_vars(node->as.try_catch.catch_block, block_params, param_count, caps, bc);
+            break;
+        case NODE_RAISE:
+            bc_scan_free_vars(node->as.raise.expr, block_params, param_count, caps, bc);
+            break;
+        case NODE_SLOT_ASSIGN:
+            bc_scan_free_vars(node->as.slot_assign.receiver, block_params, param_count, caps, bc);
+            bc_scan_free_vars(node->as.slot_assign.value, block_params, param_count, caps, bc);
+            break;
+        default:
+            break;
+    }
+}
+
 /* Compile a block/method body into a new bytecode chunk.
+ * If captures is non-NULL, register captured variable names as locals
+ * after params (slots param_count, param_count+1, ...).
  * Returns the chunk_id, or -1 on error. */
-static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
+static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
+                            BcCaptureList *captures) {
     if (bc->chunk_count >= BC_MAX_CHUNKS) {
         bc->had_error = 1;
         return -1;
     }
 
-    int chunk_id = bc->chunk_count;
+    int chunk_id = bc->chunk_count++;
 
     /* Allocate chunk on heap */
     BcChunk *chunk = (BcChunk *)calloc(1, sizeof(BcChunk));
@@ -579,7 +793,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
         chunk->param_names[i] = strdup(params->items[i]->as.ident.name);
     }
 
-    /* Save current bytecode */
+    /* Save current bytecode and local scope */
     uint8_t *outer_buf = NULL;
     size_t saved_len = bc->len;
     if (saved_len > 0) {
@@ -587,7 +801,35 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
         memcpy(outer_buf, bc->code, saved_len);
     }
 
+    /* Save outer local state */
+    BcLocal saved_locals[BC_MAX_LOCALS];
+    int saved_local_count = bc->local_count;
+    int saved_scope_depth = bc->scope_depth;
+    BcLocal *saved_enclosing = bc->enclosing_locals;
+    int saved_enclosing_count = bc->enclosing_local_count;
+    if (saved_local_count > 0)
+        memcpy(saved_locals, bc->locals, sizeof(BcLocal) * (size_t)saved_local_count);
+
+    /* Set enclosing locals for capture scanning later */
+    bc->enclosing_locals = saved_local_count > 0 ? saved_locals : NULL;
+    bc->enclosing_local_count = saved_local_count;
+
+    /* Start fresh local scope for chunk */
+    bc->local_count = 0;
+    bc->scope_depth = 0;
     bc->len = 0;
+
+    /* Register params as locals (slot 0, 1, ...) */
+    for (int i = 0; i < chunk->param_count && i < 16; i++) {
+        bc_add_local(bc, chunk->param_names[i]);
+    }
+
+    /* Register captured variables as locals (slots after params) */
+    if (captures) {
+        for (int i = 0; i < captures->count && i < 16; i++) {
+            bc_add_local(bc, captures->names[i]);
+        }
+    }
 
     /* Compile body: intermediate stmts POP, last expr stays on stack */
     for (int i = 0; i < body->count; i++) {
@@ -606,6 +848,8 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
             (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
     }
 
+    chunk->local_count = bc->local_count;
+
     emit_op(bc, CLAYVM_OP_HALT);
 
     /* Copy compiled bytecode to chunk */
@@ -613,15 +857,26 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
     if (chunk->len > BC_CHUNK_CODE) chunk->len = BC_CHUNK_CODE;
     memcpy(chunk->code, bc->code, chunk->len);
 
-    /* Restore outer code buffer */
+    /* Restore outer code buffer and local state */
     bc->len = saved_len;
     if (outer_buf) {
         memcpy(bc->code, outer_buf, saved_len);
         free(outer_buf);
     }
 
+    /* Free chunk-local names (they were strdup'd by bc_add_local) */
+    for (int i = 0; i < bc->local_count; i++) {
+        free(bc->locals[i].name);
+    }
+
+    bc->local_count = saved_local_count;
+    bc->scope_depth = saved_scope_depth;
+    bc->enclosing_locals = saved_enclosing;
+    bc->enclosing_local_count = saved_enclosing_count;
+    if (saved_local_count > 0)
+        memcpy(bc->locals, saved_locals, sizeof(BcLocal) * (size_t)saved_local_count);
+
     bc->chunks[chunk_id] = chunk;
-    bc->chunk_count++;
     return chunk_id;
 }
 
@@ -649,12 +904,18 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_IDENT: {
-            /* Load global variable via native call */
-            int name_idx = add_constant_string(bc, node->as.ident.name);
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
-            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            emit_u16(bc, (uint16_t)bc->native_load_global);
-            emit_byte(bc, 1);
+            /* Check locals first, fall back to global */
+            int slot = bc_resolve_local(bc, node->as.ident.name);
+            if (slot >= 0) {
+                emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
+            } else {
+                /* Load global variable via native call */
+                int name_idx = add_constant_string(bc, node->as.ident.name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_load_global);
+                emit_byte(bc, 1);
+            }
             break;
         }
 
@@ -669,14 +930,22 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_ASSIGN: {
-            /* Push name first, compile value, call store_global */
-            int name_idx = add_constant_string(bc, node->as.assign.name);
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
-            bc_emit_expr(bc, node->as.assign.value);
-            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            emit_u16(bc, (uint16_t)bc->native_store_global);
-            emit_byte(bc, 2);
-            /* Result left on stack for expression use */
+            /* Check if assigning to an existing local */
+            int slot = bc_resolve_local(bc, node->as.assign.name);
+            if (slot >= 0) {
+                bc_emit_expr(bc, node->as.assign.value);
+                emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
+                /* SET_LOCAL doesn't pop — value stays on stack */
+            } else {
+                /* Global: push name first, compile value, call store_global */
+                int name_idx = add_constant_string(bc, node->as.assign.name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+                bc_emit_expr(bc, node->as.assign.value);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_store_global);
+                emit_byte(bc, 2);
+                /* Result left on stack for expression use */
+            }
             break;
         }
 
@@ -728,21 +997,62 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_BLOCK: {
-            /* Compile block body to a new chunk */
-            int chunk_id = bc_compile_chunk(bc, &node->as.block.body, &node->as.block.params);
+            /* Scan for free variables BEFORE compiling the chunk
+             * (enclosing_locals is set up inside bc_compile_chunk) */
+            char **param_names = NULL;
+            int param_count = node->as.block.params.count;
+            if (param_count > 0) {
+                param_names = (char **)malloc(sizeof(char *) * (size_t)param_count);
+                for (int i = 0; i < param_count; i++)
+                    param_names[i] = node->as.block.params.items[i]->as.ident.name;
+            }
+
+            BcCaptureList caps;
+            bc_capture_init(&caps);
+            for (int i = 0; i < node->as.block.body.count; i++)
+                bc_scan_free_vars(node->as.block.body.items[i],
+                                  param_names, param_count, &caps, bc);
+            free(param_names);
+
+            /* Compile block body to a new chunk (with capture locals) */
+            int chunk_id = bc_compile_chunk(bc, &node->as.block.body,
+                                            &node->as.block.params, &caps);
             if (chunk_id < 0) {
+                bc_capture_free(&caps);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
                     (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
                 break;
             }
-            /* Emit: push chunk_id, push param_count, call native_make_block */
+
+            /* Store capture info in the chunk */
+            BcChunk *chunk = bc->chunks[chunk_id];
+            chunk->capture_count = caps.count < 16 ? caps.count : 16;
+            for (int i = 0; i < chunk->capture_count; i++) {
+                chunk->capture_names[i] = strdup(caps.names[i]);
+                chunk->capture_slots[i] = caps.slots[i];
+            }
+
+            /* Emit: push chunk_id, push param_count */
             int id_idx = add_constant_int(bc, chunk_id);
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)id_idx);
             int pc_idx = add_constant_int(bc, node->as.block.params.count);
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)pc_idx);
+
+            /* Push captured values (read from enclosing scope's locals) */
+            for (int i = 0; i < chunk->capture_count; i++) {
+                emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)caps.slots[i]);
+            }
+
+            /* Push capture_count */
+            int cc_idx = add_constant_int(bc, chunk->capture_count);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)cc_idx);
+
+            /* call native_make_block(chunk_id, param_count, captures..., capture_count) */
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
             emit_u16(bc, (uint16_t)bc->native_make_block);
-            emit_byte(bc, 2);
+            emit_byte(bc, (uint8_t)(3 + chunk->capture_count));
+
+            bc_capture_free(&caps);
             break;
         }
 
@@ -789,7 +1099,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     /* Compile method body to a chunk */
                     int chunk_id = bc_compile_chunk(bc,
                         &member->as.method_def.body,
-                        &member->as.method_def.params);
+                        &member->as.method_def.params, NULL);
                     if (chunk_id < 0 || g_method_slot_count >= 32) continue;
 
                     /* Register in method slot table */
@@ -833,35 +1143,42 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     bc->current_line = node->line;
 
     if (node->type == NODE_ASSIGN) {
-        /* Push name first, then compile value */
-        int name_idx = add_constant_string(bc, node->as.assign.name);
-        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
-        bc_emit_expr(bc, node->as.assign.value);
-        /* Stack: name, value. store_global pops val then name. Correct! */
-        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-        emit_u16(bc, (uint16_t)bc->native_store_global);
-        emit_byte(bc, 2);
-        emit_op(bc, CLAYVM_OP_POP); /* discard result */
+        /* Check if assigning to an existing local */
+        int slot = bc_resolve_local(bc, node->as.assign.name);
+        if (slot >= 0) {
+            bc_emit_expr(bc, node->as.assign.value);
+            emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
+            emit_op(bc, CLAYVM_OP_POP); /* discard (stmt context) */
+        } else {
+            /* Global: push name first, then compile value */
+            int name_idx = add_constant_string(bc, node->as.assign.name);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+            bc_emit_expr(bc, node->as.assign.value);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_store_global);
+            emit_byte(bc, 2);
+            emit_op(bc, CLAYVM_OP_POP); /* discard result */
 
-        /* Auto-set _name slot on clone results: Cat = Object clone → Cat._name = "Cat" */
-        if (is_clone_expr(node->as.assign.value)) {
-            /* Load the just-stored global back */
-            int load_name = add_constant_string(bc, node->as.assign.name);
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)load_name);
-            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            emit_u16(bc, (uint16_t)bc->native_load_global);
-            emit_byte(bc, 1);
-            /* Push slot name "_name" */
-            int slot_name = add_constant_string(bc, "_name");
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)slot_name);
-            /* Push the variable name as value */
-            int val_name = add_constant_string(bc, node->as.assign.name);
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)val_name);
-            /* set_slot(obj, name, value) */
-            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            emit_u16(bc, (uint16_t)bc->native_set_slot);
-            emit_byte(bc, 3);
-            emit_op(bc, CLAYVM_OP_POP);
+            /* Auto-set _name slot on clone results: Cat = Object clone → Cat._name = "Cat" */
+            if (is_clone_expr(node->as.assign.value)) {
+                /* Load the just-stored global back */
+                int load_name = add_constant_string(bc, node->as.assign.name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)load_name);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_load_global);
+                emit_byte(bc, 1);
+                /* Push slot name "_name" */
+                int slot_name = add_constant_string(bc, "_name");
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)slot_name);
+                /* Push the variable name as value */
+                int val_name = add_constant_string(bc, node->as.assign.name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)val_name);
+                /* set_slot(obj, name, value) */
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_set_slot);
+                emit_byte(bc, 3);
+                emit_op(bc, CLAYVM_OP_POP);
+            }
         }
         return;
     }

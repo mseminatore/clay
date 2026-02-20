@@ -22,7 +22,22 @@ typedef struct {
     size_t  len;
     int     param_count;
     char   *param_names[16]; /* up to 16 params */
+    int     capture_count;
+    char   *capture_names[16]; /* names of captured variables */
+    int     capture_slots[16]; /* enclosing scope slot index for each capture */
+    int     local_count;       /* total locals (params + temps) in this chunk */
 } BcChunk;
+
+/* Local variable tracking for compile-time scope resolution */
+typedef struct {
+    char *name;
+    int   slot;    /* stack slot relative to frame base */
+    int   depth;   /* scope depth (0 = chunk-level) */
+    int   is_captured; /* set if an inner block captures this local */
+} BcLocal;
+
+#define BC_MAX_LOCALS  256
+#define BC_MAX_SCOPE_DEPTH 16
 
 /* Bytecode compilation context */
 typedef struct {
@@ -58,6 +73,15 @@ typedef struct {
     /* Source line map: line_map[offset] = source line number */
     int line_map[BC_MAX_CODE];
     int current_line;
+
+    /* Local variable tracking for current compilation scope */
+    BcLocal locals[BC_MAX_LOCALS];
+    int     local_count;
+    int     scope_depth;
+
+    /* Enclosing scope locals (for capture scanning) */
+    BcLocal *enclosing_locals;  /* pointer to outer scope's locals */
+    int      enclosing_local_count;
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);

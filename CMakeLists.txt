@@ -44,6 +44,7 @@ set(VM_SOURCES
     src/vm/generated/assembler.c
     src/vm/generated/disasm.c
     src/vm/generated/strings.c
+    src/vm/generated/closures.c
     src/vm/generated/bytecode.c
     src/vm/generated/verify.c
     src/vm/generated/optimizer.c
@@ -52,23 +53,30 @@ set(VM_SOURCES
 add_library(clayvm STATIC ${VM_SOURCES})
 target_include_directories(clayvm PUBLIC src/vm/generated)
 
-# Compiler binary
-add_executable(clay_compiler
-    src/compiler/main.c
+# Compiler library (for testing — everything except main.c)
+add_library(clay_compiler_lib STATIC
     src/compiler/lexer.c
     src/compiler/parser.c
     src/compiler/ast.c
     src/compiler/codegen.c
     src/compiler/bc_compiler.c
 )
+target_include_directories(clay_compiler_lib PUBLIC src/compiler src/vm/generated src/runtime)
+target_compile_definitions(clay_compiler_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(clay_compiler_lib clayvm clay_runtime)
+
+# Compiler binary
+add_executable(clay_compiler
+    src/compiler/main.c
+)
 target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime)
 target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(clay_compiler clayvm clay_runtime)
+target_link_libraries(clay_compiler clay_compiler_lib clayvm clay_runtime)
 set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 
 # Test runner
 add_executable(test_runner test/test_runtime.c)
-target_link_libraries(test_runner clay_runtime testy)
+target_link_libraries(test_runner clay_runtime clay_compiler_lib clayvm testy)
 
 enable_testing()
 add_test(NAME clay_tests COMMAND test_runner)

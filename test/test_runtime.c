@@ -3,6 +3,9 @@
  */
 #include "test.h"
 #include "clay.h"
+#include "parser.h"
+#include "bc_compiler.h"
+#include "vm.h"
 
 static void test_tagged_values(void) {
     SUITE("Tagged Values");
@@ -689,6 +692,138 @@ static void test_constructors(void) {
     clay_release(Proto);
 }
 
+/* Helper: compile and run Clay source via bytecode VM, return last stack value.
+ * The VM and compiler are initialized/destroyed per call for isolation. */
+static ClayValue vm_eval(const char *source) {
+    clayvm_vm_t vm;
+    clayvm_vm_init(&vm);
+    BcCompiler bc;
+    bc_compiler_init(&bc, &vm);
+
+    Parser parser;
+    parser_init(&parser, source, "<test>");
+    AstNode *program = parser_parse(&parser);
+    if (!program || parser.had_error) {
+        if (program) ast_free(program);
+        return CLAY_NIL;
+    }
+
+    bc.len = 0;
+    bc.had_error = 0;
+    if (bc_compile(&bc, program) != 0) {
+        ast_free(program);
+        return CLAY_NIL;
+    }
+
+    vm.sp = 0;
+    int rc = clayvm_vm_run(&vm, bc.code, bc.len);
+    ClayValue result = CLAY_NIL;
+    if (rc == 0 && vm.sp > 0) {
+        result = vm_to_clay(vm.stack[vm.sp - 1]);
+    }
+
+    ast_free(program);
+    return result;
+}
+
+static void test_vm_captures(void) {
+    SUITE("VM Closures & Captures");
+
+    COMMENT("basic capture — inner block reads outer param...");
+    {
+        ClayValue r = vm_eval(
+            "wrap = { |n| { n } }\n"
+            "getter = wrap value(42)\n"
+            "getter value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 42);
+    }
+
+    COMMENT("makeAdder pattern — capture + arithmetic...");
+    {
+        ClayValue r = vm_eval(
+            "makeAdder = { |n| { |x| n + x } }\n"
+            "add5 = makeAdder value(5)\n"
+            "add5 value(10)\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 15);
+    }
+
+    COMMENT("capture survives scope exit...");
+    {
+        ClayValue r = vm_eval(
+            "maker = { |a| { |b| a * b } }\n"
+            "mul7 = maker value(7)\n"
+            "mul7 value(6)\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 42);
+    }
+
+    COMMENT("3-level nested capture...");
+    {
+        ClayValue r = vm_eval(
+            "f = { |a| { |b| { a * b } } }\n"
+            "g = f value(3)\n"
+            "h = g value(5)\n"
+            "h value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 15);
+    }
+
+    COMMENT("multiple captured variables...");
+    {
+        ClayValue r = vm_eval(
+            "pair = { |a, b| { a + b } }\n"
+            "sum = pair value(10, 20)\n"
+            "sum value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 30);
+    }
+
+    COMMENT("string capture...");
+    {
+        ClayValue r = vm_eval(
+            "greet = { |g| { |n| g + \" \" + n } }\n"
+            "hello = greet value(\"Hello\")\n"
+            "hello value(\"World\")\n");
+        TEST(!CLAY_IS_NIL(r));
+        TEST(!CLAY_IS_INT(r));
+        ClayObject *obj = CLAY_OBJ(r);
+        TEST(strcmp(clay_string_data(obj), "Hello World") == 0);
+    }
+
+    COMMENT("top-level variables remain globals (not captured)...");
+    {
+        /* Top-level assigns use globals, so a block reading x
+         * always gets the current global value (late binding). */
+        ClayValue r = vm_eval(
+            "x = 10\n"
+            "getter = { x }\n"
+            "getter value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 10);
+    }
+
+    COMMENT("simple block without captures still works...");
+    {
+        ClayValue r = vm_eval(
+            "doubler = { |x| x * 2 }\n"
+            "doubler value(21)\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 42);
+    }
+
+    COMMENT("capture with write-back...");
+    {
+        ClayValue r = vm_eval(
+            "makeCounter = { |start| { start = start + 1; start } }\n"
+            "counter = makeCounter value(0)\n"
+            "counter value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 1);
+    }
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -710,6 +845,7 @@ void test_main(int argc, char *argv[]) {
     test_dict();
     test_slot_access();
     test_constructors();
+    test_vm_captures();
 
     clay_shutdown();
 }

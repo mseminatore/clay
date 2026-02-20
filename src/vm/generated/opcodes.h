@@ -32,7 +32,12 @@ typedef enum {
     CLAYVM_OP_CALL_NATIVE = 19,
     CLAYVM_OP_RETURN = 20,
     CLAYVM_OP_HALT = 21,
-    CLAYVM_OP_COUNT = 22
+    CLAYVM_OP_GET_LOCAL = 22,
+    CLAYVM_OP_SET_LOCAL = 23,
+    CLAYVM_OP_GET_UPVALUE = 24,
+    CLAYVM_OP_SET_UPVALUE = 25,
+    CLAYVM_OP_CLOSE_UPVALUE = 26,
+    CLAYVM_OP_COUNT = 27
 } clayvm_opcode_t;
 
 static const char *clayvm_opcode_names[] = {
@@ -58,6 +63,11 @@ static const char *clayvm_opcode_names[] = {
     "CALL_NATIVE",
     "RETURN",
     "HALT",
+    "GET_LOCAL",
+    "SET_LOCAL",
+    "GET_UPVALUE",
+    "SET_UPVALUE",
+    "CLOSE_UPVALUE",
 };
 
 static const int clayvm_operand_counts[] = {
@@ -83,6 +93,11 @@ static const int clayvm_operand_counts[] = {
     2,  /* CALL_NATIVE */
     0,  /* RETURN */
     0,  /* HALT */
+    1,  /* GET_LOCAL */
+    1,  /* SET_LOCAL */
+    1,  /* GET_UPVALUE */
+    1,  /* SET_UPVALUE */
+    1,  /* CLOSE_UPVALUE */
 };
 
 /* Total instruction size in bytes (1 opcode byte + operands) */
@@ -109,6 +124,11 @@ static const int clayvm_instruction_sizes[] = {
     4,  /* CALL_NATIVE */
     1,  /* RETURN */
     1,  /* HALT */
+    3,  /* GET_LOCAL */
+    3,  /* SET_LOCAL */
+    3,  /* GET_UPVALUE */
+    3,  /* SET_UPVALUE */
+    3,  /* CLOSE_UPVALUE */
 };
 
 #endif /* CLAYVM_OPCODES_H */

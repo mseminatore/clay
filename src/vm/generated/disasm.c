@@ -87,6 +87,21 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
     case CLAYVM_OP_HALT:
         printf("\n");
         break;
+    case CLAYVM_OP_GET_LOCAL:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_SET_LOCAL:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_GET_UPVALUE:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_SET_UPVALUE:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_CLOSE_UPVALUE:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
     default:
         printf("\n");
         break;
@@ -207,6 +222,26 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         break;
     case CLAYVM_OP_HALT:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_GET_LOCAL:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_SET_LOCAL:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_GET_UPVALUE:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_SET_UPVALUE:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_CLOSE_UPVALUE:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
         if (n > 0) written += n;
         break;
     default:

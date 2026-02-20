@@ -49,7 +49,12 @@ typedef enum {
     CLAYVM_OP_CALL_NATIVE = 19,
     CLAYVM_OP_RETURN = 20,
     CLAYVM_OP_HALT = 21,
-    CLAYVM_OP_COUNT = 22
+    CLAYVM_OP_GET_LOCAL = 22,
+    CLAYVM_OP_SET_LOCAL = 23,
+    CLAYVM_OP_GET_UPVALUE = 24,
+    CLAYVM_OP_SET_UPVALUE = 25,
+    CLAYVM_OP_CLOSE_UPVALUE = 26,
+    CLAYVM_OP_COUNT = 27
 } clayvm_opcode_t;
 
 static const char *clayvm_opcode_names[] = {
@@ -75,6 +80,11 @@ static const char *clayvm_opcode_names[] = {
     "CALL_NATIVE",
     "RETURN",
     "HALT",
+    "GET_LOCAL",
+    "SET_LOCAL",
+    "GET_UPVALUE",
+    "SET_UPVALUE",
+    "CLOSE_UPVALUE",
 };
 
 static const int clayvm_operand_counts[] = {
@@ -100,6 +110,11 @@ static const int clayvm_operand_counts[] = {
     2,  /* CALL_NATIVE */
     0,  /* RETURN */
     0,  /* HALT */
+    1,  /* GET_LOCAL */
+    1,  /* SET_LOCAL */
+    1,  /* GET_UPVALUE */
+    1,  /* SET_UPVALUE */
+    1,  /* CLOSE_UPVALUE */
 };
 
 /* Total instruction size in bytes (1 opcode byte + operands) */
@@ -126,6 +141,11 @@ static const int clayvm_instruction_sizes[] = {
     4,  /* CALL_NATIVE */
     1,  /* RETURN */
     1,  /* HALT */
+    3,  /* GET_LOCAL */
+    3,  /* SET_LOCAL */
+    3,  /* GET_UPVALUE */
+    3,  /* SET_UPVALUE */
+    3,  /* CLOSE_UPVALUE */
 };
 
 
@@ -153,6 +173,32 @@ void clayvm_string_table_init(clayvm_string_table_t *table);
 void clayvm_string_table_free(clayvm_string_table_t *table);
 clayvm_string_t *clayvm_string_intern(clayvm_string_table_t *table, const char *str, size_t len);
 clayvm_string_t *clayvm_string_find(clayvm_string_table_t *table, const char *str, size_t len);
+
+
+/* --- closures.h --- */
+
+
+#include <stdint.h>
+#include <stddef.h>
+
+typedef struct clayvm_upvalue {
+    int64_t *location;
+    int64_t closed;
+    int is_closed;
+    struct clayvm_upvalue *next;
+} clayvm_upvalue_t;
+
+typedef struct {
+    uint16_t function_index;
+    clayvm_upvalue_t **upvalues;
+    int upvalue_count;
+} clayvm_closure_t;
+
+int  clayvm_init_closure(clayvm_closure_t *closure, uint16_t fn_index, int upvalue_count);
+void clayvm_free_closure(clayvm_closure_t *closure);
+int64_t clayvm_get_upvalue(clayvm_closure_t *closure, int index);
+void clayvm_set_upvalue(clayvm_closure_t *closure, int index, int64_t value);
+void clayvm_close_upvalue(clayvm_upvalue_t *upvalue);
 
 
 /* --- native.h --- */
@@ -499,6 +545,51 @@ clayvm_string_t *clayvm_string_intern(clayvm_string_table_t *table, const char *
     return s;
 }
 
+/* --- closures.c --- */
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+int clayvm_init_closure(clayvm_closure_t *closure, uint16_t fn_index, int upvalue_count) {
+    closure->function_index = fn_index;
+    closure->upvalue_count = upvalue_count;
+    closure->upvalues = NULL;
+    if (upvalue_count > 0) {
+        closure->upvalues = (clayvm_upvalue_t **)calloc((size_t)upvalue_count, sizeof(clayvm_upvalue_t *));
+        if (!closure->upvalues) {
+            fprintf(stderr, "closures: out of memory\n");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+void clayvm_free_closure(clayvm_closure_t *closure) {
+    free(closure->upvalues);
+    closure->upvalues = NULL;
+    closure->upvalue_count = 0;
+}
+
+int64_t clayvm_get_upvalue(clayvm_closure_t *closure, int index) {
+    if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
+        return 0;
+    return *closure->upvalues[index]->location;
+}
+
+void clayvm_set_upvalue(clayvm_closure_t *closure, int index, int64_t value) {
+    if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
+        return;
+    *closure->upvalues[index]->location = value;
+}
+
+void clayvm_close_upvalue(clayvm_upvalue_t *upvalue) {
+    if (!upvalue || upvalue->is_closed) return;
+    upvalue->closed = *upvalue->location;
+    upvalue->location = &upvalue->closed;
+    upvalue->is_closed = 1;
+}
+
 /* --- native.c --- */
 
 #include <stdlib.h>
@@ -771,6 +862,39 @@ static int handle_HALT(clayvm_vm_t *vm) {
     return 0;
 }
 
+static int handle_GET_LOCAL(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+    return 0;
+}
+
+static int handle_SET_LOCAL(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+    return 0;
+}
+
+static int handle_GET_UPVALUE(clayvm_vm_t *vm) {
+    uint16_t index = READ_UINT16();
+    /* Upvalue access is handled through native calls for now */
+    (void)index;
+    return 0;
+}
+
+static int handle_SET_UPVALUE(clayvm_vm_t *vm) {
+    uint16_t index = READ_UINT16();
+    /* Upvalue write is handled through native calls for now */
+    (void)index;
+    return 0;
+}
+
+static int handle_CLOSE_UPVALUE(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    /* Close upvalue is handled through native calls for now */
+    (void)slot;
+    return 0;
+}
+
 static clayvm_handler_t clayvm_dispatch_table[] = {
     handle_PUSH_CONST,
     handle_POP,
@@ -794,6 +918,11 @@ static clayvm_handler_t clayvm_dispatch_table[] = {
     handle_CALL_NATIVE,
     handle_RETURN,
     handle_HALT,
+    handle_GET_LOCAL,
+    handle_SET_LOCAL,
+    handle_GET_UPVALUE,
+    handle_SET_UPVALUE,
+    handle_CLOSE_UPVALUE,
 };
 
 int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
@@ -827,6 +956,11 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         &&op_CALL_NATIVE,
         &&op_RETURN,
         &&op_HALT,
+        &&op_GET_LOCAL,
+        &&op_SET_LOCAL,
+        &&op_GET_UPVALUE,
+        &&op_SET_UPVALUE,
+        &&op_CLOSE_UPVALUE,
     };
 
 #define DISPATCH() goto *dispatch_table[vm->code[vm->ip++]]
@@ -1049,6 +1183,54 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         return 0;
     }
 
+    op_GET_LOCAL: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+        DISPATCH();
+    }
+
+    op_SET_LOCAL: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        DISPATCH();
+    }
+
+    op_GET_UPVALUE: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t index = READ_UINT16();
+        /* Upvalue access is handled through native calls for now */
+        (void)index;
+        DISPATCH();
+    }
+
+    op_SET_UPVALUE: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t index = READ_UINT16();
+        /* Upvalue write is handled through native calls for now */
+        (void)index;
+        DISPATCH();
+    }
+
+    op_CLOSE_UPVALUE: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        /* Close upvalue is handled through native calls for now */
+        (void)slot;
+        DISPATCH();
+    }
+
 #undef DISPATCH
 #else
     while (vm->running && vm->ip < vm->code_len) {
@@ -1203,6 +1385,34 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_HALT: {
         return 0;
     }
+    case CLAYVM_OP_GET_LOCAL: {
+        uint16_t slot = READ_UINT16();
+        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL: {
+        uint16_t slot = READ_UINT16();
+        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        break;
+    }
+    case CLAYVM_OP_GET_UPVALUE: {
+        uint16_t index = READ_UINT16();
+        /* Upvalue access is handled through native calls for now */
+        (void)index;
+        break;
+    }
+    case CLAYVM_OP_SET_UPVALUE: {
+        uint16_t index = READ_UINT16();
+        /* Upvalue write is handled through native calls for now */
+        (void)index;
+        break;
+    }
+    case CLAYVM_OP_CLOSE_UPVALUE: {
+        uint16_t slot = READ_UINT16();
+        /* Close upvalue is handled through native calls for now */
+        (void)slot;
+        break;
+    }
     default: {
         char msg[64];
         snprintf(msg, sizeof(msg), "unknown opcode %d at ip %zu",
@@ -1334,6 +1544,21 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_RETURN);
     } else if (strcmp(mnemonic, "HALT") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_HALT);
+    } else if (strcmp(mnemonic, "GET_LOCAL") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_LOCAL);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "SET_LOCAL") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "GET_UPVALUE") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_UPVALUE);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "SET_UPVALUE") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_UPVALUE);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "CLOSE_UPVALUE") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_CLOSE_UPVALUE);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else {
         fprintf(stderr, "assembler: unknown mnemonic '%s'\n", mnemonic);
         as->error = 1;
@@ -1442,6 +1667,21 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
         break;
     case CLAYVM_OP_HALT:
         printf("\n");
+        break;
+    case CLAYVM_OP_GET_LOCAL:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_SET_LOCAL:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_GET_UPVALUE:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_SET_UPVALUE:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        break;
+    case CLAYVM_OP_CLOSE_UPVALUE:
+        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
         break;
     default:
         printf("\n");
@@ -1563,6 +1803,26 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         break;
     case CLAYVM_OP_HALT:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_GET_LOCAL:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_SET_LOCAL:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_GET_UPVALUE:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_SET_UPVALUE:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+        if (n > 0) written += n;
+        break;
+    case CLAYVM_OP_CLOSE_UPVALUE:
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
         if (n > 0) written += n;
         break;
     default:
@@ -1920,6 +2180,36 @@ int clayvm_verify(const uint8_t *code, size_t code_len,
             break;
         }
         case CLAYVM_OP_HALT: {
+            break;
+        }
+        case CLAYVM_OP_GET_LOCAL: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            (void)slot;
+            break;
+        }
+        case CLAYVM_OP_SET_LOCAL: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            (void)slot;
+            break;
+        }
+        case CLAYVM_OP_GET_UPVALUE: {
+            uint16_t index = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            (void)index;
+            break;
+        }
+        case CLAYVM_OP_SET_UPVALUE: {
+            uint16_t index = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            (void)index;
+            break;
+        }
+        case CLAYVM_OP_CLOSE_UPVALUE: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            (void)slot;
             break;
         }
         default:

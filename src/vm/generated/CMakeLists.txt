@@ -18,6 +18,7 @@ add_library(clayvm_vm
     disasm.c
     native.c
     strings.c
+    closures.c
     bytecode.c
     linemap.c
     verify.c

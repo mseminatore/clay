@@ -18,7 +18,7 @@ vm:
     interned_strings: true
     garbage_collection:
       enabled: false
-    closures: false
+    closures: true
     modules:
       enabled: false
     coroutines: false
@@ -156,6 +156,41 @@ vm:
       operands: []
       description: "Stop execution"
       action: "halt"
+
+    # Local variables
+    - name: GET_LOCAL
+      operands: [{ name: slot, type: uint16 }]
+      description: "Push local variable from stack slot relative to frame base"
+      action_c: |
+        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+
+    - name: SET_LOCAL
+      operands: [{ name: slot, type: uint16 }]
+      description: "Store top of stack into local variable slot (does not pop)"
+      action_c: |
+        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+
+    # Upvalue access (closures)
+    - name: GET_UPVALUE
+      operands: [{ name: index, type: uint16 }]
+      description: "Read captured variable via upvalue index"
+      action_c: |
+        /* Upvalue access is handled through native calls for now */
+        (void)index;
+
+    - name: SET_UPVALUE
+      operands: [{ name: index, type: uint16 }]
+      description: "Write captured variable via upvalue index"
+      action_c: |
+        /* Upvalue write is handled through native calls for now */
+        (void)index;
+
+    - name: CLOSE_UPVALUE
+      operands: [{ name: slot, type: uint16 }]
+      description: "Close all open upvalues at or above the given stack slot"
+      action_c: |
+        /* Close upvalue is handled through native calls for now */
+        (void)slot;
 
   constants:
     - int64

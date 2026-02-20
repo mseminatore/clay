@@ -104,6 +104,21 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_RETURN);
     } else if (strcmp(mnemonic, "HALT") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_HALT);
+    } else if (strcmp(mnemonic, "GET_LOCAL") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_LOCAL);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "SET_LOCAL") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "GET_UPVALUE") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_UPVALUE);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "SET_UPVALUE") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_UPVALUE);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "CLOSE_UPVALUE") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_CLOSE_UPVALUE);
+        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else {
         fprintf(stderr, "assembler: unknown mnemonic '%s'\n", mnemonic);
         as->error = 1;

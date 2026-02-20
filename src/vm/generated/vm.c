@@ -78,8 +78,7 @@ static int handle_PUSH_CONST(clayvm_vm_t *vm) {
 }
 
 static int handle_POP(clayvm_vm_t *vm) {
-    int64_t _ = clayvm_vm_pop(vm).as.i64;
-    (void)_;
+    clayvm_vm_pop(vm);
     return 0;
 }
 
@@ -217,10 +216,45 @@ static int handle_RETURN(clayvm_vm_t *vm) {
 }
 
 static int handle_HALT(clayvm_vm_t *vm) {
+    vm->running = 0;
     return 0;
 }
 
-static clayvm_handler_t clayvm_dispatch_table[] = {
+static int handle_GET_LOCAL(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+    return 0;
+}
+
+static int handle_SET_LOCAL(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+    return 0;
+}
+
+static int handle_GET_UPVALUE(clayvm_vm_t *vm) {
+    uint16_t index = READ_UINT16();
+    /* Upvalue access is handled through native calls for now */
+    (void)index;
+    return 0;
+}
+
+static int handle_SET_UPVALUE(clayvm_vm_t *vm) {
+    uint16_t index = READ_UINT16();
+    /* Upvalue write is handled through native calls for now */
+    (void)index;
+    return 0;
+}
+
+static int handle_CLOSE_UPVALUE(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    /* Close upvalue is handled through native calls for now */
+    (void)slot;
+    return 0;
+}
+
+/* Non-static so trampolines can use the dispatch table directly */
+clayvm_handler_t clayvm_dispatch_table[] = {
     handle_PUSH_CONST,
     handle_POP,
     handle_DUP,
@@ -243,6 +277,11 @@ static clayvm_handler_t clayvm_dispatch_table[] = {
     handle_CALL_NATIVE,
     handle_RETURN,
     handle_HALT,
+    handle_GET_LOCAL,
+    handle_SET_LOCAL,
+    handle_GET_UPVALUE,
+    handle_SET_UPVALUE,
+    handle_CLOSE_UPVALUE,
 };
 
 int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
@@ -276,6 +315,11 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         &&op_CALL_NATIVE,
         &&op_RETURN,
         &&op_HALT,
+        &&op_GET_LOCAL,
+        &&op_SET_LOCAL,
+        &&op_GET_UPVALUE,
+        &&op_SET_UPVALUE,
+        &&op_CLOSE_UPVALUE,
     };
 
 #define DISPATCH() goto *dispatch_table[vm->code[vm->ip++]]
@@ -295,8 +339,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t _ = clayvm_vm_pop(vm).as.i64;
-        (void)_;
+        clayvm_vm_pop(vm);
         DISPATCH();
     }
 
@@ -497,6 +540,54 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         return 0;
     }
 
+    op_GET_LOCAL: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+        DISPATCH();
+    }
+
+    op_SET_LOCAL: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        DISPATCH();
+    }
+
+    op_GET_UPVALUE: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t index = READ_UINT16();
+        /* Upvalue access is handled through native calls for now */
+        (void)index;
+        DISPATCH();
+    }
+
+    op_SET_UPVALUE: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t index = READ_UINT16();
+        /* Upvalue write is handled through native calls for now */
+        (void)index;
+        DISPATCH();
+    }
+
+    op_CLOSE_UPVALUE: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        /* Close upvalue is handled through native calls for now */
+        (void)slot;
+        DISPATCH();
+    }
+
 #undef DISPATCH
 #else
     while (vm->running && vm->ip < vm->code_len) {
@@ -529,8 +620,7 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         break;
     }
     case CLAYVM_OP_POP: {
-        int64_t _ = clayvm_vm_pop(vm).as.i64;
-        (void)_;
+        clayvm_vm_pop(vm);
         break;
     }
     case CLAYVM_OP_DUP: {
@@ -649,6 +739,34 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     }
     case CLAYVM_OP_HALT: {
         return 0;
+    }
+    case CLAYVM_OP_GET_LOCAL: {
+        uint16_t slot = READ_UINT16();
+        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL: {
+        uint16_t slot = READ_UINT16();
+        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        break;
+    }
+    case CLAYVM_OP_GET_UPVALUE: {
+        uint16_t index = READ_UINT16();
+        /* Upvalue access is handled through native calls for now */
+        (void)index;
+        break;
+    }
+    case CLAYVM_OP_SET_UPVALUE: {
+        uint16_t index = READ_UINT16();
+        /* Upvalue write is handled through native calls for now */
+        (void)index;
+        break;
+    }
+    case CLAYVM_OP_CLOSE_UPVALUE: {
+        uint16_t slot = READ_UINT16();
+        /* Close upvalue is handled through native calls for now */
+        (void)slot;
+        break;
     }
     default: {
         char msg[64];
