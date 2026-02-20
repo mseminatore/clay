@@ -66,7 +66,7 @@ typedef enum {
 /* Error handler callback: receives VM pointer, error code, and message */
 typedef void (*clayvm_error_handler_t)(void *vm, clayvm_error_t err, const char *msg);
 
-typedef struct clayvm_vm {
+struct clayvm_vm {
     const uint8_t *code;
     size_t code_len;
     size_t ip;
@@ -87,7 +87,7 @@ typedef struct clayvm_vm {
     clayvm_native_table_t natives;
     /* Globals table for REPL variable persistence */
     void *globals;  /* HashTable* — set up externally */
-} clayvm_vm_t;
+} /* clayvm_vm */;
 
 void clayvm_vm_init(clayvm_vm_t *vm);
 int  clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len);
