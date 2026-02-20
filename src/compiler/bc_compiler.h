@@ -54,6 +54,10 @@ typedef struct {
     int native_make_dict;
 
     int had_error;
+
+    /* Source line map: line_map[offset] = source line number */
+    int line_map[BC_MAX_CODE];
+    int current_line;
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);

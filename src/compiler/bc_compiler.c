@@ -243,6 +243,7 @@ static ClayMethodFunc g_method_trampoline_table[] = {
 
 static void emit_byte(BcCompiler *bc, uint8_t b) {
     if (bc->len >= BC_MAX_CODE) { bc->had_error = 1; return; }
+    bc->line_map[bc->len] = bc->current_line;
     bc->code[bc->len++] = b;
 }
 
@@ -615,6 +616,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params) {
 
 static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
     if (!node || bc->had_error) return;
+    bc->current_line = node->line;
 
     switch (node->type) {
         case NODE_INT_LIT: {
@@ -809,6 +811,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
 
 static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     if (!node || bc->had_error) return;
+    bc->current_line = node->line;
 
     if (node->type == NODE_ASSIGN) {
         /* Push name first, then compile value */

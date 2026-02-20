@@ -29,6 +29,8 @@ clay              # start VM REPL (default)
 | `--ast` | Print the AST and exit |
 | `--vm-repl` | Launch bytecode VM REPL (instant evaluation, default) |
 | `--repl` | Launch classic REPL (compiles to C each input) |
+| `--trace` | VM REPL with bytecode tracing (shows each opcode) |
+| `--step` | VM REPL with interactive stepping debugger |
 | `-h`, `--help` | Show help message |
 
 ### VM REPL
@@ -66,6 +68,35 @@ Bye!
 ```
 
 Variables and object definitions persist across inputs. Bare expressions are automatically printed. Multi-line input is detected via brace/paren matching. Errors are caught and reported without exiting.
+
+### Debugging
+
+**Bytecode tracing** (`--trace`) shows each VM opcode as it executes:
+
+```
+$ clay --trace
+>>> 2 + 3
+0000  PUSH_CONST      0
+0003  PUSH_CONST      1
+0006  PUSH_CONST      2
+0009  CALL_NATIVE     768 3
+0013  HALT
+=> 5
+```
+
+**Interactive stepping** (`--step`) pauses at each source line:
+
+```
+$ clay --step
+>>> x = 10
+  1 | x = 10
+[step] s
+Stack (0):
+[step] n
+>>>
+```
+
+Step commands: `n` = next line, `c` = continue, `s` = show stack, `q` = quit.
 
 ### Classic REPL
 

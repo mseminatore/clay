@@ -418,15 +418,118 @@ static void repl_enable_color(void) {
 
 #define C(code) (g_use_color ? (code) : "")
 
-static int run_vm_repl(void) {
+#define C_YELLOW  "\033[33m"
+
+/* --- Stepping debugger state --- */
+typedef struct {
+    BcCompiler *bc;
+    const char *source;    /* source text for current input */
+    int stepping;          /* 1 = step mode active */
+    int last_line;         /* last printed source line */
+    int continue_mode;     /* 1 = continue until end */
+} StepState;
+
+static StepState g_step;
+
+/* Split source text into lines, return line N (1-based). Caller must free. */
+static char *get_source_line(const char *src, int line_num) {
+    if (!src || line_num < 1) return NULL;
+    const char *p = src;
+    int cur = 1;
+    while (cur < line_num && *p) {
+        if (*p == '\n') cur++;
+        p++;
+    }
+    if (cur != line_num) return NULL;
+    const char *end = p;
+    while (*end && *end != '\n') end++;
+    size_t len = (size_t)(end - p);
+    char *result = (char *)malloc(len + 1);
+    memcpy(result, p, len);
+    result[len] = '\0';
+    return result;
+}
+
+static void step_callback(void *vm_ptr, size_t ip) {
+    clayvm_vm_t *vm = (clayvm_vm_t *)vm_ptr;
+    (void)vm;
+
+    if (!g_step.stepping || g_step.continue_mode) return;
+    if (!g_step.bc || ip >= (size_t)g_step.bc->len) return;
+
+    int line = g_step.bc->line_map[ip];
+    if (line == g_step.last_line) return; /* same source line — skip */
+    g_step.last_line = line;
+
+    /* Show source line */
+    char *src_line = get_source_line(g_step.source, line);
+    if (src_line) {
+        printf("%s%s  %d |%s %s\n", C(C_DIM), C(C_YELLOW), line, C(C_RESET), src_line);
+        free(src_line);
+    }
+
+    /* Interactive command loop */
+    for (;;) {
+        printf("%s[step]%s ", C(C_YELLOW), C(C_RESET));
+        fflush(stdout);
+        char cmd[64];
+        if (!fgets(cmd, sizeof(cmd), stdin)) { g_step.continue_mode = 1; return; }
+        char *t = cmd;
+        while (*t == ' ' || *t == '\t') t++;
+        if (*t == '\n' || *t == '\r' || *t == 'n' || *t == '\0') {
+            return; /* next */
+        } else if (*t == 'c') {
+            g_step.continue_mode = 1;
+            return;
+        } else if (*t == 's') {
+            /* show stack */
+            printf("%sStack (%d):%s\n", C(C_DIM), vm->sp, C(C_RESET));
+            for (int i = vm->sp - 1; i >= 0 && i >= vm->sp - 8; i--) {
+                clayvm_value_t v = vm->stack[i];
+                if (v.type == CLAYVM_VAL_INT64) {
+                    printf("  [%d] %lld\n", i, (long long)v.as.i64);
+                } else if (v.type == CLAYVM_VAL_BOOL) {
+                    printf("  [%d] %s\n", i, v.as.boolean ? "true" : "false");
+                } else if (v.type == CLAYVM_VAL_NIL) {
+                    printf("  [%d] nil\n", i);
+                } else if (v.type == CLAYVM_VAL_OBJECT) {
+                    ClayValue cv = vm_to_clay(v);
+                    ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
+                    printf("  [%d] %s\n", i, clay_string_data(CLAY_OBJ(sv)));
+                } else {
+                    printf("  [%d] <unknown>\n", i);
+                }
+            }
+        } else if (*t == 'q') {
+            vm->running = 0;
+            g_step.continue_mode = 1;
+            return;
+        } else {
+            printf("  n=next  c=continue  s=stack  q=quit\n");
+        }
+    }
+}
+
+static int run_vm_repl(int trace_mode, int step_mode) {
     clay_bootstrap();
     repl_enable_color();
 
     clayvm_vm_t vm;
     clayvm_vm_init(&vm);
+    if (trace_mode) vm.trace_enabled = 1;
 
     BcCompiler bc;
     bc_compiler_init(&bc, &vm);
+
+    /* Set up stepping debugger */
+    if (step_mode) {
+        g_step.stepping = 1;
+        g_step.last_line = 0;
+        g_step.continue_mode = 0;
+        g_step.bc = &bc;
+        g_step.source = NULL;
+        clayvm_vm_set_step_callback(&vm, step_callback);
+    }
 
     printf("%s%sClay VM REPL%s v0.1 (type 'quit' or 'exit' to leave)\n",
            C(C_BOLD), C(C_CYAN), C(C_RESET));
@@ -514,7 +617,27 @@ static int run_vm_repl(void) {
                 fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             }
         } else {
-            int result = clayvm_vm_run(&vm, bc.code, bc.len);
+            /* Set source for step debugger */
+            if (step_mode) {
+                g_step.source = input;
+                g_step.last_line = 0;
+                g_step.continue_mode = 0;
+            }
+            int result;
+            if (step_mode) {
+                /* Step-based execution for interactive debugging */
+                vm.code = bc.code;
+                vm.code_len = bc.len;
+                vm.ip = 0;
+                vm.sp = 0;
+                vm.running = 1;
+                result = 0;
+                while (vm.running && vm.ip < vm.code_len) {
+                    if (clayvm_vm_step(&vm) < 0) break;
+                }
+            } else {
+                result = clayvm_vm_run(&vm, bc.code, bc.len);
+            }
             clay_try_pop();
 
             if (result == 0 && vm.sp > 0) {
@@ -555,6 +678,8 @@ int main(int argc, char *argv[]) {
     int print_ast = 0;
     int repl_mode = 0;
     int vm_repl_mode = 0;
+    int trace_mode = 0;
+    int step_mode = 0;
 
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -568,6 +693,12 @@ int main(int argc, char *argv[]) {
             repl_mode = 1;
         } else if (strcmp(argv[i], "--vm-repl") == 0) {
             vm_repl_mode = 1;
+        } else if (strcmp(argv[i], "--trace") == 0) {
+            trace_mode = 1;
+            vm_repl_mode = 1;
+        } else if (strcmp(argv[i], "--step") == 0) {
+            step_mode = 1;
+            vm_repl_mode = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
@@ -576,6 +707,8 @@ int main(int argc, char *argv[]) {
             printf("  --ast         Print AST and exit\n");
             printf("  --repl        Launch interactive REPL (compiles to C)\n");
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
+            printf("  --trace       VM REPL with bytecode tracing\n");
+            printf("  --step        VM REPL with interactive stepping\n");
             printf("  -h, --help    Show this help message\n");
             printf("\nWith no arguments, launches the VM REPL.\n");
             return 0;
@@ -592,7 +725,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (vm_repl_mode) {
-        return run_vm_repl();
+        return run_vm_repl(trace_mode, step_mode);
     }
 
     if (repl_mode) {
