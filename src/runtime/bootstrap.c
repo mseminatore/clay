@@ -370,20 +370,53 @@ void clay_shutdown(void) {
 }
 
 /* Debug helper: print object details to stderr */
+/* Return a human-readable name for an object (for inspect output) */
+static const char *object_name(ClayObject *obj) {
+    if (!obj) return "nil";
+    /* Check well-known prototypes */
+    if (obj == clay_Object)  return "Object";
+    if (obj == clay_Number)  return "Number";
+    if (obj == clay_String)  return "String";
+    if (obj == clay_Array)   return "Array";
+    if (obj == clay_Block)   return "Block";
+    if (obj == clay_Nil)     return "Nil";
+    if (obj == clay_Boolean) return "Boolean";
+    if (obj == clay_Error)   return "Error";
+    if (obj == clay_Dict)    return "Dict";
+    if (obj == clay_Math)    return "Math";
+    if (obj == clay_Console) return "Console";
+    if (obj == clay_File)    return "File";
+    if (obj == &clay_true_obj)  return "true";
+    if (obj == &clay_false_obj) return "false";
+    /* Check for _name slot */
+    if (obj->slots) {
+        ht_value_t v = ht_find(obj->slots, (ht_key_t)"_name");
+        if (v) {
+            ClayValue cv = (ClayValue)(uintptr_t)v;
+            if (CLAY_IS_PTR(cv) && !CLAY_IS_NIL(cv) && CLAY_OBJ(cv)->type == CLAY_TYPE_STRING) {
+                return clay_string_data(CLAY_OBJ(cv));
+            }
+        }
+    }
+    /* Fall back to type field */
+    switch (obj->type) {
+        case CLAY_TYPE_STRING: return "String";
+        case CLAY_TYPE_ARRAY:  return "Array";
+        case CLAY_TYPE_BLOCK:  return "Block";
+        case CLAY_TYPE_FLOAT:  return "Float";
+        case CLAY_TYPE_DICT:   return "Dict";
+        default:               return "Object";
+    }
+}
+
 void clay_inspect(ClayObject *obj) {
     if (!obj) {
         fprintf(stderr, "[nil]\n");
         return;
     }
-    const char *type_name;
-    switch (obj->type) {
-        case CLAY_TYPE_STRING: type_name = "String"; break;
-        case CLAY_TYPE_ARRAY:  type_name = "Array"; break;
-        case CLAY_TYPE_BLOCK:  type_name = "Block"; break;
-        case CLAY_TYPE_FLOAT:  type_name = "Float"; break;
-        default:               type_name = "Object"; break;
-    }
-    fprintf(stderr, "[%s @%p refcount=%d parent=%p", type_name, (void *)obj, obj->refcount, (void *)obj->parent);
+    const char *type_name = object_name(obj);
+    const char *parent_name = object_name(obj->parent);
+    fprintf(stderr, "[%s @%p refcount=%d parent=%s", type_name, (void *)obj, obj->refcount, parent_name);
 
     if (obj->type == CLAY_TYPE_STRING) {
         fprintf(stderr, " data=\"%s\" len=%zu", obj->as.string.data, obj->as.string.length);
