@@ -211,7 +211,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         c_file,
         clay_dir, clay_dir, clay_dir, clay_dir,
         clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
         output_name);
 #endif
     return system(cmd);
