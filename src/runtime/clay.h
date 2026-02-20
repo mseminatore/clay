@@ -139,6 +139,10 @@ ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
 ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);
 
+/* Memory diagnostics counters */
+extern size_t clay_alloc_count;
+extern size_t clay_dealloc_count;
+
 /* --- Message dispatch --- */
 ClayValue   clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv);
 

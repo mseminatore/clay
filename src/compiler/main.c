@@ -514,7 +514,7 @@ static void step_callback(void *vm_ptr, size_t ip) {
     }
 }
 
-static int run_vm_repl(int trace_mode, int step_mode) {
+static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     clay_bootstrap();
     repl_enable_color();
 
@@ -617,6 +617,7 @@ static int run_vm_repl(int trace_mode, int step_mode) {
                 ClayValue msg = clay_send_val(err, "message", 0, NULL);
                 fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
                         clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
+                clay_release(CLAY_OBJ(msg));
             } else {
                 fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             }
@@ -658,6 +659,7 @@ static int run_vm_repl(int trace_mode, int step_mode) {
                     } else if (!CLAY_IS_NIL(cv)) {
                         ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
                         printf("%s=>%s %s\n", C(C_GREEN), C(C_RESET), clay_string_data(CLAY_OBJ(sv)));
+                        clay_release(CLAY_OBJ(sv));
                     }
                 }
             }
@@ -672,6 +674,12 @@ static int run_vm_repl(int trace_mode, int step_mode) {
     }
 
     printf("%sBye!%s\n", C(C_DIM), C(C_RESET));
+    if (mem_stats) {
+        printf("\n%s--- Memory Stats ---%s\n", C(C_DIM), C(C_RESET));
+        printf("  Objects allocated: %zu\n", clay_alloc_count);
+        printf("  Objects freed:     %zu\n", clay_dealloc_count);
+        printf("  Still live:        %zu\n", clay_alloc_count - clay_dealloc_count);
+    }
     return 0;
 }
 
@@ -684,6 +692,7 @@ int main(int argc, char *argv[]) {
     int vm_repl_mode = 0;
     int trace_mode = 0;
     int step_mode = 0;
+    int mem_stats = 0;
 
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
@@ -703,6 +712,8 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--step") == 0) {
             step_mode = 1;
             vm_repl_mode = 1;
+        } else if (strcmp(argv[i], "--mem-stats") == 0) {
+            mem_stats = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
@@ -713,6 +724,7 @@ int main(int argc, char *argv[]) {
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
             printf("  --trace       VM REPL with bytecode tracing\n");
             printf("  --step        VM REPL with interactive stepping\n");
+            printf("  --mem-stats   Show memory stats on REPL exit\n");
             printf("  -h, --help    Show this help message\n");
             printf("\nWith no arguments, launches the VM REPL.\n");
             return 0;
@@ -729,7 +741,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (vm_repl_mode) {
-        return run_vm_repl(trace_mode, step_mode);
+        return run_vm_repl(trace_mode, step_mode, mem_stats);
     }
 
     if (repl_mode) {

@@ -365,6 +365,7 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
     } else {
         ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
         printf("%s\n", clay_string_data(CLAY_OBJ(sv)));
+        clay_release(CLAY_OBJ(sv));
     }
     clayvm_vm_push(vm, CLAYVM_NIL_VAL);
     return 0;
@@ -480,13 +481,22 @@ static int native_store_global_fn(clayvm_vm_t *vm, int argc) {
     HashTable *globals = (HashTable *)vm->globals;
     if (!globals) return 0;
 
+    /* Retain new object value */
+    if (val.type == CLAYVM_VAL_OBJECT && val.as.obj) {
+        clay_retain((ClayObject *)val.as.obj);
+    }
+
     /* Allocate storage for the value */
     clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
     *stored = val;
 
-    /* Remove old if exists */
+    /* Remove old if exists, releasing any object it held */
     ht_value_t old = ht_find(globals, (ht_key_t)name);
     if (old) {
+        clayvm_value_t *old_val = (clayvm_value_t *)old;
+        if (old_val->type == CLAYVM_VAL_OBJECT && old_val->as.obj) {
+            clay_release((ClayObject *)old_val->as.obj);
+        }
         free((void *)old);
         ht_remove(globals, (ht_key_t)name);
     }

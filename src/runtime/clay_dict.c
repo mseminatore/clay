@@ -164,13 +164,14 @@ static ClayValue dict_toString(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue cv = (ClayValue)(uintptr_t)val;
         const char *vs;
         char numbuf[32];
+        ClayValue sv = CLAY_NIL;
         if (CLAY_IS_INT(cv)) {
             snprintf(numbuf, sizeof(numbuf), "%ld", (long)clay_to_int(cv));
             vs = numbuf;
         } else if (CLAY_IS_NIL(cv)) {
             vs = "nil";
         } else {
-            ClayValue sv = clay_send(CLAY_OBJ(cv), "toString", 0, NULL);
+            sv = clay_send(CLAY_OBJ(cv), "toString", 0, NULL);
             vs = clay_string_data(CLAY_OBJ(sv));
         }
         size_t vlen = strlen(vs);
@@ -187,6 +188,7 @@ static ClayValue dict_toString(ClayObject *self, int argc, ClayValue *argv) {
         buf[len++] = ' ';
         memcpy(buf + len, vs, vlen);
         len += vlen;
+        if (!CLAY_IS_NIL(sv)) clay_release(CLAY_OBJ(sv));
     }
 
     if (len + 2 > cap) { cap *= 2; buf = (char *)realloc(buf, cap); }

@@ -83,13 +83,14 @@ static ClayValue array_toString(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue item = self->as.array.items[i];
         const char *s;
         char numbuf[32];
+        ClayValue sv = CLAY_NIL;
         if (CLAY_IS_INT(item)) {
             snprintf(numbuf, sizeof(numbuf), "%ld", (long)clay_to_int(item));
             s = numbuf;
         } else if (CLAY_IS_NIL(item)) {
             s = "nil";
         } else {
-            ClayValue sv = clay_send(CLAY_OBJ(item), "toString", 0, NULL);
+            sv = clay_send(CLAY_OBJ(item), "toString", 0, NULL);
             s = clay_string_data(CLAY_OBJ(sv));
         }
         size_t slen = strlen(s);
@@ -99,6 +100,7 @@ static ClayValue array_toString(ClayObject *self, int argc, ClayValue *argv) {
         }
         memcpy(buf + len, s, slen);
         len += slen;
+        if (!CLAY_IS_NIL(sv)) clay_release(CLAY_OBJ(sv));
     }
     buf[len++] = ']';
     buf[len] = '\0';
@@ -224,6 +226,13 @@ static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
         } else {
             ClayValue sv = clay_send(CLAY_OBJ(item), "toString", 0, NULL);
             s = clay_string_data(CLAY_OBJ(sv));
+            /* Copy s before releasing sv */
+            size_t slen = strlen(s);
+            while (len + slen + 1 > cap) { cap *= 2; buf = (char *)realloc(buf, cap); }
+            memcpy(buf + len, s, slen);
+            len += slen;
+            clay_release(CLAY_OBJ(sv));
+            continue;
         }
         size_t slen = strlen(s);
         while (len + slen + 1 > cap) { cap *= 2; buf = (char *)realloc(buf, cap); }
@@ -246,7 +255,10 @@ static int clay_compare_values(const void *a, const void *b) {
     /* Fall back to string comparison */
     ClayValue sa = clay_send_val(va, "toString", 0, NULL);
     ClayValue sb = clay_send_val(vb, "toString", 0, NULL);
-    return strcmp(clay_string_data(CLAY_OBJ(sa)), clay_string_data(CLAY_OBJ(sb)));
+    int cmp = strcmp(clay_string_data(CLAY_OBJ(sa)), clay_string_data(CLAY_OBJ(sb)));
+    clay_release(CLAY_OBJ(sa));
+    clay_release(CLAY_OBJ(sb));
+    return cmp;
 }
 
 static ClayValue array_sort(ClayObject *self, int argc, ClayValue *argv) {

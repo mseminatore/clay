@@ -3,6 +3,10 @@
  */
 #include "clay.h"
 
+/* Memory diagnostics counters */
+size_t clay_alloc_count = 0;
+size_t clay_dealloc_count = 0;
+
 /* Boolean singletons - statically allocated, never freed */
 ClayObject clay_true_obj  = { NULL, NULL, NULL, 1000000, CLAY_TYPE_OBJECT, {{0}} };
 ClayObject clay_false_obj = { NULL, NULL, NULL, 1000000, CLAY_TYPE_OBJECT, {{0}} };
@@ -17,7 +21,11 @@ static int clay_is_singleton(ClayObject *obj) {
            obj == clay_Block ||
            obj == clay_Nil ||
            obj == clay_Boolean ||
-           obj == clay_Dict;
+           obj == clay_Dict ||
+           obj == clay_Error ||
+           obj == clay_Math ||
+           obj == clay_Console ||
+           obj == clay_File;
 }
 
 ClayObject *clay_retain(ClayObject *obj) {
@@ -29,6 +37,7 @@ ClayObject *clay_retain(ClayObject *obj) {
 
 static void clay_dealloc(ClayObject *obj) {
     if (!obj || clay_is_singleton(obj)) return;
+    clay_dealloc_count++;
 
     /* Release parent */
     if (obj->parent) {

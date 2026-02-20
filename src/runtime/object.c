@@ -27,6 +27,7 @@ ClayObject *clay_object_new(void) {
     obj->methods  = clay_ht_create();
     obj->refcount = 1;
     obj->type     = CLAY_TYPE_OBJECT;
+    clay_alloc_count++;
     return obj;
 }
 

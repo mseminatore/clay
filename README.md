@@ -31,6 +31,7 @@ clay              # start VM REPL (default)
 | `--repl` | Launch classic REPL (compiles to C each input) |
 | `--trace` | VM REPL with bytecode tracing (shows each opcode) |
 | `--step` | VM REPL with interactive stepping debugger |
+| `--mem-stats` | Show memory allocation stats on REPL exit |
 | `-h`, `--help` | Show help message |
 
 ### VM REPL
