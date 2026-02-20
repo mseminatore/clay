@@ -84,6 +84,44 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
         if (sep) *sep = '\0';
         strncpy(clay_dir, exe_path, sz - 1);
     }
+#else
+    {
+        /* Resolve from argv[0] — walk up from binary to project root */
+        char exe_path[1024];
+        if (argv0[0] == '/') {
+            strncpy(exe_path, argv0, sizeof(exe_path) - 1);
+        } else {
+            /* Try /proc/self/exe first (Linux) */
+            ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+            if (len > 0) {
+                exe_path[len] = '\0';
+            } else {
+                /* Fall back to realpath of argv[0] */
+                char *rp = realpath(argv0, NULL);
+                if (rp) {
+                    strncpy(exe_path, rp, sizeof(exe_path) - 1);
+                    exe_path[sizeof(exe_path) - 1] = '\0';
+                    free(rp);
+                } else {
+                    return; /* keep "." default */
+                }
+            }
+        }
+        /* Strip binary name + up to project root (bin is at build/clay or build/Debug/clay) */
+        char *sep = strrchr(exe_path, '/');
+        if (sep) *sep = '\0';
+        /* Check if parent is "Debug" or "Release" (multi-config) */
+        sep = strrchr(exe_path, '/');
+        if (sep) {
+            if (strcmp(sep + 1, "Debug") == 0 || strcmp(sep + 1, "Release") == 0) {
+                *sep = '\0';
+                sep = strrchr(exe_path, '/');
+            }
+        }
+        /* Now at build/ — go up one more */
+        if (sep) *sep = '\0';
+        strncpy(clay_dir, exe_path, sz - 1);
+    }
 #endif
 }
 
@@ -166,7 +204,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "\"%s/src/runtime/math.c\" "
         "\"%s/src/runtime/file.c\" "
         "\"%s/deps/hash/hash.c\" "
-        "-o \"%s\"",
+        "-lm -o \"%s\"",
         quiet ? "-w" : "-Wall",
         clay_dir, clay_dir,
         c_file,

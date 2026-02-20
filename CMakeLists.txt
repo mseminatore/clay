@@ -8,6 +8,13 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Link math library on Unix
+if(UNIX)
+    link_libraries(m)
+    # Ensure POSIX functions like strdup are declared with -std=c99
+    add_compile_definitions(_POSIX_C_SOURCE=200809L)
+endif()
+
 # Build hash library directly (avoid its CMakeLists which has subdirectory conflicts)
 add_library(ht STATIC deps/hash/hash.c)
 target_include_directories(ht PUBLIC deps/hash)
