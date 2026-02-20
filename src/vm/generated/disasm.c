@@ -21,9 +21,12 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
     printf("%04zu  %-16s", start, clayvm_opcode_names[opcode]);
 
     switch (opcode) {
-    case CLAYVM_OP_PUSH_CONST:
-        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    case CLAYVM_OP_PUSH_CONST: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%u\n", val);
         break;
+    }
     case CLAYVM_OP_POP:
         printf("\n");
         break;
@@ -69,39 +72,68 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
     case CLAYVM_OP_NOT:
         printf("\n");
         break;
-    case CLAYVM_OP_JUMP:
-        printf("%d\n", (int16_t)(offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    case CLAYVM_OP_JUMP: {
+        int16_t val = (int16_t)(uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%d\n", val);
         break;
-    case CLAYVM_OP_JUMP_IF_FALSE:
-        printf("%d\n", (int16_t)(offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_JUMP_IF_FALSE: {
+        int16_t val = (int16_t)(uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%d\n", val);
         break;
-    case CLAYVM_OP_CALL:
-        printf("%u %u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))), code[offset++]);
+    }
+    case CLAYVM_OP_CALL: {
+        uint16_t idx = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        uint8_t argc = code[offset++];
+        printf("%u %u\n", idx, argc);
         break;
-    case CLAYVM_OP_CALL_NATIVE:
-        printf("%u %u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))), code[offset++]);
+    }
+    case CLAYVM_OP_CALL_NATIVE: {
+        uint16_t idx = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        uint8_t argc = code[offset++];
+        printf("%u %u\n", idx, argc);
         break;
+    }
     case CLAYVM_OP_RETURN:
         printf("\n");
         break;
     case CLAYVM_OP_HALT:
         printf("\n");
         break;
-    case CLAYVM_OP_GET_LOCAL:
-        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    case CLAYVM_OP_GET_LOCAL: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%u\n", val);
         break;
-    case CLAYVM_OP_SET_LOCAL:
-        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_SET_LOCAL: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%u\n", val);
         break;
-    case CLAYVM_OP_GET_UPVALUE:
-        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_GET_UPVALUE: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%u\n", val);
         break;
-    case CLAYVM_OP_SET_UPVALUE:
-        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_SET_UPVALUE: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%u\n", val);
         break;
-    case CLAYVM_OP_CLOSE_UPVALUE:
-        printf("%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_CLOSE_UPVALUE: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        printf("%u\n", val);
         break;
+    }
     default:
         printf("\n");
         break;
@@ -136,10 +168,13 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
     if (n > 0) written += n;
 
     switch (opcode) {
-    case CLAYVM_OP_PUSH_CONST:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    case CLAYVM_OP_PUSH_CONST: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", val);
         if (n > 0) written += n;
         break;
+    }
     case CLAYVM_OP_POP:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
@@ -200,22 +235,36 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_JUMP:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%d\n", (int16_t)(offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    case CLAYVM_OP_JUMP: {
+        int16_t val = (int16_t)(uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%d\n", val);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_JUMP_IF_FALSE:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%d\n", (int16_t)(offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_JUMP_IF_FALSE: {
+        int16_t val = (int16_t)(uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%d\n", val);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_CALL:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))), code[offset++]);
+    }
+    case CLAYVM_OP_CALL: {
+        uint16_t idx = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        uint8_t argc = code[offset++];
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u\n", idx, argc);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_CALL_NATIVE:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))), code[offset++]);
+    }
+    case CLAYVM_OP_CALL_NATIVE: {
+        uint16_t idx = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        uint8_t argc = code[offset++];
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u\n", idx, argc);
         if (n > 0) written += n;
         break;
+    }
     case CLAYVM_OP_RETURN:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
@@ -224,26 +273,41 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_GET_LOCAL:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    case CLAYVM_OP_GET_LOCAL: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", val);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_SET_LOCAL:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_SET_LOCAL: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", val);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_GET_UPVALUE:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_GET_UPVALUE: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", val);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_SET_UPVALUE:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_SET_UPVALUE: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", val);
         if (n > 0) written += n;
         break;
-    case CLAYVM_OP_CLOSE_UPVALUE:
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", (offset += 2, (uint16_t)(code[offset-2] | (code[offset-1] << 8))));
+    }
+    case CLAYVM_OP_CLOSE_UPVALUE: {
+        uint16_t val = (uint16_t)(code[offset] | (code[offset+1] << 8));
+        offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", val);
         if (n > 0) written += n;
         break;
+    }
     default:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
