@@ -140,6 +140,21 @@ static char *process_escapes(const char *raw, int len) {
                 case '\\': out[j++] = '\\'; i++; break;
                 case '"':  out[j++] = '"';  i++; break;
                 case '0':  out[j++] = '\0'; i++; break;
+                case 'x': {
+                    /* \xHH — hex escape */
+                    if (i + 3 < len) {
+                        char hex[3] = { raw[i+2], raw[i+3], '\0' };
+                        char *end;
+                        long val = strtol(hex, &end, 16);
+                        if (end == hex + 2) {
+                            out[j++] = (char)val;
+                            i += 3;
+                            break;
+                        }
+                    }
+                    out[j++] = raw[i];
+                    break;
+                }
                 default:   out[j++] = raw[i]; break;
             }
         } else {

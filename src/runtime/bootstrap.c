@@ -288,10 +288,27 @@ static ClayValue console_prompt(ClayObject *self, int argc, ClayValue *argv) {
 
 void clay_bootstrap(void) {
 #ifdef _WIN32
-    /* Enable UTF-8 output on Windows console */
+    /* Enable UTF-8 output and ANSI color sequences on Windows console */
     {
+        typedef void *HANDLE;
+        typedef unsigned long DWORD;
         extern __declspec(dllimport) int __stdcall SetConsoleOutputCP(unsigned int);
+        extern __declspec(dllimport) HANDLE __stdcall GetStdHandle(DWORD);
+        extern __declspec(dllimport) int __stdcall GetConsoleMode(HANDLE, DWORD *);
+        extern __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
+        #define STD_OUTPUT_HANDLE ((DWORD)-11)
+        #define STD_ERROR_HANDLE  ((DWORD)-12)
+        #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+
         SetConsoleOutputCP(65001);
+        HANDLE h;
+        DWORD mode;
+        h = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (GetConsoleMode(h, &mode))
+            SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        h = GetStdHandle(STD_ERROR_HANDLE);
+        if (GetConsoleMode(h, &mode))
+            SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
 #endif
     /* Create root Object prototype */
