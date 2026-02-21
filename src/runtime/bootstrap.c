@@ -287,6 +287,13 @@ static ClayValue console_prompt(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 void clay_bootstrap(void) {
+#ifdef _WIN32
+    /* Enable UTF-8 output on Windows console */
+    {
+        extern __declspec(dllimport) int __stdcall SetConsoleOutputCP(unsigned int);
+        SetConsoleOutputCP(65001);
+    }
+#endif
     /* Create root Object prototype */
     clay_Object = clay_object_new();
     clay_Object->refcount = 1000000; /* never freed */
