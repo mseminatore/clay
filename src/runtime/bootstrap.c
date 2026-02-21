@@ -161,6 +161,17 @@ static ClayValue object_inspect(ClayObject *self, int argc, ClayValue *argv) {
 
 /* Boolean methods */
 
+/* Identity-based equality for all objects */
+static ClayValue object_eq(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_FALSE;
+    return CLAY_BOOL(CLAY_VAL(self) == argv[0]);
+}
+
+static ClayValue object_neq(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_TRUE;
+    return CLAY_BOOL(CLAY_VAL(self) != argv[0]);
+}
+
 /*
  * ifTrue/ifFalse return a "condition result" object that supports chaining.
  * The result stores the value in a "_val" slot and the "_matched" flag.
@@ -285,6 +296,8 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Object, "toString", object_toString);
     clay_set_method(clay_Object, "println", object_println);
     clay_set_method(clay_Object, "doesNotUnderstand", object_doesNotUnderstand);
+    clay_set_method(clay_Object, "==", object_eq);
+    clay_set_method(clay_Object, "!=", object_neq);
     clay_set_method(clay_Object, "methods", object_methods);
     clay_set_method(clay_Object, "slots", object_slots);
     clay_set_method(clay_Object, "inspect", object_inspect);

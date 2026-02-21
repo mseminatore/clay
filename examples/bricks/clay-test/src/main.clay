@@ -1,0 +1,99 @@
+// clay-test — A simple testing framework for Clay
+//
+// Usage:
+//   import("clay-test")
+//
+//   Test describe("Math", {
+//       Test it("adds numbers", {
+//           Test assertEqual(1 + 1, 2)
+//       })
+//   })
+//
+//   Test run()
+
+Test = Object clone({
+    _passed = 0
+    _failed = 0
+    _errors = ""
+    _suite = ""
+
+    describe(name, block) {
+        self _suite = name
+        ("  " + name) println()
+        block value()
+        self _suite = ""
+        self
+    }
+
+    it(name, block) {
+        result = try({
+            block value()
+            "pass"
+        }) catch({ |e|
+            self _failed += 1
+            self _errors = self _errors + "    FAIL: " + self _suite + " > " + name + " — " + e message() + "\n"
+            "fail"
+        })
+        (result == "pass") ifTrue({
+            self _passed += 1
+            ("    ✓ " + name) println()
+        })
+        (result == "fail") ifTrue({
+            ("    ✗ " + name) println()
+        })
+        self
+    }
+
+    assertEqual(actual, expected) {
+        (actual == expected) ifFalse({
+            raise("expected " + expected + " but got " + actual)
+        })
+        self
+    }
+
+    assertNotEqual(actual, expected) {
+        (actual == expected) ifTrue({
+            raise("expected values to differ but both are " + actual)
+        })
+        self
+    }
+
+    assertTrue(value) {
+        (value == false) ifTrue({
+            raise("expected true but got false")
+        })
+        self
+    }
+
+    assertFalse(value) {
+        (value == true) ifTrue({
+            raise("expected false but got true")
+        })
+        self
+    }
+
+    assertRaises(block) {
+        caught = try({
+            block value()
+            "no error"
+        }) catch({ |e|
+            "caught"
+        })
+        (caught == "no error") ifTrue({
+            raise("expected an error but none was raised")
+        })
+        self
+    }
+
+    run() {
+        "" println()
+        total = self _passed + self _failed
+        ("" + total + " tests, " + self _passed + " passed, " + self _failed + " failed") println()
+        (self _failed > 0) ifTrue({
+            "" println()
+            "Failures:" println()
+            self _errors print()
+        })
+        self
+    }
+})

@@ -13,6 +13,62 @@ AstNode *ast_new(NodeType type, int line) {
     return node;
 }
 
+static void nodelist_clone(NodeList *dst, const NodeList *src);
+
+AstNode *ast_clone(AstNode *node) {
+    if (!node) return NULL;
+    AstNode *c = ast_new(node->type, node->line);
+    switch (node->type) {
+        case NODE_INT_LIT:
+            c->as.int_lit.value = node->as.int_lit.value;
+            break;
+        case NODE_FLOAT_LIT:
+            c->as.float_lit.value = node->as.float_lit.value;
+            break;
+        case NODE_STRING_LIT:
+            c->as.string_lit.value = strdup(node->as.string_lit.value);
+            break;
+        case NODE_IDENT:
+            c->as.ident.name = strdup(node->as.ident.name);
+            break;
+        case NODE_SELF:
+            break;
+        case NODE_ASSIGN:
+            c->as.assign.name = strdup(node->as.assign.name);
+            c->as.assign.value = ast_clone(node->as.assign.value);
+            break;
+        case NODE_SEND:
+            c->as.send.receiver = ast_clone(node->as.send.receiver);
+            c->as.send.message = strdup(node->as.send.message);
+            nodelist_clone(&c->as.send.args, &node->as.send.args);
+            break;
+        case NODE_BINARY:
+            c->as.binary.left = ast_clone(node->as.binary.left);
+            c->as.binary.op = strdup(node->as.binary.op);
+            c->as.binary.right = ast_clone(node->as.binary.right);
+            break;
+        case NODE_BLOCK:
+            nodelist_clone(&c->as.block.params, &node->as.block.params);
+            nodelist_clone(&c->as.block.body, &node->as.block.body);
+            break;
+        case NODE_SLOT_ASSIGN:
+            c->as.slot_assign.receiver = ast_clone(node->as.slot_assign.receiver);
+            c->as.slot_assign.slot_name = strdup(node->as.slot_assign.slot_name);
+            c->as.slot_assign.value = ast_clone(node->as.slot_assign.value);
+            break;
+        default:
+            /* Remaining node types not expected as compound assignment receivers */
+            break;
+    }
+    return c;
+}
+
+static void nodelist_clone(NodeList *dst, const NodeList *src) {
+    nodelist_init(dst);
+    for (int i = 0; i < src->count; i++)
+        nodelist_push(dst, ast_clone(src->items[i]));
+}
+
 void nodelist_init(NodeList *list) {
     list->items = NULL;
     list->count = 0;

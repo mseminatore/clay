@@ -1,0 +1,7 @@
+{
+    "name": "clay-test",
+    "version": "0.1.0",
+    "description": "A simple testing framework for Clay",
+    "main": "src/main.clay",
+    "deps": {}
+}

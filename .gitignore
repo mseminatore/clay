@@ -1,6 +1,8 @@
 # Directories
 build/
-bricks/
+
+# Installed brick dependencies (created by `bricks install`)
+**/bricks/bricks/
 
 # Generated C from Clay compiler
 test/programs/*.c

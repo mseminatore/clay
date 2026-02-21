@@ -730,7 +730,7 @@ static AstNode *parse_statement(Parser *p) {
 
             /* Build RHS: obj slot + expr → NODE_BINARY(NODE_SEND(recv, slot), op, expr) */
             AstNode *read_slot = ast_new(NODE_SEND, expr->line);
-            read_slot->as.send.receiver = expr->as.send.receiver;
+            read_slot->as.send.receiver = ast_clone(expr->as.send.receiver);
             read_slot->as.send.message = strdup(expr->as.send.message);
             nodelist_init(&read_slot->as.send.args);
 

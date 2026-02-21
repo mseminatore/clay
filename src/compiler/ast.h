@@ -122,6 +122,7 @@ struct AstNode {
 
 /* --- API --- */
 AstNode *ast_new(NodeType type, int line);
+AstNode *ast_clone(AstNode *node);
 void     ast_free(AstNode *node);
 
 void nodelist_init(NodeList *list);
