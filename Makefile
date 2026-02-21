@@ -3,6 +3,11 @@ CFLAGS = -std=c99 -Wall -Wextra -pedantic -g \
          -D_POSIX_C_SOURCE=200809L \
          -Isrc/runtime -Isrc/compiler -Isrc/vm/generated \
          -Ideps/hash -Ideps/testy
+# VM generated files use GNU computed gotos — drop -pedantic for them
+VM_CFLAGS = -std=c99 -Wall -Wextra -g \
+            -D_POSIX_C_SOURCE=200809L \
+            -Isrc/runtime -Isrc/compiler -Isrc/vm/generated \
+            -Ideps/hash -Ideps/testy
 AR = ar
 
 # Detect macOS for platform-specific linker flags
@@ -67,6 +72,10 @@ test: test_runner
 
 test_runner: $(TEST_OBJS) libclay.a libclayvm.a
 	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -L. -lclayvm -lclay -lm $(STACK_FLAGS)
+
+# VM generated files — compile without -pedantic
+src/vm/generated/%.o: src/vm/generated/%.c
+	$(CC) $(VM_CFLAGS) -c -o $@ $<
 
 # Generic rule
 %.o: %.c
