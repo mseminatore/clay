@@ -448,6 +448,16 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             break;
         case NODE_ASSIGN:
             scan_free_vars(node->as.assign.value, block_params, param_count, caps, cg);
+            /* Assignment target may also need capture if it's from enclosing scope */
+            {
+                const char *aname = node->as.assign.name;
+                if (!is_builtin_global(aname) &&
+                    !name_in_list(aname, block_params, param_count) &&
+                    !capture_has(caps, aname) &&
+                    is_local(cg, aname)) {
+                    capture_add(caps, aname);
+                }
+            }
             break;
         case NODE_CLONE:
             scan_free_vars(node->as.clone.proto, block_params, param_count, caps, cg);
