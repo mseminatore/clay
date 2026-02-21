@@ -19,11 +19,13 @@ Test = Object clone({
     _green = "\x1b[32m"
     _red = "\x1b[91m"
     _bold = "\x1b[1m"
+    _cyan = "\x1b[36m"
+    _dim = "\x1b[2m"
     _reset = "\x1b[0m"
 
     describe(name, block) {
         self _suite = name
-        (self _bold + "  " + name + self _reset) println()
+        (self _bold + self _cyan + "  " + name + self _reset) println()
         block value()
         self _suite = ""
         self
@@ -40,10 +42,10 @@ Test = Object clone({
         })
         (result == "pass") ifTrue({
             self _passed += 1
-            ("    " + self _green + "✓" + self _reset + " " + name) println()
+            ("    " + self _green + "✓" + self _reset + self _dim + " " + name + self _reset) println()
         })
         (result == "fail") ifTrue({
-            ("    " + self _red + "✗" + self _reset + " " + name) println()
+            ("    " + self _red + "✗ " + name + self _reset) println()
         })
         self
     }
