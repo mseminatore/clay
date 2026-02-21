@@ -353,7 +353,7 @@ Integers are tagged values (fast, no allocation). Floats are heap-allocated obje
 
 ### Strings
 
-Strings support C-style escape sequences: `\n` (newline), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (quote).
+Strings support C-style escape sequences: `\n` (newline), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (quote), `\xHH` (hex byte).
 
 ```clay
 s = "hello world"
@@ -554,6 +554,32 @@ my-project/
 ```
 
 The `bricks/` directory should be gitignored — it's recreated by `clay bricks install`.
+
+### Available bricks
+
+Clay ships with several bricks in `examples/bricks/`:
+
+| Brick | Description |
+|-------|-------------|
+| **clay-test** | Testing framework with `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
+| **clay-collections** | Set, Stack, Queue, Range data structures |
+| **clay-functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
+| **clay-format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
+| **clay-event** | `Emitter` pub/sub pattern: `on`, `off`, `emit`, `once`, `removeAll`, `listenerCount` |
+| **clay-json** | `Json` serialization: `stringify`, `prettyPrint` for nested dicts/arrays/values |
+
+To use a bundled brick, copy it into your project's `bricks/` directory:
+
+```sh
+mkdir -p bricks
+cp -r path/to/clay/examples/bricks/clay-test bricks/
+```
+
+Then import by name:
+
+```clay
+import("clay-test")
+```
 
 ## Dependencies
 
