@@ -1,0 +1,103 @@
+// clay-json — JSON stringify and parse for Clay
+//
+// Usage:
+//   import("clay-json")
+//
+//   Json stringify(Dict clone set("name", "Clay") set("version", 1))
+//   // => {"name": "Clay", "version": 1}
+//
+//   Json prettyPrint(dict, 2)
+//   // => formatted with indentation
+
+Json = Object clone({
+    _result = "null"
+    // --- Stringify ---
+
+    stringify(val) {
+        self _encode(val)
+    }
+
+    _encode(val) {
+        t = val type
+        (t == "Nil") ifTrue({ self _result = "null" })
+        (t == "Number") ifTrue({ self _result = val toString() })
+        (t == "Boolean") ifTrue({ self _result = val toString() })
+        (t == "String") ifTrue({ self _result = self _encodeString(val) })
+        (t == "Array") ifTrue({ self _result = self _encodeArray(val) })
+        (t == "Dict") ifTrue({ self _result = self _encodeDict(val) })
+        self _result
+    }
+
+    _encodeString(s) {
+        escaped = s replace("\\", "\\\\")
+        escaped = escaped replace("\"", "\\\"")
+        "\"" + escaped + "\""
+    }
+
+    _encodeArray(arr) {
+        parts = []
+        arr each({ |item|
+            parts append(self _encode(item))
+        })
+        "[" + parts join(", ") + "]"
+    }
+
+    _encodeDict(dict) {
+        parts = []
+        dict keys each({ |k|
+            parts append(self _encodeString(k) + ": " + self _encode(dict get(k)))
+        })
+        "{" + parts join(", ") + "}"
+    }
+
+    // --- Pretty print ---
+
+    prettyPrint(val) {
+        self _pretty(val, 0)
+    }
+
+    _pretty(val, depth) {
+        t = val type
+        self _result = self _encode(val)
+        (t == "Dict") ifTrue({ self _result = self _prettyDict(val, depth) })
+        (t == "Array") ifTrue({ self _result = self _prettyArray(val, depth) })
+        self _result
+    }
+
+    _indent(depth) {
+        result = ""
+        i = 0
+        { i < depth } whileTrue({
+            result = result + "  "
+            i += 1
+        })
+        result
+    }
+
+    _prettyDict(dict, depth) {
+        keys = dict keys
+        result = "{}"
+        (keys size > 0) ifTrue({
+            parts = []
+            pad = self _indent(depth + 1)
+            keys each({ |k|
+                parts append(pad + self _encodeString(k) + ": " + self _pretty(dict get(k), depth + 1))
+            })
+            result = "{\n" + parts join(",\n") + "\n" + self _indent(depth) + "}"
+        })
+        result
+    }
+
+    _prettyArray(arr, depth) {
+        result = "[]"
+        (arr size > 0) ifTrue({
+            parts = []
+            pad = self _indent(depth + 1)
+            arr each({ |item|
+                parts append(pad + self _pretty(item, depth + 1))
+            })
+            result = "[\n" + parts join(",\n") + "\n" + self _indent(depth) + "]"
+        })
+        result
+    }
+})
