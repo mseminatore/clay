@@ -1014,6 +1014,60 @@ static void test_vm_shared_captures(void) {
     }
 }
 
+static void test_vm_logical_operators(void) {
+    SUITE("VM Logical Operators (&&, ||, !)");
+
+    COMMENT("basic && truth table...");
+    {
+        TEST(vm_eval("true && true") == CLAY_TRUE);
+        TEST(vm_eval("true && false") == CLAY_FALSE);
+        TEST(vm_eval("false && true") == CLAY_FALSE);
+        TEST(vm_eval("false && false") == CLAY_FALSE);
+    }
+
+    COMMENT("basic || truth table...");
+    {
+        TEST(vm_eval("true || true") == CLAY_TRUE);
+        TEST(vm_eval("true || false") == CLAY_TRUE);
+        TEST(vm_eval("false || true") == CLAY_TRUE);
+        TEST(vm_eval("false || false") == CLAY_FALSE);
+    }
+
+    COMMENT("! (not) operator...");
+    {
+        TEST(vm_eval("!true") == CLAY_FALSE);
+        TEST(vm_eval("!false") == CLAY_TRUE);
+    }
+
+    COMMENT("short-circuit — && skips right when left is false...");
+    {
+        /* Division by zero would crash if right side were evaluated */
+        ClayValue r = vm_eval("false && (1 / 0)");
+        TEST(r == CLAY_FALSE);
+    }
+
+    COMMENT("short-circuit — || skips right when left is true...");
+    {
+        ClayValue r = vm_eval("true || (1 / 0)");
+        TEST(r == CLAY_TRUE);
+    }
+
+    COMMENT("mixed with comparison operators...");
+    {
+        TEST(vm_eval("(3 > 1) && (5 < 10)") == CLAY_TRUE);
+        TEST(vm_eval("(3 > 1) && (5 > 10)") == CLAY_FALSE);
+        TEST(vm_eval("(3 > 5) || (5 < 10)") == CLAY_TRUE);
+    }
+
+    COMMENT("chained logical operators...");
+    {
+        TEST(vm_eval("true && true && true") == CLAY_TRUE);
+        TEST(vm_eval("true && true && false") == CLAY_FALSE);
+        TEST(vm_eval("false || false || true") == CLAY_TRUE);
+        TEST(vm_eval("false || false || false") == CLAY_FALSE);
+    }
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -1039,6 +1093,7 @@ void test_main(int argc, char *argv[]) {
     test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures();
+    test_vm_logical_operators();
     /* test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures(); */

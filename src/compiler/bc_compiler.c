@@ -265,6 +265,21 @@ static void emit_op_u16(BcCompiler *bc, uint8_t op, uint16_t arg) {
     emit_u16(bc, arg);
 }
 
+/* Emit a jump instruction with a placeholder offset, return patch position */
+static int emit_jump(BcCompiler *bc, uint8_t jump_op) {
+    emit_op(bc, jump_op);
+    int patch_pos = bc->len;
+    emit_u16(bc, 0); /* placeholder */
+    return patch_pos;
+}
+
+/* Patch a previously emitted jump to target the current position */
+static void patch_jump(BcCompiler *bc, int patch_pos) {
+    int offset = bc->len - (patch_pos + 2);
+    bc->code[patch_pos]     = (uint8_t)(offset & 0xFF);
+    bc->code[patch_pos + 1] = (uint8_t)((offset >> 8) & 0xFF);
+}
+
 static int add_constant_int(BcCompiler *bc, int64_t val) {
     return clayvm_vm_add_constant(bc->vm, CLAYVM_INT64(val));
 }
@@ -472,6 +487,22 @@ static int native_cell_set_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* native_is_truthy(val) — push 1 or 0 (for JUMP_IF_FALSE) */
+static int native_is_truthy_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    ClayValue v = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_vm_push(vm, CLAYVM_INT64(CLAY_IS_TRUTHY(v) ? 1 : 0));
+    return 0;
+}
+
+/* native_to_bool(val) — push CLAY_TRUE or CLAY_FALSE */
+static int native_to_bool_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    ClayValue v = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_vm_push(vm, clay_to_vm(CLAY_IS_TRUTHY(v) ? CLAY_TRUE : CLAY_FALSE));
+    return 0;
+}
+
 /* native_make_array() — create empty array */
 static int native_make_array_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
@@ -602,6 +633,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_cell_new = clayvm_native_register(&vm->natives, "cell_new", native_cell_new_fn, 1);
     bc->native_cell_get = clayvm_native_register(&vm->natives, "cell_get", native_cell_get_fn, 1);
     bc->native_cell_set = clayvm_native_register(&vm->natives, "cell_set", native_cell_set_fn, 2);
+    bc->native_is_truthy = clayvm_native_register(&vm->natives, "is_truthy", native_is_truthy_fn, 1);
+    bc->native_to_bool = clayvm_native_register(&vm->natives, "to_bool", native_to_bool_fn, 1);
 
     /* Pre-register Clay builtin prototypes as globals */
     struct { const char *name; ClayObject *obj; } builtins[] = {
@@ -1188,14 +1221,43 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
 
         case NODE_BINARY: {
             const char *op = node->as.binary.op;
-            /* Check for pure integer ops */
-            if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
-                strcmp(op, "*") == 0 || strcmp(op, "/") == 0 ||
-                strcmp(op, "%") == 0 || strcmp(op, "==") == 0 ||
-                strcmp(op, "!=") == 0 || strcmp(op, "<") == 0 ||
-                strcmp(op, ">") == 0 || strcmp(op, "<=") == 0 ||
-                strcmp(op, ">=") == 0) {
-                /* Emit as message send for type safety */
+
+            if (strcmp(op, "&&") == 0) {
+                /* Short-circuit AND: if left is falsy, skip right */
+                bc_emit_expr(bc, node->as.binary.left);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_is_truthy);
+                emit_byte(bc, 1);
+                int false_jump = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+                bc_emit_expr(bc, node->as.binary.right);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_to_bool);
+                emit_byte(bc, 1);
+                int end_jump = emit_jump(bc, CLAYVM_OP_JUMP);
+                patch_jump(bc, false_jump);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+                    (uint16_t)clayvm_vm_add_constant(bc->vm,
+                        clay_to_vm(CLAY_FALSE)));
+                patch_jump(bc, end_jump);
+            } else if (strcmp(op, "||") == 0) {
+                /* Short-circuit OR: if left is truthy, skip right */
+                bc_emit_expr(bc, node->as.binary.left);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_is_truthy);
+                emit_byte(bc, 1);
+                int true_jump = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+                    (uint16_t)clayvm_vm_add_constant(bc->vm,
+                        clay_to_vm(CLAY_TRUE)));
+                int end_jump = emit_jump(bc, CLAYVM_OP_JUMP);
+                patch_jump(bc, true_jump);
+                bc_emit_expr(bc, node->as.binary.right);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_to_bool);
+                emit_byte(bc, 1);
+                patch_jump(bc, end_jump);
+            } else {
+                /* Arithmetic/comparison — emit as message send */
                 bc_emit_expr(bc, node->as.binary.left);
                 int sel_idx = add_constant_string(bc, op);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
@@ -1203,15 +1265,6 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
                 emit_u16(bc, (uint16_t)bc->native_send);
                 emit_byte(bc, 3); /* receiver + selector + 1 arg */
-            } else {
-                /* Unknown op — treat as send */
-                bc_emit_expr(bc, node->as.binary.left);
-                int sel_idx = add_constant_string(bc, op);
-                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
-                bc_emit_expr(bc, node->as.binary.right);
-                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-                emit_u16(bc, (uint16_t)bc->native_send);
-                emit_byte(bc, 3);
             }
             break;
         }

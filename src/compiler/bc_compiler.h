@@ -70,6 +70,8 @@ typedef struct {
     int native_cell_new;
     int native_cell_get;
     int native_cell_set;
+    int native_is_truthy;
+    int native_to_bool;
 
     int had_error;
 
