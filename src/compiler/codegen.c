@@ -303,6 +303,14 @@ static int is_local(CodeGen *cg, const char *name) {
     return 0;
 }
 
+/* Check if name is a method/block-specific local (not inherited from outer scope) */
+static int is_method_local(CodeGen *cg, const char *name) {
+    for (int i = cg->method_local_base; i < cg->local_count; i++) {
+        if (strcmp(cg->local_names[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
 static void clear_locals(CodeGen *cg) {
     for (int i = 0; i < cg->local_count; i++) free(cg->local_names[i]);
     cg->local_count = 0;
@@ -714,10 +722,8 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
         }
         fprintf(cg->out, "};\n");
         emit_indent(cg);
-        fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, %s_env, %d));\n",
+        fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new_cells(%s, %s_env, %d));\n",
                 t, fname, t, md->captures.count);
-        emit_indent(cg);
-        fprintf(cg->out, "CLAY_OBJ(%s)->as.block.env_are_cells = 1;\n", t);
     } else {
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, NULL, 0));\n", t, fname);
@@ -968,6 +974,8 @@ static void emit_method_bodies(CodeGen *cg) {
         int saved_in_method = cg->in_method;
         int saved_local_count = cg->local_count;
         int saved_boxed_count = cg->boxed_count;
+        int saved_method_local_base = cg->method_local_base;
+        cg->method_local_base = cg->local_count;
         cg->in_method = 1;
 
         if (node->type == NODE_METHOD_DEF) {
@@ -989,12 +997,15 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt->as.assign.value);
                     if (val) {
                         emit_indent(cg);
-                        if (is_local(cg, stmt->as.assign.name)) {
-                            /* Reassignment to existing local */
+                        if (is_boxed(cg, stmt->as.assign.name)) {
+                            fprintf(cg->out, "%s_cell->value = %s;\n", stmt->as.assign.name, val);
+                        } else if (is_method_local(cg, stmt->as.assign.name)) {
+                            /* Reassignment to existing method local */
                             fprintf(cg->out, "%s = %s;\n", stmt->as.assign.name, val);
                         } else {
-                            /* New local variable or slot assignment on self */
-                            fprintf(cg->out, "clay_set_slot(self, \"%s\", %s);\n", stmt->as.assign.name, val);
+                            /* New method-local variable */
+                            fprintf(cg->out, "ClayValue %s = %s;\n", stmt->as.assign.name, val);
+                            push_local(cg, stmt->as.assign.name);
                         }
                         fprintf(cg->out, "    _result = %s;\n", val);
                         free(val);
@@ -1069,6 +1080,7 @@ static void emit_method_bodies(CodeGen *cg) {
 
         /* Restore context */
         cg->in_method = saved_in_method;
+        cg->method_local_base = saved_method_local_base;
         /* Clear locals added in this scope */
         while (cg->local_count > saved_local_count) {
             cg->local_count--;
@@ -1104,6 +1116,7 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->local_names = NULL;
     cg->local_count = 0;
     cg->local_capacity = 0;
+    cg->method_local_base = 0;
     cg->boxed_names = NULL;
     cg->boxed_count = 0;
     cg->boxed_capacity = 0;

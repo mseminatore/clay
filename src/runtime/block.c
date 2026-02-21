@@ -29,6 +29,30 @@ ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size) {
     return obj;
 }
 
+/* Cell-aware variant: env entries are ClayCell pointers, not ClayObject pointers */
+ClayObject *clay_block_new_cells(ClayMethodFunc func, ClayValue *env, int env_size) {
+    ClayObject *obj = clay_object_new();
+    obj->type = CLAY_TYPE_BLOCK;
+    obj->parent = clay_Block;
+    if (clay_Block) clay_retain(clay_Block);
+    obj->as.block.func = func;
+    obj->as.block.env_are_cells = 1;
+
+    if (env && env_size > 0) {
+        obj->as.block.env = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)env_size);
+        obj->as.block.env_size = env_size;
+        for (int i = 0; i < env_size; i++) {
+            obj->as.block.env[i] = env[i];
+            clay_cell_retain((ClayCell *)(uintptr_t)env[i]);
+        }
+    } else {
+        obj->as.block.env = NULL;
+        obj->as.block.env_size = 0;
+    }
+
+    return obj;
+}
+
 /* Block "value" messages - call the block with arguments */
 static ClayValue block_value(ClayObject *self, int argc, ClayValue *argv) {
     if (self->type != CLAY_TYPE_BLOCK || !self->as.block.func) {

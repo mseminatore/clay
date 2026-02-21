@@ -180,6 +180,7 @@ size_t      clay_array_size(ClayObject *arr);
 
 /* --- Block helpers --- */
 ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size);
+ClayObject *clay_block_new_cells(ClayMethodFunc func, ClayValue *env, int env_size);
 
 /* --- Dict helpers --- */
 ClayObject *clay_dict_new(void);
