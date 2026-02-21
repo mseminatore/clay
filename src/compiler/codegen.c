@@ -60,7 +60,14 @@ static void emit_c_string(CodeGen *cg, const char *s) {
             case '\\': fprintf(cg->out, "\\\\"); break;
             case '\n': fprintf(cg->out, "\\n"); break;
             case '\t': fprintf(cg->out, "\\t"); break;
-            default:   fputc(*s, cg->out);
+            case '\r': fprintf(cg->out, "\\r"); break;
+            case '\0': fprintf(cg->out, "\\0"); break;
+            default:
+                if ((unsigned char)*s < 0x20 || (unsigned char)*s == 0x7f) {
+                    fprintf(cg->out, "\\x%02x", (unsigned char)*s);
+                } else {
+                    fputc(*s, cg->out);
+                }
         }
     }
     fputc('"', cg->out);
