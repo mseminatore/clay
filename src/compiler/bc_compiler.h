@@ -82,6 +82,9 @@ typedef struct {
     /* Enclosing scope locals (for capture scanning) */
     BcLocal *enclosing_locals;  /* pointer to outer scope's locals */
     int      enclosing_local_count;
+
+    /* Method context flag — 1 when compiling inside a method body */
+    int      in_method;
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);

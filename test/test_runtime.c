@@ -870,6 +870,88 @@ static void test_compound_assignment(void) {
     }
 }
 
+static void test_implicit_self(void) {
+    SUITE("VM Implicit Self");
+
+    COMMENT("bare slot read in method resolves to self slot...");
+    {
+        ClayValue r = vm_eval(
+            "P = Object clone({\n"
+            "    x = 10\n"
+            "    getX() { x }\n"
+            "})\n"
+            "p = P clone()\n"
+            "p getX()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 10);
+    }
+
+    COMMENT("method parameter shadows self slot...");
+    {
+        ClayValue r = vm_eval(
+            "P = Object clone({\n"
+            "    x = 10\n"
+            "    f(x) { x }\n"
+            "})\n"
+            "p = P clone()\n"
+            "p f(99)\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 99);
+    }
+
+    COMMENT("implicit self with arithmetic...");
+    {
+        ClayValue r = vm_eval(
+            "P = Object clone({\n"
+            "    x = 3\n"
+            "    y = 4\n"
+            "    sum() { x + y }\n"
+            "})\n"
+            "p = P clone()\n"
+            "p sum()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 7);
+    }
+
+    COMMENT("builtin globals still resolve in methods...");
+    {
+        ClayValue r = vm_eval(
+            "M = Object clone({\n"
+            "    make() { Object clone() }\n"
+            "})\n"
+            "m = M make()\n"
+            "m type()\n");
+        TEST(CLAY_IS_PTR(r));
+        TEST(CLAY_OBJ(r)->type == CLAY_TYPE_STRING);
+        TEST(strcmp(clay_string_data(CLAY_OBJ(r)), "Object") == 0);
+    }
+
+    COMMENT("global fallback outside methods still works...");
+    {
+        ClayValue r = vm_eval(
+            "x = 42\n"
+            "x\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 42);
+    }
+
+    COMMENT("bare assignment in method writes to self slot...");
+    {
+        ClayValue r = vm_eval(
+            "P = Object clone({\n"
+            "    x = 10\n"
+            "    f() {\n"
+            "        y = 20\n"
+            "        y\n"
+            "    }\n"
+            "})\n"
+            "p = P clone()\n"
+            "p f()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 20);
+    }
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -893,6 +975,7 @@ void test_main(int argc, char *argv[]) {
     test_constructors();
     test_vm_captures();
     test_compound_assignment();
+    test_implicit_self();
 
     clay_shutdown();
 }

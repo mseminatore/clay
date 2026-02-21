@@ -1,0 +1,56 @@
+// implicit_self.clay — Test implicit self slot resolution
+//
+// Inside methods, bare identifiers should resolve to self slots
+// when they are not local variables or parameters.
+
+Point = Object clone({
+    x = 0
+    y = 0
+
+    getX() {
+        x
+    }
+
+    getY() {
+        y
+    }
+
+    sum() {
+        x + y
+    }
+
+    setXY(newX, newY) {
+        self x = newX
+        self y = newY
+        self
+    }
+
+    paramsWin(x) {
+        x
+    }
+})
+
+p = Point clone()
+p setXY(3, 4)
+
+// Bare identifiers in methods should resolve to self slots
+p getX() println()
+p getY() println()
+p sum() println()
+
+// Parameters should shadow self slots
+p paramsWin(99) println()
+
+// Direct slot access still works
+p x println()
+p y println()
+
+// Globals like Object should still work inside methods
+Maker = Object clone({
+    make() {
+        Object clone()
+    }
+})
+
+m = Maker make()
+m type() println()

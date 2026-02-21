@@ -579,6 +579,24 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node);
 
 /* --- Local variable helpers --- */
 
+static int is_builtin_global(const char *name) {
+    return strcmp(name, "Object") == 0 ||
+           strcmp(name, "Number") == 0 ||
+           strcmp(name, "String") == 0 ||
+           strcmp(name, "Array") == 0 ||
+           strcmp(name, "Block") == 0 ||
+           strcmp(name, "Nil") == 0 ||
+           strcmp(name, "Boolean") == 0 ||
+           strcmp(name, "Error") == 0 ||
+           strcmp(name, "Dict") == 0 ||
+           strcmp(name, "Math") == 0 ||
+           strcmp(name, "Console") == 0 ||
+           strcmp(name, "File") == 0 ||
+           strcmp(name, "true") == 0 ||
+           strcmp(name, "false") == 0 ||
+           strcmp(name, "nil") == 0;
+}
+
 static int bc_resolve_local(BcCompiler *bc, const char *name) {
     for (int i = bc->local_count - 1; i >= 0; i--) {
         if (strcmp(bc->locals[i].name, name) == 0)
@@ -785,7 +803,7 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
  * after params (slots param_count, param_count+1, ...).
  * Returns the chunk_id, or -1 on error. */
 static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
-                            BcCaptureList *captures) {
+                            BcCaptureList *captures, int is_method) {
     if (bc->chunk_count >= BC_MAX_CHUNKS) {
         bc->had_error = 1;
         return -1;
@@ -815,6 +833,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     BcLocal saved_locals[BC_MAX_LOCALS];
     int saved_local_count = bc->local_count;
     int saved_scope_depth = bc->scope_depth;
+    int saved_in_method = bc->in_method;
     BcLocal *saved_enclosing = bc->enclosing_locals;
     int saved_enclosing_count = bc->enclosing_local_count;
     if (saved_local_count > 0)
@@ -828,6 +847,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->local_count = 0;
     bc->scope_depth = 0;
     bc->len = 0;
+    if (is_method) bc->in_method = 1;
 
     /* Register params as locals (slot 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
@@ -881,6 +901,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
 
     bc->local_count = saved_local_count;
     bc->scope_depth = saved_scope_depth;
+    bc->in_method = saved_in_method;
     bc->enclosing_locals = saved_enclosing;
     bc->enclosing_local_count = saved_enclosing_count;
     if (saved_local_count > 0)
@@ -914,13 +935,27 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_IDENT: {
-            /* Check locals first, fall back to global */
-            int slot = bc_resolve_local(bc, node->as.ident.name);
+            const char *ident_name = node->as.ident.name;
+            /* Check locals first */
+            int slot = bc_resolve_local(bc, ident_name);
             if (slot >= 0) {
                 emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
+            } else if (bc->in_method && !is_builtin_global(ident_name)) {
+                /* Inside a method: bare identifier → implicit self slot lookup.
+                 * Emit: load self, push slot name, send(name, 0 args) */
+                int self_idx = add_constant_string(bc, "self");
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)self_idx);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_load_global);
+                emit_byte(bc, 1);
+                int sel_idx = add_constant_string(bc, ident_name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_send);
+                emit_byte(bc, 2);
             } else {
                 /* Load global variable via native call */
-                int name_idx = add_constant_string(bc, node->as.ident.name);
+                int name_idx = add_constant_string(bc, ident_name);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
                 emit_u16(bc, (uint16_t)bc->native_load_global);
@@ -946,6 +981,20 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 bc_emit_expr(bc, node->as.assign.value);
                 emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
                 /* SET_LOCAL doesn't pop — value stays on stack */
+            } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
+                /* Inside a method, unknown vars are self slot writes (matches C codegen).
+                 * Emit: push self, push slot name, push value, call set_slot */
+                int self_idx = add_constant_string(bc, "self");
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)self_idx);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_load_global);
+                emit_byte(bc, 1);
+                int name_idx = add_constant_string(bc, node->as.assign.name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+                bc_emit_expr(bc, node->as.assign.value);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_set_slot);
+                emit_byte(bc, 3);
             } else {
                 /* Global: push name first, compile value, call store_global */
                 int name_idx = add_constant_string(bc, node->as.assign.name);
@@ -1026,7 +1075,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
 
             /* Compile block body to a new chunk (with capture locals) */
             int chunk_id = bc_compile_chunk(bc, &node->as.block.body,
-                                            &node->as.block.params, &caps);
+                                            &node->as.block.params, &caps, 0);
             if (chunk_id < 0) {
                 bc_capture_free(&caps);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
@@ -1109,7 +1158,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     /* Compile method body to a chunk */
                     int chunk_id = bc_compile_chunk(bc,
                         &member->as.method_def.body,
-                        &member->as.method_def.params, NULL);
+                        &member->as.method_def.params, NULL, 1);
                     if (chunk_id < 0 || g_method_slot_count >= 32) continue;
 
                     /* Register in method slot table */
@@ -1159,6 +1208,10 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
             bc_emit_expr(bc, node->as.assign.value);
             emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
             emit_op(bc, CLAYVM_OP_POP); /* discard (stmt context) */
+        } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
+            /* Inside a method, unknown vars are self slot writes (matches C codegen) */
+            bc_emit_expr(bc, node);  /* delegates to bc_emit_expr NODE_ASSIGN */
+            emit_op(bc, CLAYVM_OP_POP);
         } else {
             /* Global: push name first, then compile value */
             int name_idx = add_constant_string(bc, node->as.assign.name);
