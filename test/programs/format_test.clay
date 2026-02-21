@@ -1,0 +1,41 @@
+// Test clay-format brick
+import("../../examples/bricks/clay-format/src/main.clay")
+
+"=== padLeft ===" println()
+("[" + Fmt padLeft("hi", 10) + "]") println()
+("[" + Fmt padLeftWith("42", 6, "0") + "]") println()
+
+"=== padRight ===" println()
+("[" + Fmt padRight("hi", 10) + "]") println()
+("[" + Fmt padRightWith("hi", 8, ".") + "]") println()
+
+"=== center ===" println()
+("[" + Fmt center("hi", 10) + "]") println()
+
+"=== repeat ===" println()
+Fmt repeat("ab", 3) println()
+Fmt repeat("-", 20) println()
+
+"=== capitalize ===" println()
+Fmt capitalize("hello") println()
+
+"=== titleCase ===" println()
+Fmt titleCase("hello world foo") println()
+
+"=== truncate ===" println()
+Fmt truncate("hello world", 8) println()
+Fmt truncate("hi", 10) println()
+
+"=== join ===" println()
+Fmt join(["a", "b", "c"], "-") println()
+
+"=== chars ===" println()
+Fmt chars("abc") toString() println()
+
+"=== replaceAll ===" println()
+Fmt replaceAll("aXbXcX", "X", "_") println()
+
+"=== wrap ===" println()
+Fmt wrap("the quick brown fox jumps over the lazy dog", 15) println()
+
+"all done!" println()

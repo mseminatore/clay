@@ -1,0 +1,7 @@
+{
+    "name": "clay-format",
+    "version": "0.1.0",
+    "description": "String and number formatting utilities for Clay",
+    "main": "src/main.clay",
+    "deps": {}
+}
