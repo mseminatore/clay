@@ -716,6 +716,8 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, %s_env, %d));\n",
                 t, fname, t, md->captures.count);
+        emit_indent(cg);
+        fprintf(cg->out, "CLAY_OBJ(%s)->as.block.env_are_cells = 1;\n", t);
     } else {
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_block_new(%s, NULL, 0));\n", t, fname);

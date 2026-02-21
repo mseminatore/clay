@@ -87,6 +87,12 @@ set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 # Test runner
 add_executable(test_runner test/test_runtime.c)
 target_link_libraries(test_runner clay_compiler_lib testy)
+# Increase stack size — vm_eval allocates ~400KB per call (BcCompiler + VM stack)
+if(MSVC)
+    target_link_options(test_runner PRIVATE /STACK:4194304)
+else()
+    target_link_options(test_runner PRIVATE -Wl,-z,stacksize=4194304)
+endif()
 
 enable_testing()
 add_test(NAME clay_tests COMMAND test_runner)

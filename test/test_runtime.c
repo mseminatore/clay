@@ -6,6 +6,7 @@
 #include "parser.h"
 #include "bc_compiler.h"
 #include "vm.h"
+#include "hash.h"
 
 static void test_tagged_values(void) {
     SUITE("Tagged Values");
@@ -694,7 +695,11 @@ static void test_constructors(void) {
 
 /* Helper: compile and run Clay source via bytecode VM, return last stack value.
  * The VM and compiler are initialized/destroyed per call for isolation. */
+static int vm_eval_count = 0;
+
 static ClayValue vm_eval(const char *source) {
+    vm_eval_count++;
+    
     clayvm_vm_t vm;
     clayvm_vm_init(&vm);
     BcCompiler bc;
@@ -723,6 +728,10 @@ static ClayValue vm_eval(const char *source) {
     }
 
     ast_free(program);
+
+    /* Note: vm/bc resources (chunks, globals, natives) are intentionally
+     * not freed here to avoid use-after-free. Each vm_eval creates its own. */
+
     return result;
 }
 
@@ -794,8 +803,6 @@ static void test_vm_captures(void) {
 
     COMMENT("top-level variables remain globals (not captured)...");
     {
-        /* Top-level assigns use globals, so a block reading x
-         * always gets the current global value (late binding). */
         ClayValue r = vm_eval(
             "x = 10\n"
             "getter = { x }\n"
@@ -952,6 +959,61 @@ static void test_implicit_self(void) {
     }
 }
 
+static void test_vm_shared_captures(void) {
+    SUITE("VM Shared Captures (ClayCell)");
+
+    COMMENT("shared capture — two closures see each other's mutations...");
+    {
+        ClayValue r = vm_eval(
+            "f = { |x|\n"
+            "    inc = { x = x + 1; x }\n"
+            "    get = { x }\n"
+            "    [inc, get]\n"
+            "}\n"
+            "result = f value(0)\n"
+            "inc = result at(0)\n"
+            "get = result at(1)\n"
+            "inc value()\n"
+            "inc value()\n"
+            "get value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 2);
+    }
+
+    COMMENT("counter pattern — cell persists across calls...");
+    {
+        ClayValue r = vm_eval(
+            "makeCounter = { |start| { start = start + 1; start } }\n"
+            "c = makeCounter value(0)\n"
+            "c value()\n"
+            "c value()\n"
+            "c value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 3);
+    }
+
+    COMMENT("3-level nested capture through cells...");
+    {
+        ClayValue r = vm_eval(
+            "f = { |a| { |b| { a * b } } }\n"
+            "g = f value(3)\n"
+            "h = g value(5)\n"
+            "h value()\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 15);
+    }
+
+    COMMENT("capture with block passed to higher-order function...");
+    {
+        ClayValue r = vm_eval(
+            "f = { |x| { |y| x + y } }\n"
+            "adder = f value(100)\n"
+            "[1, 2, 3] map(adder) at(2)\n");
+        TEST(CLAY_IS_INT(r));
+        TEST(clay_to_int(r) == 103);
+    }
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -976,6 +1038,10 @@ void test_main(int argc, char *argv[]) {
     test_vm_captures();
     test_compound_assignment();
     test_implicit_self();
+    test_vm_shared_captures();
+    /* test_compound_assignment();
+    test_implicit_self();
+    test_vm_shared_captures(); */
 
     clay_shutdown();
 }

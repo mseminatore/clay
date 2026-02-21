@@ -67,6 +67,9 @@ typedef struct {
     int native_load_global;
     int native_store_global;
     int native_make_dict;
+    int native_cell_new;
+    int native_cell_get;
+    int native_cell_set;
 
     int had_error;
 

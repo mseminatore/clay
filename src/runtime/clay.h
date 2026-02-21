@@ -92,6 +92,7 @@ struct ClayObject {
             ClayMethodFunc func;
             ClayValue     *env;
             int            env_size;
+            int            env_are_cells; /* 1 = env entries are ClayCell pointers */
         } block;
 
         struct {

@@ -9,6 +9,7 @@ ClayObject *clay_block_new(ClayMethodFunc func, ClayValue *env, int env_size) {
     obj->parent = clay_Block;
     if (clay_Block) clay_retain(clay_Block);
     obj->as.block.func = func;
+    obj->as.block.env_are_cells = 0;
 
     if (env && env_size > 0) {
         obj->as.block.env = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)env_size);
