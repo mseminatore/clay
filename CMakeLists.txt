@@ -37,6 +37,7 @@ set(RUNTIME_SOURCES
     src/runtime/math.c
     src/runtime/file.c
     src/runtime/bootstrap.c
+    src/runtime/intern.c
 )
 
 add_library(clay_runtime STATIC ${RUNTIME_SOURCES})

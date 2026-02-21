@@ -136,6 +136,12 @@ ClayValue   clay_get_slot(ClayObject *obj, const char *name);
 void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func);
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
 
+/* --- String interning --- */
+const char *clay_intern(const char *name);
+
+/* --- Method cache --- */
+void clay_method_cache_clear(void);
+
 /* --- Memory management --- */
 ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);

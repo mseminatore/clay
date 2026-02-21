@@ -74,14 +74,21 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
         if (_fullpath(full, exe_path, sizeof(full))) {
             strncpy(exe_path, full, sizeof(exe_path) - 1);
         }
+        /* Strip binary name */
         char *sep = strrchr(exe_path, '\\');
         if (!sep) sep = strrchr(exe_path, '/');
         if (sep) *sep = '\0';
+        /* Check if parent is "Debug" or "Release" (multi-config generators) */
         sep = strrchr(exe_path, '\\');
         if (!sep) sep = strrchr(exe_path, '/');
-        if (sep) *sep = '\0';
-        sep = strrchr(exe_path, '\\');
-        if (!sep) sep = strrchr(exe_path, '/');
+        if (sep) {
+            if (strcmp(sep + 1, "Debug") == 0 || strcmp(sep + 1, "Release") == 0) {
+                *sep = '\0';
+                sep = strrchr(exe_path, '\\');
+                if (!sep) sep = strrchr(exe_path, '/');
+            }
+        }
+        /* Now at build/ — go up one more */
         if (sep) *sep = '\0';
         strncpy(clay_dir, exe_path, sz - 1);
     }
@@ -156,7 +163,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         }
         snprintf(cmd, sizeof(cmd),
             "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
-            "cl /nologo %s "
+            "cl /nologo %s /O2 /GF "
             "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" "
             "/D_CRT_SECURE_NO_WARNINGS "
             "/Fo\"%%TEMP%%\\\\\" "
@@ -174,6 +181,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
             "\"%s\\src\\runtime\\bootstrap.c\" "
             "\"%s\\src\\runtime\\math.c\" "
             "\"%s\\src\\runtime\\file.c\" "
+            "\"%s\\src\\runtime\\intern.c\" "
             "\"%s\\deps\\hash\\hash.c\" "
             "/Fe:\"%s\" %s\"",
             vs_path,
@@ -182,13 +190,13 @@ static int compile_c_file(const char *c_file, const char *output_name,
             c_file,
             clay_dir, clay_dir, clay_dir, clay_dir,
             clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
             output_name,
             quiet ? ">nul 2>&1" : "");
     }
 #else
     snprintf(cmd, sizeof(cmd),
-        "cc -std=c99 %s "
+        "cc -std=c99 -O2 %s "
         "-I\"%s/src/runtime\" -I\"%s/deps/hash\" "
         "\"%s\" "
         "\"%s/src/runtime/object.c\" "
@@ -204,6 +212,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "\"%s/src/runtime/bootstrap.c\" "
         "\"%s/src/runtime/math.c\" "
         "\"%s/src/runtime/file.c\" "
+        "\"%s/src/runtime/intern.c\" "
         "\"%s/deps/hash/hash.c\" "
         "-lm -o \"%s\"",
         quiet ? "-w" : "-Wall",
@@ -211,7 +220,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         c_file,
         clay_dir, clay_dir, clay_dir, clay_dir,
         clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
         output_name);
 #endif
     return system(cmd);

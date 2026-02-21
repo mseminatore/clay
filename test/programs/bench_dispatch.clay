@@ -1,0 +1,55 @@
+// bench_dispatch.clay — Benchmark message dispatch performance
+//
+// Tests tight loops with repeated message sends to measure
+// the effectiveness of inline caching.
+
+// Benchmark 1: Deep prototype chain (method inherited 3 levels up)
+Base = Object clone({
+    greet() { "hello" }
+})
+Mid = Base clone({
+    extra() { "mid" }
+})
+Child = Mid clone({
+    other() { "child" }
+})
+
+obj = Child clone()
+i = 0
+{ i < 200000 } whileTrue({
+    obj greet()
+    i = i + 1
+})
+("Deep chain: " + i) println()
+
+// Benchmark 2: Object method dispatch (slots + methods)
+Counter = Object clone({
+    _value = 0
+    inc() {
+        self _value = self _value + 1
+        self
+    }
+    get() {
+        self _value
+    }
+})
+
+c = Counter clone()
+i = 0
+{ i < 200000 } whileTrue({
+    c inc()
+    i = i + 1
+})
+("Counter: " + c get()) println()
+
+// Benchmark 3: Mixed sends (inherited + local methods)
+i = 0
+{ i < 100000 } whileTrue({
+    obj greet()
+    obj extra()
+    obj other()
+    c inc()
+    i = i + 1
+})
+("Mixed: " + i) println()
+("Counter: " + c get()) println()

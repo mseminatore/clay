@@ -120,6 +120,9 @@ void clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func) {
 
     char *key_copy = strdup(name);
     ht_insert(obj->methods, key_copy, (ht_value_t)m);
+
+    /* Invalidate method cache — methods table changed */
+    clay_method_cache_clear();
 }
 
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name) {

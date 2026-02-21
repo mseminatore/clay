@@ -1068,6 +1068,60 @@ static void test_vm_logical_operators(void) {
     }
 }
 
+/* --- Method cache invalidation --- */
+
+static ClayValue cache_test_hello(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new("hello"));
+}
+
+static ClayValue cache_test_world(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new("world"));
+}
+
+static void test_method_cache(void) {
+    SUITE("Method Cache");
+
+    COMMENT("cache returns correct method after warm-up...");
+    ClayObject *obj = clay_clone(clay_Object);
+    clay_set_method(obj, "greet", cache_test_hello);
+
+    /* Warm the cache with repeated sends */
+    ClayValue r1 = clay_send(obj, "greet", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r1)), "hello") == 0);
+    clay_release(CLAY_OBJ(r1));
+    ClayValue r2 = clay_send(obj, "greet", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r2)), "hello") == 0);
+    clay_release(CLAY_OBJ(r2));
+
+    COMMENT("cache invalidated when method is replaced...");
+    clay_set_method(obj, "greet", cache_test_world);
+    ClayValue r3 = clay_send(obj, "greet", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r3)), "world") == 0);
+    clay_release(CLAY_OBJ(r3));
+
+    COMMENT("inherited method cached and invalidated correctly...");
+    ClayObject *child = clay_clone(obj);
+    ClayValue r4 = clay_send(child, "greet", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r4)), "world") == 0);
+    clay_release(CLAY_OBJ(r4));
+
+    /* Override on child — cache should see new method */
+    clay_set_method(child, "greet", cache_test_hello);
+    ClayValue r5 = clay_send(child, "greet", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r5)), "hello") == 0);
+    clay_release(CLAY_OBJ(r5));
+
+    /* Parent unchanged */
+    ClayValue r6 = clay_send(obj, "greet", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(r6)), "world") == 0);
+    clay_release(CLAY_OBJ(r6));
+
+    clay_release(child);
+    clay_release(obj);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -1094,6 +1148,7 @@ void test_main(int argc, char *argv[]) {
     test_implicit_self();
     test_vm_shared_captures();
     test_vm_logical_operators();
+    test_method_cache();
     /* test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures(); */
