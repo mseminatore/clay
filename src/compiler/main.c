@@ -1,12 +1,16 @@
 /*
  * main.c - Clay compiler driver
  *
- * Usage: clay [options] <source.clay>
- *   -o <output>   Output binary name (default: a.out / a.exe)
- *   -c            Emit C code only (don't compile)
+ * Usage: clay [options] [source.clay]
+ *   --compile     Compile to native binary via C codegen
+ *   -o <output>   Output binary name (implies --compile)
+ *   -c            Emit C code only (implies --compile)
  *   --ast         Print AST and exit
- *   --repl        Interactive REPL (C compilation, also activates with no source file)
+ *   --repl        Interactive REPL (C compilation)
  *   --vm-repl     Interactive REPL (bytecode VM, faster)
+ *
+ * With no arguments, launches the VM REPL.
+ * With a source file, runs it in the bytecode VM.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -732,10 +736,90 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     return 0;
 }
 
+/* --- Run a .clay file through the bytecode VM --- */
+static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
+    char *source = read_file(filename);
+    clay_bootstrap();
+    repl_enable_color();
+
+    clayvm_vm_t vm;
+    clayvm_vm_init(&vm);
+    if (trace_mode) vm.trace_enabled = 1;
+
+    BcCompiler bc;
+    bc_compiler_init(&bc, &vm);
+
+    if (step_mode) {
+        g_step.stepping = 1;
+        g_step.last_line = 0;
+        g_step.continue_mode = 0;
+        g_step.bc = &bc;
+        g_step.source = source;
+        clayvm_vm_set_step_callback(&vm, step_callback);
+    }
+
+    Parser parser;
+    parser_init(&parser, source, filename);
+    AstNode *program = parser_parse(&parser);
+
+    if (!program || parser.had_error) {
+        fprintf(stderr, "clay: compilation failed due to parse errors\n");
+        if (program) ast_free(program);
+        free(source);
+        return 1;
+    }
+
+    if (bc_compile(&bc, program) != 0) {
+        fprintf(stderr, "clay: bytecode compilation failed\n");
+        ast_free(program);
+        free(source);
+        return 1;
+    }
+
+    int exit_code = 0;
+    vm.sp = 0;
+    int caught = clay_try_push();
+    if (caught != 0) {
+        ClayValue err = clay_error_stack.current_error;
+        if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+            ClayValue msg = clay_send_val(err, "message", 0, NULL);
+            fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
+                    clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
+            clay_release(CLAY_OBJ(msg));
+        } else {
+            fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
+        }
+        exit_code = 1;
+    } else {
+        int result;
+        if (step_mode) {
+            vm.code = bc.code;
+            vm.code_len = bc.len;
+            vm.ip = 0;
+            vm.sp = 0;
+            vm.running = 1;
+            result = 0;
+            while (vm.running && vm.ip < vm.code_len) {
+                if (clayvm_vm_step(&vm) < 0) break;
+            }
+        } else {
+            result = clayvm_vm_run(&vm, bc.code, bc.len);
+        }
+        clay_try_pop();
+
+        if (result != 0) exit_code = 1;
+    }
+
+    ast_free(program);
+    free(source);
+    return exit_code;
+}
+
 int main(int argc, char *argv[]) {
     const char *source_file = NULL;
     const char *output_name = NULL;
     int c_only = 0;
+    int compile_mode = 0;
     int print_ast = 0;
     int repl_mode = 0;
     int vm_repl_mode = 0;
@@ -752,8 +836,12 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             output_name = argv[++i];
+            compile_mode = 1;
         } else if (strcmp(argv[i], "-c") == 0) {
             c_only = 1;
+            compile_mode = 1;
+        } else if (strcmp(argv[i], "--compile") == 0) {
+            compile_mode = 1;
         } else if (strcmp(argv[i], "--ast") == 0) {
             print_ast = 1;
         } else if (strcmp(argv[i], "--repl") == 0) {
@@ -762,27 +850,27 @@ int main(int argc, char *argv[]) {
             vm_repl_mode = 1;
         } else if (strcmp(argv[i], "--trace") == 0) {
             trace_mode = 1;
-            vm_repl_mode = 1;
         } else if (strcmp(argv[i], "--step") == 0) {
             step_mode = 1;
-            vm_repl_mode = 1;
         } else if (strcmp(argv[i], "--mem-stats") == 0) {
             mem_stats = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
-            printf("  -o <output>   Output binary name\n");
-            printf("  -c            Emit C code only (no compile)\n");
+            printf("  --compile     Compile to native binary via C (instead of running in VM)\n");
+            printf("  -o <output>   Output binary name (implies --compile)\n");
+            printf("  -c            Emit C code only, no compile (implies --compile)\n");
             printf("  --ast         Print AST and exit\n");
             printf("  --repl        Launch interactive REPL (compiles to C)\n");
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
-            printf("  --trace       VM REPL with bytecode tracing\n");
-            printf("  --step        VM REPL with interactive stepping\n");
+            printf("  --trace       Bytecode tracing (VM REPL or file execution)\n");
+            printf("  --step        Interactive stepping debugger (VM REPL or file execution)\n");
             printf("  --mem-stats   Show memory stats on REPL exit\n");
             printf("  -h, --help    Show this help message\n");
             printf("\nSubcommands:\n");
             printf("  bricks        Package manager (clay bricks --help)\n");
             printf("\nWith no arguments, launches the VM REPL.\n");
+            printf("With a source file, runs it in the bytecode VM.\n");
             return 0;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "clay: unknown option '%s'\n", argv[i]);
@@ -796,6 +884,11 @@ int main(int argc, char *argv[]) {
         vm_repl_mode = 1; /* default to VM REPL if no source file */
     }
 
+    /* --trace/--step without a source file → VM REPL */
+    if (!source_file && (trace_mode || step_mode)) {
+        vm_repl_mode = 1;
+    }
+
     if (vm_repl_mode) {
         return run_vm_repl(trace_mode, step_mode, mem_stats);
     }
@@ -806,11 +899,37 @@ int main(int argc, char *argv[]) {
 
     if (!source_file) {
         fprintf(stderr, "Usage: clay [options] <source.clay>\n");
+        fprintf(stderr, "  --compile     Compile to native binary via C\n");
         fprintf(stderr, "  -o <output>   Output binary name\n");
         fprintf(stderr, "  -c            Emit C code only\n");
         fprintf(stderr, "  --ast         Print AST and exit\n");
         return 1;
     }
+
+    /* --ast: parse and print AST, then exit */
+    if (print_ast) {
+        char *source = read_file(source_file);
+        Parser parser;
+        parser_init(&parser, source, source_file);
+        AstNode *program = parser_parse(&parser);
+        if (parser.had_error) {
+            fprintf(stderr, "clay: compilation failed due to parse errors\n");
+            if (program) ast_free(program);
+            free(source);
+            return 1;
+        }
+        ast_print(program, 0);
+        ast_free(program);
+        free(source);
+        return 0;
+    }
+
+    /* Default: run in bytecode VM */
+    if (!compile_mode) {
+        return run_vm_file(source_file, trace_mode, step_mode);
+    }
+
+    /* --- C codegen path (--compile, -c, -o) --- */
 
     /* Read source */
     char *source = read_file(source_file);
@@ -825,13 +944,6 @@ int main(int argc, char *argv[]) {
         ast_free(program);
         free(source);
         return 1;
-    }
-
-    if (print_ast) {
-        ast_print(program, 0);
-        ast_free(program);
-        free(source);
-        return 0;
     }
 
     /* Generate C code */
