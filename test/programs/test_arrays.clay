@@ -1,6 +1,6 @@
 // test_arrays.clay — Array operations
 
-Test = Object clone({
+Test = Object clone {
     _p = 0
     _f = 0
 
@@ -25,7 +25,7 @@ Test = Object clone({
         (self _f > 0) ifTrue({ raise("test failures") })
         self
     }
-})
+}
 
 // Size
 Test eq([1, 2, 3] size(), 3)

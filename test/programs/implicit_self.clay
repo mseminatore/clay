@@ -3,7 +3,7 @@
 // Inside methods, bare identifiers should resolve to self slots
 // when they are not local variables or parameters.
 
-Point = Object clone({
+Point = Object clone {
     x = 0
     y = 0
 
@@ -28,7 +28,7 @@ Point = Object clone({
     paramsWin(x) {
         x
     }
-})
+}
 
 p = Point clone()
 p setXY(3, 4)
@@ -46,11 +46,11 @@ p x println()
 p y println()
 
 // Globals like Object should still work inside methods
-Maker = Object clone({
+Maker = Object clone {
     make() {
         Object clone()
     }
-})
+}
 
 m = Maker make()
 m type() println()

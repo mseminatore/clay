@@ -7,7 +7,7 @@
 //   Match value(x) whenType("String", { |v| v upper() }) else({ |v| v toString() })
 //   Match value(x) whenPred({ |v| v > 10 }, { "big" }) else({ "small" })
 
-Match = Object clone({
+Match = Object clone {
     _val = nil
     _matched = false
     _result = nil
@@ -61,4 +61,4 @@ Match = Object clone({
     result() {
         self _result
     }
-})
+}

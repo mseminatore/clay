@@ -1,12 +1,12 @@
 // point.clay - Prototype-based object example
-Point = Object clone({
+Point = Object clone {
   x = 0
   y = 0
 
   toString() {
     "(" + x toString() + ", " + y toString() + ")"
   }
-})
+}
 
 p = Point clone()
 

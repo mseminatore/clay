@@ -38,11 +38,11 @@ result4 = try({
 result4 println()
 
 // Test 5: Custom doesNotUnderstand
-Proxy = Object clone({
+Proxy = Object clone {
   doesNotUnderstand(name, args) {
     "forwarded: " + name
   }
-})
+}
 
 p = Proxy clone()
 p banana() println()

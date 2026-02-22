@@ -1,6 +1,6 @@
 // test_errors.clay — Error handling: try/catch/raise
 
-Test = Object clone({
+Test = Object clone {
     _p = 0
     _f = 0
     eq(a, b) {
@@ -19,7 +19,7 @@ Test = Object clone({
         (self _f > 0) ifTrue({ raise("test failures") })
         self
     }
-})
+}
 
 // Catch a raised string
 r1 = try({ raise("oops") }) catch({ |e| e message() })

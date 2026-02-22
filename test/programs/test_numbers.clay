@@ -1,7 +1,7 @@
 // test_numbers.clay — Number operations
 
 // Minimal test helper — uses few constants
-Test = Object clone({
+Test = Object clone {
     _p = 0
     _f = 0
 
@@ -26,7 +26,7 @@ Test = Object clone({
         (self _f > 0) ifTrue({ raise("test failures") })
         self
     }
-})
+}
 
 // Arithmetic
 Test eq(2 + 3, 5)

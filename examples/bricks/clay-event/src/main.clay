@@ -8,7 +8,7 @@
 //   emitter emit("click", "button1")
 //   emitter off("click")
 
-Emitter = Object clone({
+Emitter = Object clone {
     _handlers = nil
 
     new() {
@@ -75,4 +75,4 @@ Emitter = Object clone({
     events() {
         self _handlers keys
     }
-})
+}

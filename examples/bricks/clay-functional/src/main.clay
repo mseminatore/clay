@@ -13,7 +13,7 @@
 //
 //   5 times({ |i| i println() })
 
-Fn = Object clone({
+Fn = Object clone {
     // --- Core higher-order functions ---
 
     map(arr, block) {
@@ -142,4 +142,4 @@ Fn = Object clone({
     product(arr) {
         self reduce(arr, 1, { |acc, x| acc * x })
     }
-})
+}

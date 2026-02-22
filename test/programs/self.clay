@@ -1,6 +1,6 @@
 // self.clay - Test the self keyword
 
-Counter = Object clone({
+Counter = Object clone {
   count = 0
 
   inc() {
@@ -15,7 +15,7 @@ Counter = Object clone({
   toString() {
     "Counter(" + count toString() + ")"
   }
-})
+}
 
 c = Counter clone()
 
@@ -29,7 +29,7 @@ c toString() println()
 c value() println()
 
 // self in a method that returns self
-Dog = Object clone({
+Dog = Object clone {
   name = "unnamed"
 
   setName(n) {
@@ -40,7 +40,7 @@ Dog = Object clone({
   speak() {
     name + " says woof!"
   }
-})
+}
 
 d = Dog clone()
 d setName("Rex") speak() println()

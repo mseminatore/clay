@@ -19,7 +19,7 @@
 //   Range new(1, 5) each({ |i| i println() })
 
 // --- Set: unique elements backed by Dict ---
-Set = Object clone({
+Set = Object clone {
     _data = nil
 
     new() {
@@ -84,10 +84,10 @@ Set = Object clone({
         items = self toArray()
         "Set{" + items join(", ") + "}"
     }
-})
+}
 
 // --- Stack: LIFO backed by Array ---
-Stack = Object clone({
+Stack = Object clone {
     _items = nil
 
     new() {
@@ -130,10 +130,10 @@ Stack = Object clone({
     toString() {
         "Stack" + self _items toString()
     }
-})
+}
 
 // --- Queue: FIFO backed by Array ---
-Queue = Object clone({
+Queue = Object clone {
     _items = nil
 
     new() {
@@ -174,10 +174,10 @@ Queue = Object clone({
     toString() {
         "Queue" + self _items toString()
     }
-})
+}
 
 // --- Range: numeric iteration ---
-Range = Object clone({
+Range = Object clone {
     _start = 0
     _end = 0
     _step = 1
@@ -245,4 +245,4 @@ Range = Object clone({
     toString() {
         "Range(" + self _start toString() + ", " + self _end toString() + ", " + self _step toString() + ")"
     }
-})
+}

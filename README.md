@@ -56,12 +56,12 @@ Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)
 => [1, 2, 3]
 >>> (10 > 5) ifTrue({ "yes" }) ifFalse({ "no" })
 => yes
->>> Point = Object clone({
+>>> Point = Object clone {
 ...   x = 0
 ...   y = 0
 ...   getX() { self x() }
-... })
->>> p = Point clone({})
+... }
+>>> p = Point clone {}
 >>> p getX()
 => 0
 >>> quit
@@ -157,7 +157,7 @@ Standard math precedence applies.
 Objects are created by cloning a prototype and defining slots (data) and methods:
 
 ```clay
-Point = Object clone({
+Point = Object clone {
   x = 0
   y = 0
 
@@ -169,7 +169,7 @@ Point = Object clone({
   toString() {
     "(" + x toString() + ", " + y toString() + ")"
   }
-})
+}
 
 p = Point clone()
 p moveTo(3, 4)
@@ -201,14 +201,14 @@ Slot reads walk the prototype chain — if the object doesn't have the slot, its
 Define an `init` method on a prototype, then create instances with `new`:
 
 ```clay
-Point = Object clone({
+Point = Object clone {
   x = 0
   y = 0
   init(x, y) {
     self x = x
     self y = y
   }
-})
+}
 
 p = Point new(3, 4)
 p x             // => 3
@@ -218,7 +218,7 @@ p y             // => 4
 `new` clones the prototype and calls `init(args...)` on the clone if an `init` method exists. If there is no `init`, `new` just clones:
 
 ```clay
-Cat = Object clone({ name = "kitty" })
+Cat = Object clone { name = "kitty" }
 c = Cat new     // clones Cat, no init called
 c name          // => "kitty"
 ```
@@ -435,11 +435,11 @@ Error types include `DivisionByZero`, `MethodNotFound`, `NilError`, `TypeError`,
 Objects can override `doesNotUnderstand` for proxy-style dispatch:
 
 ```clay
-Proxy = Object clone({
+Proxy = Object clone {
   doesNotUnderstand(name, args) {
     "forwarding: " + name
   }
-})
+}
 ```
 
 ## Core Objects

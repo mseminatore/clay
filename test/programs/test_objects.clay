@@ -1,6 +1,6 @@
 // test_objects.clay — Object/prototype operations
 
-Test = Object clone({
+Test = Object clone {
     _p = 0
     _f = 0
     eq(a, b) {
@@ -19,42 +19,42 @@ Test = Object clone({
         (self _f > 0) ifTrue({ raise("test failures") })
         self
     }
-})
+}
 
 // Clone with slots
-P = Object clone({ x = 0; y = 0 })
+P = Object clone { x = 0; y = 0 }
 Test eq(P x, 0)
 Test eq(P y, 0)
 
 // Set slots
-o = Object clone({ v = 0 })
+o = Object clone { v = 0 }
 o v = 42
 Test eq(o v, 42)
 
 // Methods
-M = Object clone({ add(a, b) { a + b } })
+M = Object clone { add(a, b) { a + b } }
 Test eq(M add(3, 4), 7)
 
 // Prototype chain
-B = Object clone({ val() { 1 } })
-C = B clone({})
+B = Object clone { val() { 1 } }
+C = B clone {}
 Test eq(C val(), 1)
 
 // Constructor
-P2 = Object clone({
+P2 = Object clone {
     x = 0; y = 0
     init(a, b) { self x = a; self y = b }
-})
+}
 p = P2 new(3, 4)
 Test eq(p x, 3)
 Test eq(p y, 4)
 
 // Self
-Ctr = Object clone({
+Ctr = Object clone {
     n = 0
     inc() { self n = self n + 1; self }
-})
-c = Ctr clone({})
+}
+c = Ctr clone {}
 c inc(); c inc()
 Test eq(c n, 2)
 
@@ -63,16 +63,16 @@ Test eq(Object type(), "Object")
 Test eq(P2 type(), "P2")
 
 // Deep prototype chain
-A = Object clone({ a() { 1 } })
-B2 = A clone({ b() { 2 } })
-C2 = B2 clone({ c() { 3 } })
+A = Object clone { a() { 1 } }
+B2 = A clone { b() { 2 } }
+C2 = B2 clone { c() { 3 } }
 Test eq(C2 a(), 1)
 Test eq(C2 b(), 2)
 Test eq(C2 c(), 3)
 
 // Clone inherits slots
-Base = Object clone({ color = "red" })
-Child = Base clone({})
+Base = Object clone { color = "red" }
+Child = Base clone {}
 Test eq(Child color, "red")
 
 // Child slot override
@@ -81,28 +81,28 @@ Test eq(Child color, "blue")
 Test eq(Base color, "red")
 
 // Method with multiple statements
-Calc = Object clone({
+Calc = Object clone {
     compute(a, b) {
         sum = a + b
         prod = a * b
         sum + prod
     }
-})
+}
 Test eq(Calc compute(3, 4), 19)
 
 // doesNotUnderstand
-Proxy = Object clone({
+Proxy = Object clone {
     doesNotUnderstand(name, args) {
         "forwarded: " + name
     }
-})
+}
 px = Proxy clone()
 Test eq(px banana(), "forwarded: banana")
 
 // Multiple clones from same proto
-F = Object clone({ val = 0 })
-f1 = F clone({}); f1 val = 10
-f2 = F clone({}); f2 val = 20
+F = Object clone { val = 0 }
+f1 = F clone {}; f1 val = 10
+f2 = F clone {}; f2 val = 20
 Test eq(f1 val, 10)
 Test eq(f2 val, 20)
 Test eq(F val, 0)

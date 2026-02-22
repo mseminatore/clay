@@ -1,7 +1,7 @@
 //
 // A simple 2D vector class
 //
-Vector2d = Object clone({
+Vector2d = Object clone {
     x = 0 // Default value for x
     y = 0 // Default value for y
 
@@ -25,4 +25,4 @@ Vector2d = Object clone({
     magnitude () {
         ((self x * self x) + (self y * self y)) sqrt
     }
-})
+}

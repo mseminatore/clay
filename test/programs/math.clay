@@ -2,8 +2,8 @@
 
 square = { |x| x * x }
 
-Math = Object clone({
+Math = Object clone {
   abs(n) {
     (n < 0) ifTrue({ 0 - n }) ifFalse({ n })
   }
-})
+}

@@ -1,6 +1,6 @@
 /* Test super keyword for prototype chain method dispatch */
 
-Test = Object clone({
+Test = Object clone {
     _p = 0
     _f = 0
     eq(a, b) {
@@ -14,65 +14,65 @@ Test = Object clone({
         (self _f > 0) ifTrue({ raise("test failures") })
         self
     }
-})
+}
 
 /* Basic super call */
-Animal = Object clone({
+Animal = Object clone {
     speak() { "animal" }
-})
+}
 
-Dog = Animal clone({
+Dog = Animal clone {
     speak() { super speak() + "-dog" }
-})
+}
 
 Test eq(Dog speak(), "animal-dog")
 
 /* Super with arguments */
-Base = Object clone({
+Base = Object clone {
     add(a, b) { a + b }
-})
+}
 
-Child = Base clone({
+Child = Base clone {
     add(a, b) { super add(a, b) * 2 }
-})
+}
 
 Test eq(Child add(3, 4), 14)
 
 /* Multi-level super chain */
-A = Object clone({
+A = Object clone {
     greet() { "A" }
-})
+}
 
-B = A clone({
+B = A clone {
     greet() { super greet() + "B" }
-})
+}
 
-C = B clone({
+C = B clone {
     greet() { super greet() + "C" }
-})
+}
 
 Test eq(C greet(), "ABC")
 
 /* Super on cloned instance */
-Proto = Object clone({
+Proto = Object clone {
     value() { 10 }
-})
+}
 
-Sub = Proto clone({
+Sub = Proto clone {
     value() { super value() + 5 }
-})
+}
 
 inst = Sub clone()
 Test eq(inst value(), 15)
 
 /* Super unary (no args) */
-Base2 = Object clone({
+Base2 = Object clone {
     name() { "base" }
-})
+}
 
-Derived = Base2 clone({
+Derived = Base2 clone {
     name() { super name() }
-})
+}
 
 Test eq(Derived name(), "base")
 

@@ -11,7 +11,7 @@
 //   Log level("warn")   // only warn and error shown
 //   Log prefix("[app]") // set prefix
 
-Log = Object clone({
+Log = Object clone {
     _level = 1     // 0=debug, 1=info, 2=warn, 3=error
     _prefix = ""
 
@@ -64,4 +64,4 @@ Log = Object clone({
         _line = _line + msg
         _line println()
     }
-})
+}

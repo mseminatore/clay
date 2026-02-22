@@ -12,7 +12,7 @@
 //   Json prettyPrint(dict)
 //   // => formatted with indentation
 
-Json = Object clone({
+Json = Object clone {
     _result = "null"
     _src = ""
     _pos = 0
@@ -268,4 +268,4 @@ Json = Object clone({
         self _pos = self _pos + expected length()
         value
     }
-})
+}

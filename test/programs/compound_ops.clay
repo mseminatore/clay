@@ -14,7 +14,7 @@ x %= 3
 x println()
 
 // 2. Slot compound assignment
-Counter = Object clone({
+Counter = Object clone {
     count = 0
     increment() {
         self count += 1
@@ -31,7 +31,7 @@ Counter = Object clone({
     toString() {
         "Counter(" + self count + ")"
     }
-})
+}
 
 c = Counter clone
 c increment()

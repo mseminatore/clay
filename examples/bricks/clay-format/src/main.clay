@@ -11,7 +11,7 @@
 //   Fmt truncate("long string", 6) // "lon..."
 //   Fmt join(["a","b","c"], "-")   // "a-b-c"
 
-Fmt = Object clone({
+Fmt = Object clone {
     padLeft(str, width) {
         s = str toString()
         { s length < width } whileTrue({
@@ -148,4 +148,4 @@ Fmt = Object clone({
         })
         lines join("\n")
     }
-})
+}

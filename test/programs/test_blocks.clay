@@ -1,6 +1,6 @@
 // test_blocks.clay — Block/closure operations
 
-Test = Object clone({
+Test = Object clone {
     _p = 0
     _f = 0
 
@@ -25,7 +25,7 @@ Test = Object clone({
         (self _f > 0) ifTrue({ raise("test failures") })
         self
     }
-})
+}
 
 // Basic blocks
 Test eq({ 42 } value(), 42)

@@ -4,15 +4,15 @@
 // the effectiveness of inline caching.
 
 // Benchmark 1: Deep prototype chain (method inherited 3 levels up)
-Base = Object clone({
+Base = Object clone {
     greet() { "hello" }
-})
-Mid = Base clone({
+}
+Mid = Base clone {
     extra() { "mid" }
-})
-Child = Mid clone({
+}
+Child = Mid clone {
     other() { "child" }
-})
+}
 
 obj = Child clone()
 i = 0
@@ -23,7 +23,7 @@ i = 0
 ("Deep chain: " + i) println()
 
 // Benchmark 2: Object method dispatch (slots + methods)
-Counter = Object clone({
+Counter = Object clone {
     _value = 0
     inc() {
         self _value = self _value + 1
@@ -32,7 +32,7 @@ Counter = Object clone({
     get() {
         self _value
     }
-})
+}
 
 c = Counter clone()
 i = 0

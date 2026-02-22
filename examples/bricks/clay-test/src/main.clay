@@ -11,7 +11,7 @@
 //
 //   Test run()
 
-Test = Object clone({
+Test = Object clone {
     _passed = 0
     _failed = 0
     _errors = ""
@@ -104,4 +104,4 @@ Test = Object clone({
         })
         self
     }
-})
+}
