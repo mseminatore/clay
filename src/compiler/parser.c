@@ -816,10 +816,15 @@ void parser_init(Parser *p, const char *source, const char *filename) {
 static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     char *resolved = NULL;
 
-    /* Check if this is a brick import (no path separators, no .clay extension) */
-    if (!strchr(import_path, '/') && !strchr(import_path, '\\') &&
-        !strstr(import_path, ".clay")) {
-        /* Try bricks/<name>/brick.json for main entry point */
+    /* Check if this is a brick import.
+     * Bricks: no .clay extension, no backslash, doesn't start with "." (relative path).
+     * Simple brick: "clay-match" (no /)
+     * Monorepo brick: "clay-stdlib/match" (has /) */
+    int is_brick = !strstr(import_path, ".clay") &&
+                   !strchr(import_path, '\\') &&
+                   import_path[0] != '.';
+    if (is_brick) {
+        /* Try bricks/<path>/brick.json for main entry point */
         char manifest_path[BRICK_MAX_PATH];
         snprintf(manifest_path, sizeof(manifest_path), "bricks/%s/brick.json", import_path);
         BrickManifest bm;
@@ -831,7 +836,7 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
                 resolved = strdup(brick_main);
             }
         }
-        /* Fallback: bricks/<name>/src/main.clay */
+        /* Fallback: bricks/<path>/src/main.clay */
         if (!resolved) {
             char fallback[BRICK_MAX_PATH];
             snprintf(fallback, sizeof(fallback), "bricks/%s/src/main.clay", import_path);

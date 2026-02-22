@@ -1,0 +1,18 @@
+// Test monorepo brick imports
+import("clay-stdlib/utils")
+import("clay-stdlib/helpers")
+
+passed = 0
+failed = 0
+
+// Test 1: utils brick provides double
+result = double value(21)
+(result == 42) ifTrue({ passed = passed + 1 })
+(!(result == 42)) ifTrue({ "FAIL: double(21) should be 42" println(); failed = failed + 1 })
+
+// Test 2: helpers brick provides greet
+msg = greet value("Clay")
+(msg == "Hello, Clay") ifTrue({ passed = passed + 1 })
+(!(msg == "Hello, Clay")) ifTrue({ "FAIL: greet(Clay) should be Hello, Clay" println(); failed = failed + 1 })
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

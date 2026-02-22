@@ -154,24 +154,6 @@ static void make_dir(const char *path) {
 #endif
 }
 
-/* Extract brick name from URL: "github.com/user/my-lib@v1.0" → "my-lib" */
-static void url_to_name(const char *url, char *name, size_t sz) {
-    /* Strip @tag if present */
-    char tmp[BRICK_MAX_PATH];
-    strncpy(tmp, url, sizeof(tmp) - 1);
-    tmp[sizeof(tmp) - 1] = '\0';
-    char *at = strchr(tmp, '@');
-    if (at) *at = '\0';
-
-    /* Find last / segment */
-    const char *last = strrchr(tmp, '/');
-    if (last) last++;
-    else last = tmp;
-
-    strncpy(name, last, sz - 1);
-    name[sz - 1] = '\0';
-}
-
 /* Split URL into clone URL and ref: "github.com/user/lib@v1.0" → "https://github.com/user/lib", "v1.0" */
 static void split_url_ref(const char *url, char *clone_url, size_t url_sz,
                            char *ref, size_t ref_sz) {
@@ -196,47 +178,229 @@ static void split_url_ref(const char *url, char *clone_url, size_t url_sz,
     }
 }
 
-/* Install a single dependency. Returns 0 on success. */
-static int install_dep(const char *url, const char *name) {
-    char clone_url[BRICK_MAX_PATH], ref[256];
-    split_url_ref(url, clone_url, sizeof(clone_url), ref, sizeof(ref));
+/*
+ * Split a monorepo URL into repo URL, subpath, and ref.
+ * "github.com/user/repo/sub/path@v1.0" →
+ *   clone_url = "https://github.com/user/repo"
+ *   subpath   = "sub/path"
+ *   ref       = "v1.0"
+ *
+ * URL format: host/owner/repo[/subpath][@ref]
+ * The first 3 slash-separated segments (after stripping protocol) are the repo.
+ */
+static void split_url_parts(const char *url,
+                             char *clone_url, size_t url_sz,
+                             char *subpath, size_t sub_sz,
+                             char *ref, size_t ref_sz) {
+    char tmp[BRICK_MAX_PATH];
+    strncpy(tmp, url, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
 
-    char dest[BRICK_MAX_PATH];
-    snprintf(dest, sizeof(dest), "bricks/%s", name);
-
-    /* Check if already exists */
-    struct stat st;
-    if (stat(dest, &st) == 0) {
-        printf("  %s: already installed\n", name);
-        return 0;
+    /* Strip @ref */
+    ref[0] = '\0';
+    char *at = strchr(tmp, '@');
+    if (at) {
+        strncpy(ref, at + 1, ref_sz - 1);
+        ref[ref_sz - 1] = '\0';
+        *at = '\0';
     }
 
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"", clone_url, dest);
-    printf("  Installing %s from %s...\n", name, clone_url);
-    int rc = system(cmd);
-    if (rc != 0) {
-        fprintf(stderr, "  error: failed to clone %s\n", clone_url);
-        return -1;
+    /* Strip protocol prefix for segment counting */
+    const char *path_start = tmp;
+    const char *prefix = "";
+    if (strncmp(tmp, "https://", 8) == 0) { path_start = tmp + 8; prefix = "https://"; }
+    else if (strncmp(tmp, "http://", 7) == 0) { path_start = tmp + 7; prefix = "http://"; }
+    else { prefix = "https://"; }
+
+    /* Count 3 segments: host/owner/repo */
+    int slashes = 0;
+    const char *p = path_start;
+    const char *repo_end = NULL;
+    while (*p) {
+        if (*p == '/') {
+            slashes++;
+            if (slashes == 3) { repo_end = p; break; }
+        }
+        p++;
     }
 
-    /* Checkout ref if specified */
-    if (ref[0]) {
-        snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"", dest, ref);
-        rc = system(cmd);
-        if (rc != 0) {
-            fprintf(stderr, "  warning: could not checkout '%s' for %s\n", ref, name);
+    subpath[0] = '\0';
+    if (repo_end) {
+        /* Have subpath after 3rd slash */
+        size_t repo_len = (size_t)(repo_end - path_start);
+        snprintf(clone_url, url_sz, "%s%.*s", prefix, (int)repo_len, path_start);
+        if (*(repo_end + 1)) {
+            strncpy(subpath, repo_end + 1, sub_sz - 1);
+            subpath[sub_sz - 1] = '\0';
+        }
+    } else {
+        /* No subpath — simple repo URL */
+        snprintf(clone_url, url_sz, "%s%s", prefix, path_start);
+    }
+}
+
+/* Extract repo name from URL path (3rd segment): "github.com/user/my-repo/..." → "my-repo" */
+static void url_to_repo_name(const char *url, char *name, size_t sz) {
+    char tmp[BRICK_MAX_PATH];
+    strncpy(tmp, url, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    char *at = strchr(tmp, '@');
+    if (at) *at = '\0';
+
+    /* Strip protocol */
+    const char *p = tmp;
+    if (strncmp(p, "https://", 8) == 0) p += 8;
+    else if (strncmp(p, "http://", 7) == 0) p += 7;
+
+    /* Find 3rd segment (repo name) = between 2nd and 3rd slash */
+    int slashes = 0;
+    const char *seg_start = NULL;
+    const char *seg_end = NULL;
+    for (const char *c = p; *c; c++) {
+        if (*c == '/') {
+            slashes++;
+            if (slashes == 2) seg_start = c + 1;
+            if (slashes == 3) { seg_end = c; break; }
         }
     }
+    if (seg_start && !seg_end) seg_end = p + strlen(p);
+    if (seg_start && seg_end > seg_start) {
+        size_t len = (size_t)(seg_end - seg_start);
+        if (len >= sz) len = sz - 1;
+        memcpy(name, seg_start, len);
+        name[len] = '\0';
+    } else {
+        /* Fallback: last segment */
+        const char *last = strrchr(tmp, '/');
+        strncpy(name, last ? last + 1 : tmp, sz - 1);
+        name[sz - 1] = '\0';
+    }
+}
 
-    /* Recursively install sub-dependencies */
-    char sub_manifest[BRICK_MAX_PATH];
-    snprintf(sub_manifest, sizeof(sub_manifest), "%s/brick.json", dest);
-    BrickManifest sub;
-    if (brick_parse(sub_manifest, &sub) == 0 && sub.dep_count > 0) {
-        printf("  Installing dependencies of %s...\n", name);
-        for (int i = 0; i < sub.dep_count; i++) {
-            install_dep(sub.deps[i].url, sub.deps[i].name);
+/* Extract brick name from URL.
+ * Simple: "github.com/user/my-lib@v1.0" → "my-lib"
+ * Monorepo: "github.com/user/stdlib/match@v1.0" → "stdlib/match" */
+static void url_to_name(const char *url, char *name, size_t sz) {
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+
+    if (subpath[0]) {
+        /* Monorepo: name = repo-name/subpath */
+        char repo[BRICK_MAX_NAME];
+        url_to_repo_name(url, repo, sizeof(repo));
+        snprintf(name, sz, "%s/%s", repo, subpath);
+    } else {
+        /* Simple: last segment of URL */
+        char tmp[BRICK_MAX_PATH];
+        strncpy(tmp, url, sizeof(tmp) - 1);
+        tmp[sizeof(tmp) - 1] = '\0';
+        char *at = strchr(tmp, '@');
+        if (at) *at = '\0';
+        const char *last = strrchr(tmp, '/');
+        if (last) last++;
+        else last = tmp;
+        strncpy(name, last, sz - 1);
+        name[sz - 1] = '\0';
+    }
+}
+
+/* Install a single dependency. Returns 0 on success. */
+static int install_dep(const char *url, const char *name) {
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+
+    if (subpath[0]) {
+        /* Monorepo: clone into bricks/<repo-name>/, brick at subpath */
+        char repo_name[BRICK_MAX_NAME];
+        url_to_repo_name(url, repo_name, sizeof(repo_name));
+
+        char repo_dest[BRICK_MAX_PATH];
+        snprintf(repo_dest, sizeof(repo_dest), "bricks/%s", repo_name);
+
+        struct stat st;
+        if (stat(repo_dest, &st) != 0) {
+            /* Clone the repo (first sub-brick from this repo) */
+            char cmd[2048];
+            snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"",
+                     clone_url, repo_dest);
+            printf("  Cloning %s...\n", repo_name);
+            int rc = system(cmd);
+            if (rc != 0) {
+                fprintf(stderr, "  error: failed to clone %s\n", clone_url);
+                return -1;
+            }
+            if (ref[0]) {
+                snprintf(cmd, sizeof(cmd),
+                         "git -C \"%s\" checkout --quiet \"%s\"", repo_dest, ref);
+                rc = system(cmd);
+                if (rc != 0)
+                    fprintf(stderr, "  warning: could not checkout '%s'\n", ref);
+            }
+        }
+
+        /* Verify the sub-brick exists */
+        char brick_dir[BRICK_MAX_PATH];
+        snprintf(brick_dir, sizeof(brick_dir), "bricks/%s/%s", repo_name, subpath);
+        struct stat st2;
+        if (stat(brick_dir, &st2) != 0) {
+            fprintf(stderr, "  error: sub-brick '%s' not found in %s\n",
+                    subpath, repo_name);
+            return -1;
+        }
+
+        printf("  Installed %s (from %s)\n", name, repo_name);
+
+        /* Recursively install sub-dependencies from the sub-brick's manifest */
+        char sub_manifest[BRICK_MAX_PATH];
+        snprintf(sub_manifest, sizeof(sub_manifest), "%s/brick.json", brick_dir);
+        BrickManifest sub;
+        if (brick_parse(sub_manifest, &sub) == 0 && sub.dep_count > 0) {
+            printf("  Installing dependencies of %s...\n", name);
+            for (int i = 0; i < sub.dep_count; i++) {
+                install_dep(sub.deps[i].url, sub.deps[i].name);
+            }
+        }
+    } else {
+        /* Simple single-brick repo (existing behavior) */
+        char dest[BRICK_MAX_PATH];
+        snprintf(dest, sizeof(dest), "bricks/%s", name);
+
+        struct stat st;
+        if (stat(dest, &st) == 0) {
+            printf("  %s: already installed\n", name);
+            return 0;
+        }
+
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"",
+                 clone_url, dest);
+        printf("  Installing %s from %s...\n", name, clone_url);
+        int rc = system(cmd);
+        if (rc != 0) {
+            fprintf(stderr, "  error: failed to clone %s\n", clone_url);
+            return -1;
+        }
+
+        if (ref[0]) {
+            snprintf(cmd, sizeof(cmd),
+                     "git -C \"%s\" checkout --quiet \"%s\"", dest, ref);
+            rc = system(cmd);
+            if (rc != 0)
+                fprintf(stderr, "  warning: could not checkout '%s' for %s\n",
+                        ref, name);
+        }
+
+        /* Recursively install sub-dependencies */
+        char sub_manifest[BRICK_MAX_PATH];
+        snprintf(sub_manifest, sizeof(sub_manifest), "%s/brick.json", dest);
+        BrickManifest sub;
+        if (brick_parse(sub_manifest, &sub) == 0 && sub.dep_count > 0) {
+            printf("  Installing dependencies of %s...\n", name);
+            for (int i = 0; i < sub.dep_count; i++) {
+                install_dep(sub.deps[i].url, sub.deps[i].name);
+            }
         }
     }
 
@@ -356,6 +520,11 @@ static int cmd_remove(const char *name) {
         return 1;
     }
 
+    /* Check if this is a monorepo sub-brick */
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(m.deps[found].url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+
     /* Remove from array */
     for (int i = found; i < m.dep_count - 1; i++) {
         m.deps[i] = m.deps[i + 1];
@@ -364,14 +533,53 @@ static int cmd_remove(const char *name) {
     brick_write("brick.json", &m);
     printf("Removed '%s' from brick.json\n", name);
 
-    /* Remove directory */
-    char cmd[BRICK_MAX_PATH];
+    if (subpath[0]) {
+        /* Monorepo: only remove repo dir if no other deps use it */
+        char repo_name[BRICK_MAX_NAME];
+        url_to_repo_name(m.deps[found < m.dep_count ? found : 0].url,
+                         repo_name, sizeof(repo_name));
+        /* Re-derive repo name from the removed dep's URL (saved before shift) */
+        /* Actually we need the original URL — use clone_url to get repo name */
+        {
+            const char *p = clone_url;
+            if (strncmp(p, "https://", 8) == 0) p += 8;
+            else if (strncmp(p, "http://", 7) == 0) p += 7;
+            const char *last = strrchr(p, '/');
+            if (last) {
+                strncpy(repo_name, last + 1, sizeof(repo_name) - 1);
+                repo_name[sizeof(repo_name) - 1] = '\0';
+            }
+        }
+
+        int others_use_repo = 0;
+        for (int i = 0; i < m.dep_count; i++) {
+            char other_repo[BRICK_MAX_NAME];
+            url_to_repo_name(m.deps[i].url, other_repo, sizeof(other_repo));
+            if (strcmp(other_repo, repo_name) == 0) {
+                others_use_repo = 1;
+                break;
+            }
+        }
+        if (!others_use_repo) {
+            char cmd[BRICK_MAX_PATH];
 #ifdef _WIN32
-    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul", name);
+            snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul",
+                     repo_name);
 #else
-    snprintf(cmd, sizeof(cmd), "rm -rf \"bricks/%s\"", name);
+            snprintf(cmd, sizeof(cmd), "rm -rf \"bricks/%s\"", repo_name);
 #endif
-    system(cmd);
+            system(cmd);
+        }
+    } else {
+        /* Simple brick: remove its directory */
+        char cmd[BRICK_MAX_PATH];
+#ifdef _WIN32
+        snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul", name);
+#else
+        snprintf(cmd, sizeof(cmd), "rm -rf \"bricks/%s\"", name);
+#endif
+        system(cmd);
+    }
     return 0;
 }
 
@@ -395,35 +603,42 @@ static int cmd_list(void) {
 
 /* Update a single installed dependency by pulling latest or re-cloning */
 static int update_dep(const char *url, const char *name) {
-    char dest[BRICK_MAX_PATH];
-    snprintf(dest, sizeof(dest), "bricks/%s", name);
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+
+    /* For monorepo, git operations target the repo root */
+    char git_dir[BRICK_MAX_PATH];
+    if (subpath[0]) {
+        char repo_name[BRICK_MAX_NAME];
+        url_to_repo_name(url, repo_name, sizeof(repo_name));
+        snprintf(git_dir, sizeof(git_dir), "bricks/%s", repo_name);
+    } else {
+        snprintf(git_dir, sizeof(git_dir), "bricks/%s", name);
+    }
 
     struct stat st;
-    if (stat(dest, &st) != 0) {
+    if (stat(git_dir, &st) != 0) {
         printf("  %s: not installed, installing...\n", name);
         return install_dep(url, name);
     }
 
-    char clone_url[BRICK_MAX_PATH], ref[256];
-    split_url_ref(url, clone_url, sizeof(clone_url), ref, sizeof(ref));
-
     if (ref[0]) {
-        /* Pinned ref: fetch and checkout the specific ref */
         char cmd[2048];
-        snprintf(cmd, sizeof(cmd), "git -C \"%s\" fetch --quiet origin", dest);
+        snprintf(cmd, sizeof(cmd), "git -C \"%s\" fetch --quiet origin", git_dir);
         printf("  Updating %s (ref: %s)...\n", name, ref);
         int rc = system(cmd);
         if (rc != 0) {
             fprintf(stderr, "  warning: fetch failed for %s\n", name);
             return -1;
         }
-        snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"", dest, ref);
+        snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"",
+                 git_dir, ref);
         system(cmd);
     } else {
-        /* No pinned ref: pull latest from default branch */
         char cmd[2048];
         printf("  Updating %s...\n", name);
-        snprintf(cmd, sizeof(cmd), "git -C \"%s\" pull --quiet", dest);
+        snprintf(cmd, sizeof(cmd), "git -C \"%s\" pull --quiet", git_dir);
         int rc = system(cmd);
         if (rc != 0) {
             fprintf(stderr, "  warning: pull failed for %s\n", name);
