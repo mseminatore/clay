@@ -177,6 +177,7 @@ extern ClayObject *clay_FFI;
 
 void clay_bootstrap(void);
 void clay_shutdown(void);
+void clay_set_args(int argc, char **argv);
 
 /* --- String helpers --- */
 ClayObject *clay_string_new(const char *str);

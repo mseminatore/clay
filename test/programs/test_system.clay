@@ -1,0 +1,59 @@
+// test_system.clay — Test System OS methods
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Test 1: platform returns a known string
+p = System platform()
+valid = (p == "windows") ifTrue({ true }) ifFalse({
+    (p == "macos") ifTrue({ true }) ifFalse({
+        (p == "linux") ifTrue({ true }) ifFalse({ false })
+    })
+})
+assert value(valid, "platform should be windows, macos, or linux")
+
+// Test 2: env returns nil for non-existent var
+assert value(System env("__CLAY_NONEXISTENT_VAR__") == nil, "env returns nil for missing var")
+
+// Test 3: env returns string for existing var (PATH always exists)
+path = System env("PATH")
+assert value(path != nil, "env(PATH) should not be nil")
+
+// Test 4: clock returns a number
+t = System clock()
+assert value(t >= 0, "clock should be >= 0")
+
+// Test 5: clock advances
+t1 = System clock()
+// Do some work
+x = 0
+i = 0
+{ (i < 10000) } whileTrue({
+    x = x + i
+    i = i + 1
+})
+t2 = System clock()
+assert value(t2 >= t1, "clock should not go backwards")
+
+// Test 6: args returns an array
+a = System args()
+assert value(a size() > 0, "args should have at least 1 element")
+
+// Test 7: first arg is the executable or script
+// (it's the clay executable path)
+assert value(a at(0) != nil, "first arg should not be nil")
+
+// Test 8: allocCount and deallocCount still work
+assert value(System allocCount() > 0, "allocCount > 0")
+assert value(System deallocCount() >= 0, "deallocCount >= 0")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

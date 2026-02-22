@@ -3,6 +3,12 @@
  */
 #include "clay.h"
 #include "ffi.h"
+#include <time.h>
+#ifdef _WIN32
+#include <stdlib.h>  /* getenv, exit */
+#else
+#include <stdlib.h>
+#endif
 
 /* Core prototypes - global singletons */
 ClayObject *clay_Object  = NULL;
@@ -339,6 +345,59 @@ static ClayValue system_dealloc_count(ClayObject *self, int argc, ClayValue *arg
     return clay_int((intptr_t)clay_dealloc_count);
 }
 
+/* Stored command-line args */
+static int s_argc = 0;
+static char **s_argv = NULL;
+
+void clay_set_args(int argc, char **argv) {
+    s_argc = argc;
+    s_argv = argv;
+}
+
+static ClayValue system_exit(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    int code = 0;
+    if (argc > 0 && CLAY_IS_INT(argv[0]))
+        code = (int)clay_to_int(argv[0]);
+    exit(code);
+    return CLAY_NIL; /* unreachable */
+}
+
+static ClayValue system_env(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0]))
+        return CLAY_NIL;
+    const char *name = clay_string_data(CLAY_OBJ(argv[0]));
+    const char *val = getenv(name);
+    if (!val) return CLAY_NIL;
+    return CLAY_VAL(clay_string_new(val));
+}
+
+static ClayValue system_args(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    ClayObject *arr = clay_array_new();
+    for (int i = 0; i < s_argc; i++) {
+        clay_array_append(arr, CLAY_VAL(clay_string_new(s_argv[i])));
+    }
+    return CLAY_VAL(arr);
+}
+
+static ClayValue system_platform(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+#if defined(_WIN32)
+    return CLAY_VAL(clay_string_new("windows"));
+#elif defined(__APPLE__)
+    return CLAY_VAL(clay_string_new("macos"));
+#else
+    return CLAY_VAL(clay_string_new("linux"));
+#endif
+}
+
+static ClayValue system_clock(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return clay_int((intptr_t)(clock() * 1000 / CLOCKS_PER_SEC));
+}
+
 void clay_bootstrap(void) {
 #ifdef _WIN32
     /* Enable UTF-8 output and ANSI color sequences on Windows console */
@@ -476,6 +535,11 @@ void clay_bootstrap(void) {
     clay_set_slot(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
+    clay_set_method(clay_System, "exit", system_exit);
+    clay_set_method(clay_System, "env", system_env);
+    clay_set_method(clay_System, "args", system_args);
+    clay_set_method(clay_System, "platform", system_platform);
+    clay_set_method(clay_System, "clock", system_clock);
 
     /* FFI object — foreign function interface */
     clay_FFI = clay_object_new();

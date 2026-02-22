@@ -120,3 +120,4 @@ add_test(NAME clay_test_monorepo_import COMMAND clay_compiler ${CMAKE_CURRENT_SO
 set_tests_properties(clay_test_monorepo_import PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/mock_monorepo)
 add_test(NAME clay_test_memory COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_memory.clay)
 add_test(NAME clay_test_file_ops COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_file_ops.clay)
+add_test(NAME clay_test_system COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_system.clay)

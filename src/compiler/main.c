@@ -818,6 +818,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 }
 
 int main(int argc, char *argv[]) {
+    clay_set_args(argc, argv);
     const char *source_file = NULL;
     const char *output_name = NULL;
     int c_only = 0;
