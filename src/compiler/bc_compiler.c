@@ -1477,17 +1477,30 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             } else {
                 /* Map arithmetic operators to VM opcodes for fast path */
                 int vm_op = -1;
+                int is_cmp = 0;
                 if      (strcmp(op, "+")  == 0) vm_op = CLAYVM_OP_ADD;
                 else if (strcmp(op, "-")  == 0) vm_op = CLAYVM_OP_SUB;
                 else if (strcmp(op, "*")  == 0) vm_op = CLAYVM_OP_MUL;
                 else if (strcmp(op, "/")  == 0) vm_op = CLAYVM_OP_DIV;
                 else if (strcmp(op, "%")  == 0) vm_op = CLAYVM_OP_MOD;
+                else if (strcmp(op, "==") == 0) { vm_op = CLAYVM_OP_EQ;  is_cmp = 1; }
+                else if (strcmp(op, "!=") == 0) { vm_op = CLAYVM_OP_NEQ; is_cmp = 1; }
+                else if (strcmp(op, "<")  == 0) { vm_op = CLAYVM_OP_LT;  is_cmp = 1; }
+                else if (strcmp(op, ">")  == 0) { vm_op = CLAYVM_OP_GT;  is_cmp = 1; }
+                else if (strcmp(op, "<=") == 0) { vm_op = CLAYVM_OP_LTE; is_cmp = 1; }
+                else if (strcmp(op, ">=") == 0) { vm_op = CLAYVM_OP_GTE; is_cmp = 1; }
 
                 if (vm_op >= 0) {
-                    /* Arithmetic: emit operands then VM opcode */
+                    /* Emit operands then VM opcode */
                     bc_emit_expr(bc, node->as.binary.left);
                     bc_emit_expr(bc, node->as.binary.right);
                     emit_op(bc, (uint8_t)vm_op);
+                    if (is_cmp) {
+                        /* Normalize int64 0/1 to Clay boolean */
+                        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                        emit_u16(bc, (uint16_t)bc->native_to_bool);
+                        emit_byte(bc, 1);
+                    }
                 } else {
                     /* Comparisons and other ops: use native_send
                      * (comparisons must return Clay booleans, not VM ints) */
