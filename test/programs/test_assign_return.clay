@@ -1,0 +1,62 @@
+// test_assign_return.clay — Assignment as implicit return value
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({ self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() })
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+}
+
+// Block: last expression is assignment → returns assigned value
+result = { x = 42 } value()
+Test eq(result, 42)
+
+// Block: last expression is slot assignment → returns assigned value
+Obj = Object clone { val = 0 }
+result = {
+    Obj val = 99
+} value()
+Test eq(result, 99)
+Test eq(Obj val, 99)
+
+// Method: last expression is assignment → returns assigned value
+Calculator = Object clone {
+    _result = 0
+    compute(a, b) {
+        self _result = a + b
+    }
+}
+
+Test eq(Calculator compute(3, 7), 10)
+Test eq(Calculator _result, 10)
+
+// Method: regular expression still works as return
+Adder = Object clone {
+    add(a, b) { a + b }
+}
+Test eq(Adder add(5, 3), 8)
+
+// Block returning assignment used in control flow
+// Note: ifTrue returns a CondResult wrapper, not the raw value
+val = (true) ifTrue({ x = "yes" }) ifFalse({ "no" })
+Test eq(val, "yes")
+
+// Nested: method with block whose last stmt is assignment
+Container = Object clone {
+    _data = 0
+    process(v) {
+        r = v * 2
+    }
+}
+Test eq(Container process(5), 10)
+
+Test done()

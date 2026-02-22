@@ -487,7 +487,7 @@ static int native_set_slot_fn(clayvm_vm_t *vm, int argc) {
     ClayValue obj = vm_to_clay(clayvm_vm_pop(vm));
     const char *name = clay_string_data((ClayObject *)name_val.as.obj);
     clay_set_slot(CLAY_OBJ(obj), name, val);
-    clayvm_vm_push(vm, clay_to_vm(obj));
+    clayvm_vm_push(vm, clay_to_vm(val)); /* return assigned value */
     return 0;
 }
 
@@ -1257,24 +1257,18 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     }
 
     /* Compile body: intermediate stmts POP, last expr stays on stack */
-    int last_was_stmt = 0;
     for (int i = 0; i < body->count; i++) {
         AstNode *stmt = body->items[i];
         int is_last = (i == body->count - 1);
-        if (is_last && stmt->type != NODE_ASSIGN && stmt->type != NODE_SLOT_ASSIGN) {
+        if (is_last) {
             bc_emit_expr(bc, stmt);
-            last_was_stmt = 0;
         } else {
             bc_emit_stmt(bc, stmt);
-            last_was_stmt = 1;
         }
     }
 
-    /* If body was empty or last stmt was an assignment (value was POP'd),
-     * push nil so the block has a valid return value on the stack.
-     * Without this, the "return value" would be a stale local slot
-     * (possibly a cell pointer), causing heap corruption. */
-    if (body->count == 0 || last_was_stmt) {
+    /* If body was empty, push nil as return value */
+    if (body->count == 0) {
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
             (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
     }
@@ -1661,6 +1655,19 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
             emit_u16(bc, (uint16_t)bc->native_raise);
             emit_byte(bc, 1);
+            break;
+        }
+
+        case NODE_SLOT_ASSIGN: {
+            /* receiver slot = value → set_slot, return assigned value */
+            bc_emit_expr(bc, node->as.slot_assign.receiver);
+            int sa_name_idx = add_constant_string(bc, node->as.slot_assign.slot_name);
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sa_name_idx);
+            bc_emit_expr(bc, node->as.slot_assign.value);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_set_slot);
+            emit_byte(bc, 3);
+            /* native_set_slot now returns the assigned value */
             break;
         }
 
