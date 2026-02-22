@@ -303,6 +303,96 @@ static ClayValue array_neq(ClayObject *self, int argc, ClayValue *argv) {
     return array_equals(self, argc, argv) == CLAY_TRUE ? CLAY_FALSE : CLAY_TRUE;
 }
 
+static ClayValue array_flatten(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayObject *result = clay_array_new();
+    for (size_t i = 0; i < self->as.array.size; i++) {
+        ClayValue item = self->as.array.items[i];
+        if (!CLAY_IS_INT(item) && !CLAY_IS_NIL(item) &&
+            CLAY_OBJ(item)->type == CLAY_TYPE_ARRAY) {
+            ClayObject *inner = CLAY_OBJ(item);
+            for (size_t j = 0; j < inner->as.array.size; j++) {
+                clay_array_append(result, inner->as.array.items[j]);
+            }
+        } else {
+            clay_array_append(result, item);
+        }
+    }
+    return CLAY_VAL(result);
+}
+
+static ClayValue array_sum(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->as.array.size == 0) return clay_int(0);
+    int use_float = 0;
+    intptr_t isum = 0;
+    double fsum = 0.0;
+    for (size_t i = 0; i < self->as.array.size; i++) {
+        ClayValue v = self->as.array.items[i];
+        if (CLAY_IS_INT(v)) {
+            if (use_float) fsum += (double)clay_to_int(v);
+            else isum += clay_to_int(v);
+        } else if (CLAY_IS_FLOAT(v)) {
+            if (!use_float) { fsum = (double)isum; use_float = 1; }
+            fsum += clay_to_float(v);
+        }
+    }
+    if (use_float) return CLAY_VAL(clay_float_new((float)fsum));
+    return clay_int(isum);
+}
+
+static ClayValue array_min(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->as.array.size == 0) return CLAY_NIL;
+    ClayValue best = self->as.array.items[0];
+    for (size_t i = 1; i < self->as.array.size; i++) {
+        ClayValue v = self->as.array.items[i];
+        ClayValue lt = clay_send_val(v, "<", 1, &best);
+        if (lt == CLAY_TRUE) best = v;
+    }
+    return best;
+}
+
+static ClayValue array_max(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->as.array.size == 0) return CLAY_NIL;
+    ClayValue best = self->as.array.items[0];
+    for (size_t i = 1; i < self->as.array.size; i++) {
+        ClayValue v = self->as.array.items[i];
+        ClayValue gt = clay_send_val(v, ">", 1, &best);
+        if (gt == CLAY_TRUE) best = v;
+    }
+    return best;
+}
+
+static ClayValue array_avg(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->as.array.size == 0) return CLAY_NIL;
+    double sum = 0.0;
+    for (size_t i = 0; i < self->as.array.size; i++) {
+        ClayValue v = self->as.array.items[i];
+        if (CLAY_IS_INT(v)) sum += (double)clay_to_int(v);
+        else if (CLAY_IS_FLOAT(v)) sum += (double)clay_to_float(v);
+    }
+    return CLAY_VAL(clay_float_new((float)(sum / (double)self->as.array.size)));
+}
+
+static ClayValue array_unique(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayObject *result = clay_array_new();
+    for (size_t i = 0; i < self->as.array.size; i++) {
+        ClayValue item = self->as.array.items[i];
+        int found = 0;
+        for (size_t j = 0; j < result->as.array.size; j++) {
+            ClayValue existing = result->as.array.items[j];
+            ClayValue eq = clay_send_val(item, "==", 1, &existing);
+            if (eq == CLAY_TRUE) { found = 1; break; }
+        }
+        if (!found) clay_array_append(result, item);
+    }
+    return CLAY_VAL(result);
+}
+
 void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "append", array_append);
     clay_set_method(proto, "push", array_append);
@@ -325,4 +415,10 @@ void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "toString", array_toString);
     clay_set_method(proto, "==", array_equals);
     clay_set_method(proto, "!=", array_neq);
+    clay_set_method(proto, "flatten", array_flatten);
+    clay_set_method(proto, "sum", array_sum);
+    clay_set_method(proto, "min", array_min);
+    clay_set_method(proto, "max", array_max);
+    clay_set_method(proto, "avg", array_avg);
+    clay_set_method(proto, "unique", array_unique);
 }

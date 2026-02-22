@@ -161,6 +161,25 @@ static ClayValue object_slots(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(arr);
 }
 
+static ClayValue object_parent(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    return self->parent ? CLAY_VAL(self->parent) : CLAY_NIL;
+}
+
+static ClayValue object_has_slot(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_FALSE;
+    ClayObject *name_obj = CLAY_OBJ(argv[0]);
+    if (name_obj->type != CLAY_TYPE_STRING) return CLAY_FALSE;
+    return CLAY_BOOL(clay_has_slot(self, clay_string_data(name_obj)));
+}
+
+static ClayValue object_has_method(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_FALSE;
+    ClayObject *name_obj = CLAY_OBJ(argv[0]);
+    if (name_obj->type != CLAY_TYPE_STRING) return CLAY_FALSE;
+    return CLAY_BOOL(clay_lookup_method(self, clay_string_data(name_obj)) != NULL);
+}
+
 static ClayValue object_inspect(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     clay_inspect(self);
@@ -346,6 +365,9 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Object, "slots", object_slots);
     clay_set_method(clay_Object, "inspect", object_inspect);
     clay_set_method(clay_Object, "type", object_type);
+    clay_set_method(clay_Object, "parent", object_parent);
+    clay_set_method(clay_Object, "hasSlot", object_has_slot);
+    clay_set_method(clay_Object, "hasMethod", object_has_method);
 
     /* Number prototype */
     clay_Number = clay_object_new();

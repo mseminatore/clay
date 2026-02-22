@@ -113,3 +113,5 @@ add_test(NAME clay_test_errors   COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME clay_test_super   COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_super.clay)
 add_test(NAME clay_test_clone_syntax COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_clone_syntax.clay)
 add_test(NAME clay_test_assign_return COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_assign_return.clay)
+add_test(NAME clay_test_reflection COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_reflection.clay)
+add_test(NAME clay_test_array_utils COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_array_utils.clay)

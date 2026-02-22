@@ -1,0 +1,58 @@
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Test 1: parent of Object is nil
+assert value(Object parent == nil, "Object parent should be nil")
+
+// Test 2: parent of clone is the prototype
+Dog = Object clone {}
+assert value(Dog parent == Object, "Dog parent should be Object")
+
+// Test 3: parent chain (grandchild)
+Poodle = Dog clone {}
+assert value(Poodle parent == Dog, "Poodle parent should be Dog")
+
+// Test 4: hasSlot on own slot
+obj = Object clone { _x = 42 }
+assert value(obj hasSlot("_x"), "obj hasSlot _x")
+
+// Test 5: hasSlot negative
+assert value((obj hasSlot("_y")) == false, "obj should not have _y")
+
+// Test 6: hasMethod positive (own method)
+Greeter = Object clone { greet() { "hi" } }
+assert value(Greeter hasMethod("greet"), "Greeter hasMethod greet")
+
+// Test 7: hasMethod inherited
+assert value(Greeter hasMethod("clone"), "Greeter hasMethod clone (inherited)")
+
+// Test 8: hasMethod negative
+assert value((Greeter hasMethod("fly")) == false, "Greeter should not have fly")
+
+// Test 9: methods returns array
+m = Object clone {} methods()
+assert value(m size() > 0, "methods should return non-empty array")
+
+// Test 10: slots returns array with own slots
+obj2 = Object clone { _a = 1; _b = 2 }
+s = obj2 slots()
+assert value(s size() >= 2, "slots should have at least 2 entries")
+
+// Test 11: type returns string
+assert value(Object type() == "Object", "Object type should be Object")
+
+// Test 12: type respects _name slot
+Cat = Object clone { _name = "Cat" }
+assert value(Cat type() == "Cat", "named clone type should be Cat")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

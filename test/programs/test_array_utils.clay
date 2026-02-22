@@ -1,0 +1,120 @@
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// === flatten ===
+
+// Test 1: flatten nested arrays
+inner1 = Array clone {}
+inner1 append(1)
+inner1 append(2)
+inner2 = Array clone {}
+inner2 append(3)
+inner2 append(4)
+a = Array clone {}
+a append(inner1)
+a append(inner2)
+f = a flatten()
+assert value(f size() == 4, "flatten size should be 4")
+assert value(f at(0) == 1, "flatten[0] == 1")
+assert value(f at(3) == 4, "flatten[3] == 4")
+
+// Test 2: flatten mixed (arrays + non-arrays)
+inner3 = Array clone {}
+inner3 append(2)
+inner3 append(3)
+b = Array clone {}
+b append(1)
+b append(inner3)
+b append(4)
+f2 = b flatten()
+assert value(f2 size() == 4, "flatten mixed size should be 4")
+assert value(f2 at(0) == 1, "flatten mixed [0] == 1")
+assert value(f2 at(1) == 2, "flatten mixed [1] == 2")
+assert value(f2 at(3) == 4, "flatten mixed [3] == 4")
+
+// Test 3: flatten empty
+e = Array clone {}
+assert value(e flatten() size() == 0, "flatten empty is empty")
+
+// === sum ===
+
+// Test 4: sum integers
+nums = Array clone {}
+nums append(1)
+nums append(2)
+nums append(3)
+assert value(nums sum() == 6, "sum of 1,2,3 == 6")
+
+// Test 5: sum empty
+assert value((Array clone {}) sum() == 0, "sum of empty == 0")
+
+// === min / max ===
+
+// Test 6: min
+assert value(nums min() == 1, "min of 1,2,3 == 1")
+
+// Test 7: max
+assert value(nums max() == 3, "max of 1,2,3 == 3")
+
+// Test 8: min/max single element
+single = Array clone {}
+single append(42)
+assert value(single min() == 42, "min of single == 42")
+assert value(single max() == 42, "max of single == 42")
+
+// Test 9: min/max empty
+assert value((Array clone {}) min() == nil, "min of empty == nil")
+assert value((Array clone {}) max() == nil, "max of empty == nil")
+
+// === avg ===
+
+// Test 10: avg integers
+avg_val = nums avg()
+// avg of 1,2,3 = 2.0
+assert value(avg_val > 1, "avg > 1")
+assert value(avg_val < 3, "avg < 3")
+
+// Test 11: avg empty
+assert value((Array clone {}) avg() == nil, "avg of empty == nil")
+
+// === unique ===
+
+// Test 12: unique removes duplicates
+dups = Array clone {}
+dups append(1)
+dups append(2)
+dups append(1)
+dups append(3)
+dups append(2)
+u = dups unique()
+assert value(u size() == 3, "unique size should be 3")
+assert value(u at(0) == 1, "unique preserves order [0]==1")
+assert value(u at(1) == 2, "unique preserves order [1]==2")
+assert value(u at(2) == 3, "unique preserves order [2]==3")
+
+// Test 13: unique already unique
+u2 = nums unique()
+assert value(u2 size() == 3, "unique of unique unchanged")
+
+// Test 14: unique empty
+assert value((Array clone {}) unique() size() == 0, "unique empty is empty")
+
+// Test 15: unique with strings
+strs = Array clone {}
+strs append("a")
+strs append("b")
+strs append("a")
+u3 = strs unique()
+assert value(u3 size() == 2, "unique strings size == 2")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()
