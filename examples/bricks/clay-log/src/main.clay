@@ -29,28 +29,28 @@ Log = Object clone {
     }
 
     debug(msg) {
-        (self _level == 0) ifTrue({
+        (_level == 0) ifTrue({
             self _emit("[DEBUG]", msg)
         })
         self
     }
 
     info(msg) {
-        (self _level <= 1) ifTrue({
+        (_level <= 1) ifTrue({
             self _emit("[INFO]", msg)
         })
         self
     }
 
     warn(msg) {
-        (self _level <= 2) ifTrue({
+        (_level <= 2) ifTrue({
             self _emit("[WARN]", msg)
         })
         self
     }
 
     error(msg) {
-        (self _level <= 3) ifTrue({
+        (_level <= 3) ifTrue({
             self _emit("[ERROR]", msg)
         })
         self
@@ -58,8 +58,8 @@ Log = Object clone {
 
     _emit(tag, msg) {
         _line = tag + " "
-        (self _prefix != "") ifTrue({
-            _line = _line + self _prefix + " "
+        (_prefix != "") ifTrue({
+            _line = _line + _prefix + " "
         })
         _line = _line + msg
         _line println()

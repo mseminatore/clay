@@ -25,7 +25,7 @@ Test = Object clone {
 
     describe(name, block) {
         self _suite = name
-        (self _bold + self _cyan + "  " + name + self _reset) println()
+        (_bold + _cyan + "  " + name + _reset) println()
         block value()
         self _suite = ""
         self
@@ -37,15 +37,15 @@ Test = Object clone {
             "pass"
         }) catch({ |e|
             self _failed += 1
-            self _errors = self _errors + "    " + self _red + "FAIL: " + self _suite + " > " + name + " — " + e message() + self _reset + "\n"
+            self _errors = _errors + "    " + _red + "FAIL: " + _suite + " > " + name + " — " + e message() + _reset + "\n"
             "fail"
         })
         (result == "pass") ifTrue({
             self _passed += 1
-            ("    " + self _green + "✓" + self _reset + self _dim + " " + name + self _reset) println()
+            ("    " + _green + "✓" + _reset + _dim + " " + name + _reset) println()
         })
         (result == "fail") ifTrue({
-            ("    " + self _red + "✗ " + name + self _reset) println()
+            ("    " + _red + "✗ " + name + _reset) println()
         })
         self
     }
@@ -93,14 +93,14 @@ Test = Object clone {
 
     run() {
         "" println()
-        total = self _passed + self _failed
-        color = self _green
-        (self _failed > 0) ifTrue({ color = self _red })
-        (color + "" + total + " tests, " + self _passed + " passed, " + self _failed + " failed" + self _reset) println()
-        (self _failed > 0) ifTrue({
+        total = _passed + _failed
+        color = _green
+        (_failed > 0) ifTrue({ color = _red })
+        (color + "" + total + " tests, " + _passed + " passed, " + _failed + " failed" + _reset) println()
+        (_failed > 0) ifTrue({
             "" println()
-            (self _red + "Failures:" + self _reset) println()
-            self _errors print()
+            (_red + "Failures:" + _reset) println()
+            _errors print()
         })
         self
     }

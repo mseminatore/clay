@@ -38,13 +38,13 @@ Iter = Object clone {
 
     _copyOps() {
         _new = []
-        self _ops each({ |op| _new append(op) })
+        _ops each({ |op| _new append(op) })
         _new
     }
 
     map(fn) {
         _it = self clone()
-        _it _items = self _items
+        _it _items = _items
         _it _ops = self _copyOps()
         _it _ops append(["map", fn])
         _it
@@ -52,7 +52,7 @@ Iter = Object clone {
 
     filter(fn) {
         _it = self clone()
-        _it _items = self _items
+        _it _items = _items
         _it _ops = self _copyOps()
         _it _ops append(["filter", fn])
         _it
@@ -60,7 +60,7 @@ Iter = Object clone {
 
     take(n) {
         _it = self clone()
-        _it _items = self _items
+        _it _items = _items
         _it _ops = self _copyOps()
         _it _ops append(["take", n])
         _it
@@ -68,7 +68,7 @@ Iter = Object clone {
 
     skip(n) {
         _it = self clone()
-        _it _items = self _items
+        _it _items = _items
         _it _ops = self _copyOps()
         _it _ops append(["skip", n])
         _it
@@ -79,9 +79,9 @@ Iter = Object clone {
     }
 
     _evaluate(result) {
-        _src = self _items
+        _src = _items
         // Apply ops one at a time
-        self _ops each({ |op|
+        _ops each({ |op|
             _type = op at(0)
             _arg = op at(1)
             (_type == "map") ifTrue({

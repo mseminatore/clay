@@ -21,44 +21,44 @@ Match = Object clone {
     }
 
     when(pattern, block) {
-        (self _matched == false) ifTrue({
-            (self _val == pattern) ifTrue({
+        (_matched == false) ifTrue({
+            (_val == pattern) ifTrue({
                 self _matched = true
-                self _result = block value(self _val)
+                self _result = block value(_val)
             })
         })
         self
     }
 
     whenType(typeName, block) {
-        (self _matched == false) ifTrue({
-            (self _val type() == typeName) ifTrue({
+        (_matched == false) ifTrue({
+            (_val type() == typeName) ifTrue({
                 self _matched = true
-                self _result = block value(self _val)
+                self _result = block value(_val)
             })
         })
         self
     }
 
     whenPred(pred, block) {
-        (self _matched == false) ifTrue({
-            (pred value(self _val) == true) ifTrue({
+        (_matched == false) ifTrue({
+            (pred value(_val) == true) ifTrue({
                 self _matched = true
-                self _result = block value(self _val)
+                self _result = block value(_val)
             })
         })
         self
     }
 
     else(block) {
-        (self _matched == false) ifTrue({
+        (_matched == false) ifTrue({
             self _matched = true
-            self _result = block value(self _val)
+            self _result = block value(_val)
         })
-        self _result
+        _result
     }
 
     result() {
-        self _result
+        _result
     }
 }

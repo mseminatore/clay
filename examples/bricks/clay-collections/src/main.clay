@@ -35,25 +35,25 @@ Set = Object clone {
     }
 
     add(val) {
-        self _data set(val toString(), val)
+        _data set(val toString(), val)
         self
     }
 
     remove(val) {
-        self _data remove(val toString())
+        _data remove(val toString())
         self
     }
 
     contains(val) {
-        self _data has(val toString())
+        _data has(val toString())
     }
 
     size() {
-        self _data size
+        _data size
     }
 
     toArray() {
-        self _data values
+        _data values
     }
 
     each(block) {
@@ -97,38 +97,38 @@ Stack = Object clone {
     }
 
     push(val) {
-        self _items append(val)
+        _items append(val)
         self
     }
 
     pop() {
-        sz = self _items size
+        sz = _items size
         (sz == 0) ifTrue({ raise("Stack is empty") })
-        val = self _items at(sz - 1)
-        self _items removeAt(sz - 1)
+        val = _items at(sz - 1)
+        _items removeAt(sz - 1)
         val
     }
 
     peek() {
-        sz = self _items size
+        sz = _items size
         (sz == 0) ifTrue({ raise("Stack is empty") })
-        self _items at(sz - 1)
+        _items at(sz - 1)
     }
 
     isEmpty() {
-        self _items size == 0
+        _items size == 0
     }
 
     size() {
-        self _items size
+        _items size
     }
 
     toArray() {
-        self _items
+        _items
     }
 
     toString() {
-        "Stack" + self _items toString()
+        "Stack" + _items toString()
     }
 }
 
@@ -143,36 +143,36 @@ Queue = Object clone {
     }
 
     enqueue(val) {
-        self _items append(val)
+        _items append(val)
         self
     }
 
     dequeue() {
-        (self _items size == 0) ifTrue({ raise("Queue is empty") })
-        val = self _items at(0)
-        self _items removeAt(0)
+        (_items size == 0) ifTrue({ raise("Queue is empty") })
+        val = _items at(0)
+        _items removeAt(0)
         val
     }
 
     peek() {
-        (self _items size == 0) ifTrue({ raise("Queue is empty") })
-        self _items at(0)
+        (_items size == 0) ifTrue({ raise("Queue is empty") })
+        _items at(0)
     }
 
     isEmpty() {
-        self _items size == 0
+        _items size == 0
     }
 
     size() {
-        self _items size
+        _items size
     }
 
     toArray() {
-        self _items
+        _items
     }
 
     toString() {
-        "Queue" + self _items toString()
+        "Queue" + _items toString()
     }
 }
 
@@ -199,9 +199,9 @@ Range = Object clone {
     }
 
     each(block) {
-        i = self _start
-        step = self _step
-        end = self _end
+        i = _start
+        step = _step
+        end = _end
         { i <= end } whileTrue({
             block value(i)
             i += step
@@ -232,17 +232,17 @@ Range = Object clone {
     }
 
     contains(n) {
-        n >= self _start && n <= self _end
+        n >= _start && n <= _end
     }
 
     size() {
-        diff = self _end - self _start
+        diff = _end - _start
         (diff < 0) ifTrue({ 0 }) ifFalse({
-            diff / self _step + 1
+            diff / _step + 1
         })
     }
 
     toString() {
-        "Range(" + self _start toString() + ", " + self _end toString() + ", " + self _step toString() + ")"
+        "Range(" + _start toString() + ", " + _end toString() + ", " + _step toString() + ")"
     }
 }
