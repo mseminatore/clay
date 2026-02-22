@@ -1274,6 +1274,76 @@ static void test_super_dispatch(void) {
     g_test_base = NULL;
 }
 
+static void test_memory_leaks(void) {
+    SUITE("Memory Leak Detection");
+
+    COMMENT("object create and release...");
+    {
+        size_t before_a = clay_alloc_count;
+        size_t before_d = clay_dealloc_count;
+        ClayObject *obj = clay_object_new();
+        TEST(clay_alloc_count == before_a + 1);
+        clay_release(obj);
+        TEST(clay_dealloc_count == before_d + 1);
+    }
+
+    COMMENT("clone and release...");
+    {
+        size_t before_a = clay_alloc_count;
+        size_t before_d = clay_dealloc_count;
+        ClayObject *proto = clay_object_new();
+        ClayObject *child = clay_clone(proto);
+        /* clone allocs 1 for child, proto itself is 1 */
+        clay_release(child); /* child released, proto refcount drops */
+        clay_release(proto); /* proto released */
+        size_t delta = clay_alloc_count - before_a;
+        size_t freed = clay_dealloc_count - before_d;
+        TEST(delta == freed);
+    }
+
+    COMMENT("string create and release...");
+    {
+        size_t before_a = clay_alloc_count;
+        size_t before_d = clay_dealloc_count;
+        ClayObject *s = clay_string_new("hello");
+        clay_release(s);
+        TEST(clay_alloc_count - before_a == clay_dealloc_count - before_d);
+    }
+
+    COMMENT("array create, append, release...");
+    {
+        size_t before_a = clay_alloc_count;
+        size_t before_d = clay_dealloc_count;
+        ClayObject *arr = clay_array_new();
+        ClayObject *s1 = clay_string_new("a");
+        ClayObject *s2 = clay_string_new("b");
+        clay_array_append(arr, CLAY_VAL(s1));
+        clay_array_append(arr, CLAY_VAL(s2));
+        /* arr retains s1 and s2, so we can release our refs */
+        clay_release(s1);
+        clay_release(s2);
+        /* releasing arr should free s1 and s2 too */
+        clay_release(arr);
+        TEST(clay_alloc_count - before_a == clay_dealloc_count - before_d);
+    }
+
+    COMMENT("slot set and release...");
+    {
+        size_t before_a = clay_alloc_count;
+        size_t before_d = clay_dealloc_count;
+        ClayObject *obj = clay_object_new();
+        ClayObject *val = clay_string_new("test");
+        clay_set_slot(obj, "key", CLAY_VAL(val));
+        clay_release(val); /* obj retains it */
+        clay_release(obj); /* should free val too */
+        TEST(clay_alloc_count - before_a == clay_dealloc_count - before_d);
+    }
+
+    COMMENT("alloc/dealloc counters accessible...");
+    TEST(clay_alloc_count > 0);
+    TEST(clay_dealloc_count > 0);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -1307,6 +1377,7 @@ void test_main(int argc, char *argv[]) {
     test_vm_logical_operators();
     test_method_cache();
     test_super_dispatch();
+    test_memory_leaks();
     /* test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures(); */

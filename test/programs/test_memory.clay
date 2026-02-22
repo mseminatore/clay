@@ -1,0 +1,48 @@
+// test_memory.clay — Memory leak detection via System counters
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Test 1: System counters exist and are positive
+a = System allocCount()
+d = System deallocCount()
+assert value(a > 0, "allocCount should be > 0")
+assert value(d >= 0, "deallocCount should be >= 0")
+
+// Test 2: Object creation increments alloc count
+before = System allocCount()
+obj = Object clone { _x = 1 }
+after = System allocCount()
+assert value(after > before, "allocCount should increase after clone")
+
+// Test 3: String operations create allocations
+before2 = System allocCount()
+s = "hello" + " " + "world"
+after2 = System allocCount()
+assert value(after2 > before2, "string concat should allocate")
+
+// Test 4: Array operations create allocations
+before3 = System allocCount()
+arr = Array clone {}
+arr append(1)
+arr append(2)
+arr append(3)
+after3 = System allocCount()
+assert value(after3 > before3, "array ops should allocate")
+
+// Test 5: Alloc count always >= dealloc count
+assert value(System allocCount() >= System deallocCount(), "allocs >= deallocs")
+
+// Test 6: System type is System
+assert value(System type() == "System", "System type should be System")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

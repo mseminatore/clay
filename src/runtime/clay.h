@@ -172,6 +172,7 @@ extern ClayObject *clay_Dict;
 extern ClayObject *clay_Math;
 extern ClayObject *clay_Console;
 extern ClayObject *clay_File;
+extern ClayObject *clay_System;
 
 void clay_bootstrap(void);
 void clay_shutdown(void);

@@ -16,6 +16,7 @@ ClayObject *clay_Dict    = NULL;
 ClayObject *clay_Math   = NULL;
 ClayObject *clay_Console = NULL;
 ClayObject *clay_File    = NULL;
+ClayObject *clay_System  = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -325,6 +326,17 @@ static ClayValue console_prompt(ClayObject *self, int argc, ClayValue *argv) {
     return console_readLine(self, 0, NULL);
 }
 
+/* System methods — memory diagnostics */
+static ClayValue system_alloc_count(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return clay_int((intptr_t)clay_alloc_count);
+}
+
+static ClayValue system_dealloc_count(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return clay_int((intptr_t)clay_dealloc_count);
+}
+
 void clay_bootstrap(void) {
 #ifdef _WIN32
     /* Enable UTF-8 output and ANSI color sequences on Windows console */
@@ -454,6 +466,14 @@ void clay_bootstrap(void) {
     clay_File->parent = clay_Object;
     clay_File->refcount = 1000000;
     clay_file_init(clay_File);
+
+    /* System object — memory diagnostics */
+    clay_System = clay_object_new();
+    clay_System->parent = clay_Object;
+    clay_System->refcount = 1000000;
+    clay_set_slot(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
+    clay_set_method(clay_System, "allocCount", system_alloc_count);
+    clay_set_method(clay_System, "deallocCount", system_dealloc_count);
 }
 
 void clay_shutdown(void) {
