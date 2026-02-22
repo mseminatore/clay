@@ -1,0 +1,67 @@
+// clay-log — Structured logging for Clay
+//
+// Usage:
+//   import("clay-log")
+//
+//   Log info("server started")
+//   Log warn("disk space low")
+//   Log error("connection failed")
+//   Log debug("parsing token")
+//
+//   Log level("warn")   // only warn and error shown
+//   Log prefix("[app]") // set prefix
+
+Log = Object clone({
+    _level = 1     // 0=debug, 1=info, 2=warn, 3=error
+    _prefix = ""
+
+    level(name) {
+        (name == "debug") ifTrue({ self _level = 0 })
+        (name == "info")  ifTrue({ self _level = 1 })
+        (name == "warn")  ifTrue({ self _level = 2 })
+        (name == "error") ifTrue({ self _level = 3 })
+        self
+    }
+
+    prefix(p) {
+        self _prefix = p
+        self
+    }
+
+    debug(msg) {
+        (self _level == 0) ifTrue({
+            self _emit("[DEBUG]", msg)
+        })
+        self
+    }
+
+    info(msg) {
+        (self _level <= 1) ifTrue({
+            self _emit("[INFO]", msg)
+        })
+        self
+    }
+
+    warn(msg) {
+        (self _level <= 2) ifTrue({
+            self _emit("[WARN]", msg)
+        })
+        self
+    }
+
+    error(msg) {
+        (self _level <= 3) ifTrue({
+            self _emit("[ERROR]", msg)
+        })
+        self
+    }
+
+    _emit(tag, msg) {
+        _line = tag + " "
+        (self _prefix != "") ifTrue({
+            _line = _line + self _prefix + " "
+        })
+        _line = _line + msg
+        _line println()
+    }
+})

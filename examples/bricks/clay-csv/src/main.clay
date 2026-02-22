@@ -1,0 +1,164 @@
+// clay-csv — CSV parsing and generation for Clay
+//
+// Usage:
+//   import("clay-csv")
+//
+//   Csv parse("a,b,c\n1,2,3")
+//   // => [[a, b, c], [1, 2, 3]]
+//
+//   Csv parseWithHeader("name,age\nClay,1\nFoo,2")
+//   // => [Dict{name:Clay, age:1}, Dict{name:Foo, age:2}]
+//
+//   Csv stringify([[1, 2], [3, 4]])
+//   // => "1,2\n3,4"
+
+Csv = Object clone({
+    _src = ""
+    _pos = 0
+    _len = 0
+    _ch = ""
+    _done = false
+    _rowDone = false
+    _result = ""
+    _isQuoted = false
+
+    parse(str) {
+        self _src = str
+        self _pos = 0
+        self _len = str length()
+        self _parseRows([])
+    }
+
+    _parseRows(rows) {
+        { self _pos < self _len } whileTrue({
+            rows append(self _parseRow([]))
+        })
+        rows
+    }
+
+    _parseRow(fields) {
+        self _rowDone = false
+        { self _rowDone == false } whileTrue({
+            fields append(self _parseField())
+            (self _pos < self _len) ifTrue({
+                self _ch = self _src at(self _pos)
+                (self _ch == ",") ifTrue({
+                    self _pos = self _pos + 1
+                })
+                (self _ch == "\n") ifTrue({
+                    self _pos = self _pos + 1
+                    self _rowDone = true
+                })
+                (self _ch != "," && self _ch != "\n") ifTrue({
+                    self _rowDone = true
+                })
+            })
+            (self _pos >= self _len) ifTrue({ self _rowDone = true })
+        })
+        fields
+    }
+
+    _parseField() {
+        self _isQuoted = false
+        (self _pos < self _len && self _src at(self _pos) == "\"") ifTrue({
+            self _isQuoted = true
+        })
+        self _result = ""
+        (self _isQuoted == true) ifTrue({ self _result = self _parseQuoted() })
+        (self _isQuoted == false) ifTrue({ self _result = self _parseUnquoted() })
+        self _result
+    }
+
+    _parseUnquoted() {
+        self _result = ""
+        self _done = false
+        { self _done == false && self _pos < self _len } whileTrue({
+            self _ch = self _src at(self _pos)
+            (self _ch == "," || self _ch == "\n") ifTrue({ self _done = true })
+            (self _ch != "," && self _ch != "\n") ifTrue({
+                self _result = self _result + self _ch
+                self _pos = self _pos + 1
+            })
+        })
+        self _result
+    }
+
+    _parseQuoted() {
+        self _pos = self _pos + 1  // skip opening "
+        self _result = ""
+        self _done = false
+        { self _done == false && self _pos < self _len } whileTrue({
+            self _ch = self _src at(self _pos)
+            self _pos = self _pos + 1
+            (self _ch == "\"") ifTrue({
+                // Check for escaped quote ""
+                (self _pos < self _len && self _src at(self _pos) == "\"") ifTrue({
+                    self _result = self _result + "\""
+                    self _pos = self _pos + 1
+                })
+                (self _pos >= self _len || !(self _src at(self _pos) == "\"")) ifTrue({
+                    self _done = true
+                })
+            })
+            (self _ch != "\"") ifTrue({
+                self _result = self _result + self _ch
+            })
+        })
+        self _result
+    }
+
+    parseWithHeader(str) {
+        self _parseWithHdr(self parse(str))
+    }
+
+    _parseWithHdr(rows) {
+        (rows size() == 0) ifTrue({ [] })
+        self _mapRows(rows at(0), rows, 1, [])
+    }
+
+    _mapRows(headers, rows, idx, result) {
+        { idx < rows size() } whileTrue({
+            self _makeDict(headers, rows at(idx), result)
+            idx = idx + 1
+        })
+        result
+    }
+
+    _makeDict(headers, row, result) {
+        _d = Dict new()
+        _i = 0
+        { _i < headers size() && _i < row size() } whileTrue({
+            _d set(headers at(_i), row at(_i))
+            _i = _i + 1
+        })
+        result append(_d)
+    }
+
+    stringify(rows) {
+        self _stringifyRows(rows, [], 0)
+    }
+
+    _stringifyRows(rows, parts, idx) {
+        { idx < rows size() } whileTrue({
+            self _stringifyRow(rows at(idx), parts)
+            idx = idx + 1
+        })
+        parts join("\n")
+    }
+
+    _stringifyRow(row, parts) {
+        _cols = []
+        row each({ |field|
+            _cols append(self _encodeField(field))
+        })
+        parts append(_cols join(","))
+    }
+
+    _encodeField(val) {
+        _s = val toString()
+        (_s contains(",") || _s contains("\"") || _s contains("\n")) ifTrue({
+            _s = "\"" + _s replace("\"", "\"\"") + "\""
+        })
+        _s
+    }
+})

@@ -1,0 +1,64 @@
+// clay-match — Pattern matching for Clay
+//
+// Usage:
+//   import("clay-match")
+//
+//   Match value(x) when(1, { "one" }) when(2, { "two" }) else({ "other" })
+//   Match value(x) whenType("String", { |v| v upper() }) else({ |v| v toString() })
+//   Match value(x) whenPred({ |v| v > 10 }, { "big" }) else({ "small" })
+
+Match = Object clone({
+    _val = nil
+    _matched = false
+    _result = nil
+
+    value(v) {
+        _m = self clone()
+        _m _val = v
+        _m _matched = false
+        _m _result = nil
+        _m
+    }
+
+    when(pattern, block) {
+        (self _matched == false) ifTrue({
+            (self _val == pattern) ifTrue({
+                self _matched = true
+                self _result = block value(self _val)
+            })
+        })
+        self
+    }
+
+    whenType(typeName, block) {
+        (self _matched == false) ifTrue({
+            (self _val type() == typeName) ifTrue({
+                self _matched = true
+                self _result = block value(self _val)
+            })
+        })
+        self
+    }
+
+    whenPred(pred, block) {
+        (self _matched == false) ifTrue({
+            (pred value(self _val) == true) ifTrue({
+                self _matched = true
+                self _result = block value(self _val)
+            })
+        })
+        self
+    }
+
+    else(block) {
+        (self _matched == false) ifTrue({
+            self _matched = true
+            self _result = block value(self _val)
+        })
+        self _result
+    }
+
+    result() {
+        self _result
+    }
+})

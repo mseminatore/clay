@@ -1,0 +1,41 @@
+import("clay-csv")
+
+pass = 0
+fail = 0
+
+check = { |name, a, b|
+    (a == b) ifTrue({ pass = pass + 1 })
+    (!(a == b)) ifTrue({
+        fail = fail + 1
+        ("FAIL: " + name + " got " + a toString() + " expected " + b toString()) println()
+    })
+}
+
+// Basic parse
+rows = Csv parse("a,b,c\n1,2,3")
+check value("row count", rows size(), 2)
+check value("header a", rows at(0) at(0), "a")
+check value("header c", rows at(0) at(2), "c")
+check value("data 1", rows at(1) at(0), "1")
+check value("data 3", rows at(1) at(2), "3")
+
+// Quoted fields
+rows2 = Csv parse("name,desc\nClay,\"a,b\"\nFoo,bar")
+check value("quoted rows", rows2 size(), 3)
+check value("quoted field", rows2 at(1) at(1), "a,b")
+
+// parseWithHeader
+dicts = Csv parseWithHeader("name,age\nClay,1\nFoo,2")
+check value("dict count", dicts size(), 2)
+check value("dict name", dicts at(0) get("name"), "Clay")
+check value("dict age", dicts at(1) get("age"), "2")
+
+// Stringify
+s = Csv stringify([["x", "y"], ["1", "2"]])
+check value("stringify", s, "x,y\n1,2")
+
+// Stringify with quoting
+s2 = Csv stringify([["a,b", "c"]])
+check value("stringify quoted", s2 contains("\"a,b\""), true)
+
+(pass toString() + " passed, " + fail toString() + " failed") println()

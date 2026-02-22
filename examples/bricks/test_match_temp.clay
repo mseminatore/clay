@@ -1,0 +1,41 @@
+import("clay-match")
+
+pass = 0
+fail = 0
+check = { |name, a, b|
+    (a == b) ifTrue({ pass = pass + 1 })
+    (!(a == b)) ifTrue({
+        fail = fail + 1
+        ("FAIL: " + name + " got " + a toString() + " expected " + b toString()) println()
+    })
+}
+
+// when with literal match
+r1 = Match value(1) when(1, { "one" }) when(2, { "two" }) else({ "other" })
+check value("match 1", r1, "one")
+
+r2 = Match value(2) when(1, { "one" }) when(2, { "two" }) else({ "other" })
+check value("match 2", r2, "two")
+
+r3 = Match value(3) when(1, { "one" }) when(2, { "two" }) else({ "other" })
+check value("match else", r3, "other")
+
+// whenType
+r4 = Match value("hi") whenType("String", { |v| v upper() }) else({ |v| v toString() })
+check value("type string", r4, "HI")
+
+r5 = Match value(42) whenType("String", { |v| v upper() }) else({ |v| v toString() })
+check value("type number", r5, "42")
+
+// whenPred
+r6 = Match value(15) whenPred({ |v| v > 10 }, { "big" }) else({ "small" })
+check value("pred big", r6, "big")
+
+r7 = Match value(5) whenPred({ |v| v > 10 }, { "big" }) else({ "small" })
+check value("pred small", r7, "small")
+
+// Chaining multiple patterns
+r8 = Match value("hello") when("hi", { "greeting" }) when("hello", { "greeting" }) when("bye", { "farewell" }) else({ "unknown" })
+check value("chain", r8, "greeting")
+
+(pass toString() + " passed, " + fail toString() + " failed") println()

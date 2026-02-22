@@ -1,0 +1,146 @@
+// clay-iter — Lazy iterator pipelines for Clay
+//
+// Usage:
+//   import("clay-iter")
+//
+//   Iter from([1,2,3,4,5]) map({ |x| x * 2 }) filter({ |x| x > 4 }) toArray()
+//   // => [6, 8, 10]
+//
+//   Iter range(1, 5) toArray()
+//   // => [1, 2, 3, 4]
+//
+//   Iter from([1,2,3]) reduce(0, { |acc, x| acc + x })
+//   // => 6
+
+Iter = Object clone({
+    _items = []
+    _ops = []
+
+    from(arr) {
+        _it = self clone()
+        _it _items = arr
+        _it _ops = []
+        _it
+    }
+
+    range(start, end) {
+        _arr = []
+        _i = start
+        { _i < end } whileTrue({
+            _arr append(_i)
+            _i = _i + 1
+        })
+        _it = self clone()
+        _it _items = _arr
+        _it _ops = []
+        _it
+    }
+
+    _copyOps() {
+        _new = []
+        self _ops each({ |op| _new append(op) })
+        _new
+    }
+
+    map(fn) {
+        _it = self clone()
+        _it _items = self _items
+        _it _ops = self _copyOps()
+        _it _ops append(["map", fn])
+        _it
+    }
+
+    filter(fn) {
+        _it = self clone()
+        _it _items = self _items
+        _it _ops = self _copyOps()
+        _it _ops append(["filter", fn])
+        _it
+    }
+
+    take(n) {
+        _it = self clone()
+        _it _items = self _items
+        _it _ops = self _copyOps()
+        _it _ops append(["take", n])
+        _it
+    }
+
+    skip(n) {
+        _it = self clone()
+        _it _items = self _items
+        _it _ops = self _copyOps()
+        _it _ops append(["skip", n])
+        _it
+    }
+
+    toArray() {
+        self _evaluate([])
+    }
+
+    _evaluate(result) {
+        _src = self _items
+        // Apply ops one at a time
+        self _ops each({ |op|
+            _type = op at(0)
+            _arg = op at(1)
+            (_type == "map") ifTrue({
+                _next = []
+                _src each({ |item| _next append(_arg value(item)) })
+                _src = _next
+            })
+            (_type == "filter") ifTrue({
+                _next = []
+                _src each({ |item|
+                    (_arg value(item) == true) ifTrue({ _next append(item) })
+                })
+                _src = _next
+            })
+            (_type == "take") ifTrue({
+                _next = []
+                _idx = 0
+                _src each({ |item|
+                    (_idx < _arg) ifTrue({ _next append(item) })
+                    _idx = _idx + 1
+                })
+                _src = _next
+            })
+            (_type == "skip") ifTrue({
+                _next = []
+                _idx = 0
+                _src each({ |item|
+                    (_idx >= _arg) ifTrue({ _next append(item) })
+                    _idx = _idx + 1
+                })
+                _src = _next
+            })
+        })
+        _src
+    }
+
+    reduce(init, fn) {
+        _acc = init
+        self toArray() each({ |item|
+            _acc = fn value(_acc, item)
+        })
+        _acc
+    }
+
+    each(fn) {
+        self toArray() each(fn)
+    }
+
+    first() {
+        self _firstOf(self take(1) toArray())
+    }
+
+    _firstOf(arr) {
+        _r = nil
+        (arr size() > 0) ifTrue({ _r = arr at(0) })
+        _r
+    }
+
+    count() {
+        self toArray() size()
+    }
+})
