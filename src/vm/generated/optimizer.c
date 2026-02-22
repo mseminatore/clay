@@ -23,75 +23,6 @@ static void nop_fill(uint8_t *code, size_t start, size_t count) {
         code[start + i] = CLAYVM_OP_NOP;
 }
 
-/* Constant folding: PUSH_CONST X, PUSH_CONST Y, <arith> → PUSH_CONST Z */
-static int fold_constants(uint8_t *code, size_t code_len,
-                          clayvm_const_pool_t *constants) {
-    int folded = 0;
-    size_t ip = 0;
-    while (ip + 6 < code_len) {
-        /* Match: PUSH_CONST <u16>, PUSH_CONST <u16>, <arith> */
-        if (code[ip] != CLAYVM_OP_PUSH_CONST ||
-            code[ip + 3] != CLAYVM_OP_PUSH_CONST) {
-            ip += clayvm_instruction_sizes[code[ip] < CLAYVM_OP_COUNT ? code[ip] : 0];
-            continue;
-        }
-        uint8_t arith_op = code[ip + 6];
-        int64_t result = 0;
-        int matched = 0;
-        if (arith_op == CLAYVM_OP_ADD) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            result = a + b;
-            matched = 1;
-        } else if (arith_op == CLAYVM_OP_SUB) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            result = a - b;
-            matched = 1;
-        } else if (arith_op == CLAYVM_OP_MUL) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            result = a * b;
-            matched = 1;
-        } else if (arith_op == CLAYVM_OP_DIV) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            if (b == 0) { ip += 3; continue; }
-            result = a / b;
-            matched = 1;
-        }
-        if (matched && constants->count < constants->capacity) {
-            int new_idx = constants->count;
-            constants->values[new_idx] = CLAYVM_INT64(result);
-            constants->count++;
-            code[ip] = CLAYVM_OP_PUSH_CONST;
-            write_u16(&code[ip + 1], (uint16_t)new_idx);
-            nop_fill(code, ip + 3, 4);
-            folded++;
-            ip += 7;
-        } else {
-            ip += 3;
-        }
-    }
-    return folded;
-}
-
 /* Dead code: NOP-fill bytes after HALT/RETURN until next jump target */
 static int eliminate_dead_code(uint8_t *code, size_t code_len) {
     int eliminated = 0;
@@ -142,13 +73,6 @@ int clayvm_optimize(uint8_t *code, size_t code_len,
                 clayvm_opt_stats_t *stats) {
     clayvm_opt_stats_t s;
     memset(&s, 0, sizeof(s));
-
-    /* Pass 1: Constant folding (iterate until no more folds) */
-    int folded;
-    do {
-        folded = fold_constants(code, code_len, constants);
-        s.constants_folded += folded;
-    } while (folded > 0);
 
     /* Pass 2: Dead code elimination */
     s.dead_code_bytes = eliminate_dead_code(code, code_len);

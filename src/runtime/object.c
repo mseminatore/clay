@@ -46,9 +46,16 @@ ClayObject *clay_clone(ClayObject *proto) {
         extern int dict_str_compare(ht_key_t a, ht_key_t b);
         ht_set_compare_func(obj->as.dict.map, dict_str_compare);
     } else if (proto && proto->type == CLAY_TYPE_ARRAY) {
-        obj->as.array.items = (ClayValue *)malloc(sizeof(ClayValue) * 8);
-        obj->as.array.size = 0;
-        obj->as.array.capacity = 8;
+        int cap = proto->as.array.capacity > 8 ? proto->as.array.capacity : 8;
+        obj->as.array.items = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)cap);
+        obj->as.array.size = proto->as.array.size;
+        obj->as.array.capacity = cap;
+        for (int i = 0; i < proto->as.array.size; i++) {
+            obj->as.array.items[i] = proto->as.array.items[i];
+            ClayValue v = proto->as.array.items[i];
+            if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE)
+                clay_retain(CLAY_OBJ(v));
+        }
     }
 
     /* Copy slots from prototype */

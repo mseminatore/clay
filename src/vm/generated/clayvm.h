@@ -341,6 +341,7 @@ typedef struct clayvm_vm {
     clayvm_value_t current_exception;
     clayvm_native_table_t natives;
     void * globals; /* HashTable* for REPL variable persistence */
+    void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
     void (*cleanup)(struct clayvm_vm *vm);
 } clayvm_vm_t;
 
@@ -810,37 +811,101 @@ int handle_DUP(clayvm_vm_t *vm) {
 }
 
 int handle_ADD(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_SUB(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_MUL(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_DIV(clayvm_vm_t *vm) {
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+        if (b.as.i64 == 0) {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                return -1;
+            }
+        } else {
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+        }
+    } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+    } else if (vm->arith_fallback) {
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+        return -1;
+    }
     return 0;
 }
 
 int handle_MOD(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+    (void)vm;
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -851,44 +916,116 @@ int handle_NEGATE(clayvm_vm_t *vm) {
 }
 
 int handle_EQ(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 == b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_NEQ(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 != b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_LT(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 < b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_GT(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 > b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_LTE(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 <= b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_GTE(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 >= b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -1124,7 +1261,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1134,7 +1282,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1144,7 +1303,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1154,7 +1324,25 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            if (b.as.i64 == 0) {
+                if (vm->arith_fallback) {
+                    vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                } else {
+                    clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                    return -1;
+                }
+            } else {
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+            }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+            return -1;
+        }
         DISPATCH();
     }
 
@@ -1162,9 +1350,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1183,7 +1380,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 == b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1193,7 +1401,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 != b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1203,7 +1422,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 < b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1213,7 +1443,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 > b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1223,7 +1464,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 <= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1233,7 +1485,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 >= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -1448,31 +1711,91 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_ADD: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_SUB: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_MUL: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_DIV: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            if (b.as.i64 == 0) {
+                if (vm->arith_fallback) {
+                    vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                } else {
+                    clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                    return -1;
+                }
+            } else {
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+            }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+            return -1;
+        }
         break;
     }
     case CLAYVM_OP_MOD: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_NEGATE: {
@@ -1483,37 +1806,103 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_EQ: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 == b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_NEQ: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 != b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_LT: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 < b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_GT: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 > b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_LTE: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 <= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_GTE: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 >= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_NOT: {
@@ -2570,75 +2959,6 @@ static void nop_fill(uint8_t *code, size_t start, size_t count) {
         code[start + i] = CLAYVM_OP_NOP;
 }
 
-/* Constant folding: PUSH_CONST X, PUSH_CONST Y, <arith> → PUSH_CONST Z */
-static int fold_constants(uint8_t *code, size_t code_len,
-                          clayvm_const_pool_t *constants) {
-    int folded = 0;
-    size_t ip = 0;
-    while (ip + 6 < code_len) {
-        /* Match: PUSH_CONST <u16>, PUSH_CONST <u16>, <arith> */
-        if (code[ip] != CLAYVM_OP_PUSH_CONST ||
-            code[ip + 3] != CLAYVM_OP_PUSH_CONST) {
-            ip += clayvm_instruction_sizes[code[ip] < CLAYVM_OP_COUNT ? code[ip] : 0];
-            continue;
-        }
-        uint8_t arith_op = code[ip + 6];
-        int64_t result = 0;
-        int matched = 0;
-        if (arith_op == CLAYVM_OP_ADD) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            result = a + b;
-            matched = 1;
-        } else if (arith_op == CLAYVM_OP_SUB) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            result = a - b;
-            matched = 1;
-        } else if (arith_op == CLAYVM_OP_MUL) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            result = a * b;
-            matched = 1;
-        } else if (arith_op == CLAYVM_OP_DIV) {
-            uint16_t idx_a = read_u16(&code[ip + 1]);
-            uint16_t idx_b = read_u16(&code[ip + 4]);
-            if (idx_a >= constants->count || idx_b >= constants->count)
-                { ip += 3; continue; }
-            int64_t a = constants->values[idx_a].as.i64;
-            int64_t b = constants->values[idx_b].as.i64;
-            if (b == 0) { ip += 3; continue; }
-            result = a / b;
-            matched = 1;
-        }
-        if (matched && constants->count < constants->capacity) {
-            int new_idx = constants->count;
-            constants->values[new_idx] = CLAYVM_INT64(result);
-            constants->count++;
-            code[ip] = CLAYVM_OP_PUSH_CONST;
-            write_u16(&code[ip + 1], (uint16_t)new_idx);
-            nop_fill(code, ip + 3, 4);
-            folded++;
-            ip += 7;
-        } else {
-            ip += 3;
-        }
-    }
-    return folded;
-}
-
 /* Dead code: NOP-fill bytes after HALT/RETURN until next jump target */
 static int eliminate_dead_code(uint8_t *code, size_t code_len) {
     int eliminated = 0;
@@ -2689,13 +3009,6 @@ int clayvm_optimize(uint8_t *code, size_t code_len,
                 clayvm_opt_stats_t *stats) {
     clayvm_opt_stats_t s;
     memset(&s, 0, sizeof(s));
-
-    /* Pass 1: Constant folding (iterate until no more folds) */
-    int folded;
-    do {
-        folded = fold_constants(code, code_len, constants);
-        s.constants_folded += folded;
-    } while (folded > 0);
 
     /* Pass 2: Dead code elimination */
     s.dead_code_bytes = eliminate_dead_code(code, code_len);

@@ -79,6 +79,12 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
         clayvm_vm_push(g_vm, clay_to_vm(cv));
     }
 
+    /* Reserve stack space for block-created locals beyond params and captures */
+    int reserved = chunk->param_count + capture_count;
+    for (int i = reserved; i < chunk->local_count; i++) {
+        clayvm_vm_push(g_vm, CLAYVM_NIL_VAL);
+    }
+
     /* Run the dispatch loop manually (can't use vm_run — it resets sp) */
     while (g_vm->running && g_vm->ip < g_vm->code_len) {
         uint8_t opcode = g_vm->code[g_vm->ip++];
@@ -138,22 +144,24 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
 
     BcChunk *chunk = g_bc->chunks[ms->chunk_id];
 
-    /* Save and set self as global (methods access self via global) */
+    /* Save and set self as global (methods access self via global).
+     * Reuse existing hash entry when possible to avoid heap churn. */
     HashTable *globals = (HashTable *)g_vm->globals;
     ClayValue saved_self = CLAY_NIL;
     int self_existed = 0;
     if (globals) {
         ht_value_t old_self = ht_find(globals, (ht_key_t)"self");
         if (old_self) {
-            saved_self = vm_to_clay(*(clayvm_value_t *)old_self);
+            clayvm_value_t *existing = (clayvm_value_t *)old_self;
+            saved_self = vm_to_clay(*existing);
             self_existed = 1;
-            free((void *)old_self);
-            ht_remove(globals, (ht_key_t)"self");
+            *existing = CLAYVM_OBJ(self);  /* update in place */
+        } else {
+            clayvm_value_t *self_stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+            *self_stored = CLAYVM_OBJ(self);
+            ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
         }
     }
-    clayvm_value_t *self_stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-    *self_stored = CLAYVM_OBJ(self);
-    ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
 
     /* Save full VM state */
     const uint8_t *saved_code = g_vm->code;
@@ -184,6 +192,11 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
         clayvm_vm_push(g_vm, clay_to_vm(val));
     }
 
+    /* Reserve stack space for method-created locals beyond params */
+    for (int i = chunk->param_count; i < chunk->local_count; i++) {
+        clayvm_vm_push(g_vm, CLAYVM_NIL_VAL);
+    }
+
     /* Run the dispatch loop */
     while (g_vm->running && g_vm->ip < g_vm->code_len) {
         uint8_t opcode = g_vm->code[g_vm->ip++];
@@ -205,13 +218,15 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
     g_vm->running = saved_running;
     g_vm->frame_count = saved_frame_count;
 
-    /* Restore self */
-    ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
-    if (cur_self) { free((void *)cur_self); ht_remove(globals, (ht_key_t)"self"); }
+    /* Restore self — update in place when possible */
     if (self_existed) {
-        clayvm_value_t *sv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-        *sv = clay_to_vm(saved_self);
-        ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)sv);
+        ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
+        if (cur_self) {
+            *(clayvm_value_t *)cur_self = clay_to_vm(saved_self);
+        }
+    } else {
+        ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
+        if (cur_self) { free((void *)cur_self); ht_remove(globals, (ht_key_t)"self"); }
     }
 
     return retval;
@@ -365,6 +380,35 @@ clayvm_value_t clay_to_vm(ClayValue cv) {
 }
 
 /* --- Native bridge functions --- */
+
+/* Map VM opcode to Clay operator string */
+static const char *opcode_to_selector(int opcode) {
+    switch (opcode) {
+        case CLAYVM_OP_ADD: return "+";
+        case CLAYVM_OP_SUB: return "-";
+        case CLAYVM_OP_MUL: return "*";
+        case CLAYVM_OP_DIV: return "/";
+        case CLAYVM_OP_MOD: return "%";
+        case CLAYVM_OP_EQ:  return "==";
+        case CLAYVM_OP_NEQ: return "!=";
+        case CLAYVM_OP_LT:  return "<";
+        case CLAYVM_OP_GT:  return ">";
+        case CLAYVM_OP_LTE: return "<=";
+        case CLAYVM_OP_GTE: return ">=";
+        default: return "+";
+    }
+}
+
+/* Fallback for binary ops on non-numeric types (e.g., string + string).
+ * Converts VM values to Clay values, dispatches via clay_send_val. */
+static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
+                               clayvm_value_t b, int opcode) {
+    ClayValue receiver = vm_to_clay(a);
+    ClayValue arg = vm_to_clay(b);
+    const char *sel = opcode_to_selector(opcode);
+    ClayValue result = clay_send_val(receiver, sel, 1, &arg);
+    clayvm_vm_push(vm, clay_to_vm(result));
+}
 
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
@@ -678,23 +722,20 @@ static int native_store_global_fn(clayvm_vm_t *vm, int argc) {
         clay_retain((ClayObject *)val.as.obj);
     }
 
-    /* Allocate storage for the value */
-    clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-    *stored = val;
-
-    /* Remove old if exists, releasing any object it held */
+    /* Update in-place if the global already exists (avoids heap churn) */
     ht_value_t old = ht_find(globals, (ht_key_t)name);
     if (old) {
-        clayvm_value_t *old_val = (clayvm_value_t *)old;
-        if (old_val->type == CLAYVM_VAL_OBJECT && old_val->as.obj) {
-            clay_release((ClayObject *)old_val->as.obj);
+        clayvm_value_t *existing = (clayvm_value_t *)old;
+        if (existing->type == CLAYVM_VAL_OBJECT && existing->as.obj) {
+            clay_release((ClayObject *)existing->as.obj);
         }
-        free((void *)old);
-        ht_remove(globals, (ht_key_t)name);
+        *existing = val;
+    } else {
+        clayvm_value_t *stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+        *stored = val;
+        char *key_copy = strdup(name);
+        ht_add(globals, (ht_key_t)key_copy, (ht_value_t)stored);
     }
-
-    char *key_copy = strdup(name);
-    ht_add(globals, (ht_key_t)key_copy, (ht_value_t)stored);
 
     clayvm_vm_push(vm, val);
     return 0;
@@ -723,6 +764,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     }
 
     /* Register native functions */
+    vm->arith_fallback = arith_fallback_fn;
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);
     bc->native_clone = clayvm_native_register(&vm->natives, "clone", native_clone_fn, 1);
     bc->native_set_slot = clayvm_native_register(&vm->natives, "set_slot", native_set_slot_fn, 3);
@@ -973,9 +1015,18 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
             bc_scan_free_vars(node->as.binary.left, block_params, param_count, caps, bc);
             bc_scan_free_vars(node->as.binary.right, block_params, param_count, caps, bc);
             break;
-        case NODE_ASSIGN:
+        case NODE_ASSIGN: {
+            /* Check if assignment target is an enclosing local (needs capture) */
+            const char *name = node->as.assign.name;
+            if (!bc_is_builtin_global(name) &&
+                !bc_name_in_list(name, block_params, param_count) &&
+                !bc_capture_has(caps, name)) {
+                int slot = bc_resolve_enclosing(bc, name);
+                if (slot >= 0) bc_capture_add(caps, name, slot);
+            }
             bc_scan_free_vars(node->as.assign.value, block_params, param_count, caps, bc);
             break;
+        }
         case NODE_CLONE:
             bc_scan_free_vars(node->as.clone.proto, block_params, param_count, caps, bc);
             bc_scan_free_vars_list(&node->as.clone.members, block_params, param_count, caps, bc);
@@ -1062,6 +1113,21 @@ static void bc_prescan_list(BcCompiler *bc, NodeList *list) {
         bc_prescan_node(bc, list->items[i]);
 }
 
+/* Pre-register method-local variables: walk the body for bare NODE_ASSIGN
+ * names that aren't already locals or builtins, and register them as locals.
+ * This ensures prescan can correctly identify which locals nested blocks capture. */
+static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
+    for (int i = 0; i < body->count; i++) {
+        AstNode *stmt = body->items[i];
+        if (stmt && stmt->type == NODE_ASSIGN) {
+            const char *name = stmt->as.assign.name;
+            if (!is_builtin_global(name) && bc_resolve_local(bc, name) < 0) {
+                bc_add_local(bc, name);
+            }
+        }
+    }
+}
+
 /* Compile a block/method body into a new bytecode chunk.
  * If captures is non-NULL, register captured variable names as locals
  * after params (slots param_count, param_count+1, ...).
@@ -1127,14 +1193,24 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
         }
     }
 
+    /* Pre-register method-local variables: scan body for bare assignments
+     * that create new locals (not params, captures, or builtins).
+     * This ensures prescan can identify which locals blocks will capture. */
+    if (is_method) {
+        bc_preregister_method_locals(bc, body);
+    }
+
     /* Pre-scan body for nested blocks to identify params that will be captured.
      * This must happen AFTER params are registered as locals. */
     bc_prescan_list(bc, body);
 
-    /* Box any params that are marked as captured.
+    /* Box any locals that are marked as captured (params + method-created locals).
+     * Skip capture locals (they're already cells from enclosing scope).
      * Emit: GET_LOCAL(slot) → cell_new → SET_LOCAL(slot) */
-    for (int i = 0; i < chunk->param_count && i < 16; i++) {
-        if (bc->locals[i].is_captured) {
+    int capture_start = chunk->param_count;
+    int capture_end = chunk->param_count + (captures ? captures->count : 0);
+    for (int i = 0; i < bc->local_count; i++) {
+        if (bc->locals[i].is_captured && (i < capture_start || i >= capture_end)) {
             emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)i);
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
             emit_u16(bc, (uint16_t)bc->native_cell_new);
@@ -1280,15 +1356,16 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 }
                 /* Value stays on stack (expression context) */
             } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
-                /* Inside a method, unknown vars are self slot writes (matches C codegen).
-                 * Emit: push self, push slot name, push value, call set_slot */
+                /* Inside a method scope: write to self slot.
+                 * Method-level locals are pre-registered; this path handles
+                 * bare assigns inside blocks within methods. */
                 int self_idx = add_constant_string(bc, "self");
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)self_idx);
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
                 emit_u16(bc, (uint16_t)bc->native_load_global);
                 emit_byte(bc, 1);
-                int name_idx = add_constant_string(bc, node->as.assign.name);
-                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+                int slot_name = add_constant_string(bc, node->as.assign.name);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)slot_name);
                 bc_emit_expr(bc, node->as.assign.value);
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
                 emit_u16(bc, (uint16_t)bc->native_set_slot);
@@ -1361,14 +1438,30 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_byte(bc, 1);
                 patch_jump(bc, end_jump);
             } else {
-                /* Arithmetic/comparison — emit as message send */
-                bc_emit_expr(bc, node->as.binary.left);
-                int sel_idx = add_constant_string(bc, op);
-                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
-                bc_emit_expr(bc, node->as.binary.right);
-                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-                emit_u16(bc, (uint16_t)bc->native_send);
-                emit_byte(bc, 3); /* receiver + selector + 1 arg */
+                /* Map arithmetic operators to VM opcodes for fast path */
+                int vm_op = -1;
+                if      (strcmp(op, "+")  == 0) vm_op = CLAYVM_OP_ADD;
+                else if (strcmp(op, "-")  == 0) vm_op = CLAYVM_OP_SUB;
+                else if (strcmp(op, "*")  == 0) vm_op = CLAYVM_OP_MUL;
+                else if (strcmp(op, "/")  == 0) vm_op = CLAYVM_OP_DIV;
+                else if (strcmp(op, "%")  == 0) vm_op = CLAYVM_OP_MOD;
+
+                if (vm_op >= 0) {
+                    /* Arithmetic: emit operands then VM opcode */
+                    bc_emit_expr(bc, node->as.binary.left);
+                    bc_emit_expr(bc, node->as.binary.right);
+                    emit_op(bc, (uint8_t)vm_op);
+                } else {
+                    /* Comparisons and other ops: use native_send
+                     * (comparisons must return Clay booleans, not VM ints) */
+                    bc_emit_expr(bc, node->as.binary.left);
+                    int sel_idx = add_constant_string(bc, op);
+                    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
+                    bc_emit_expr(bc, node->as.binary.right);
+                    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                    emit_u16(bc, (uint16_t)bc->native_send);
+                    emit_byte(bc, 3); /* receiver + selector + 1 arg */
+                }
             }
             break;
         }

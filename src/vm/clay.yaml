@@ -50,34 +50,87 @@ vm:
     - name: ADD
       operands: []
       description: "Pop two values, push their sum"
-      action: "pop b; pop a; push a + b"
+      typed_action:
+        int64: "pop b; pop a; push a + b"
+        double: "pop b; pop a; push a + b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+              return -1;
+          }
       stack_effect: -1
 
     - name: SUB
       operands: []
       description: "Pop two values, push their difference"
-      action: "pop b; pop a; push a - b"
+      typed_action:
+        int64: "pop b; pop a; push a - b"
+        double: "pop b; pop a; push a - b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+              return -1;
+          }
       stack_effect: -1
 
     - name: MUL
       operands: []
       description: "Pop two values, push their product"
-      action: "pop b; pop a; push a * b"
+      typed_action:
+        int64: "pop b; pop a; push a * b"
+        double: "pop b; pop a; push a * b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+              return -1;
+          }
       stack_effect: -1
 
     - name: DIV
       operands: []
       description: "Pop two values, push their quotient"
-      action: "pop b; pop a; push a / b"
+      action_c: |
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            if (b.as.i64 == 0) {
+                if (vm->arith_fallback) {
+                    vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                } else {
+                    clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                    return -1;
+                }
+            } else {
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+            }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+            return -1;
+        }
       stack_effect: -1
 
     - name: MOD
       operands: []
       description: "Pop two values, push remainder"
-      action_c: |
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+      typed_action:
+        int64: "pop b; pop a; push a % b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+              return -1;
+          }
       stack_effect: -1
 
     - name: NEGATE
@@ -89,37 +142,91 @@ vm:
     - name: EQ
       operands: []
       description: "Pop two values, push true if equal"
-      action: "pop b; pop a; push a == b"
+      typed_action:
+        int64: "pop b; pop a; push a == b"
+        double: "pop b; pop a; push a == b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+              return -1;
+          }
       stack_effect: -1
 
     - name: NEQ
       operands: []
       description: "Pop two values, push true if not equal"
-      action: "pop b; pop a; push a != b"
+      typed_action:
+        int64: "pop b; pop a; push a != b"
+        double: "pop b; pop a; push a != b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+              return -1;
+          }
       stack_effect: -1
 
     - name: LT
       operands: []
       description: "Pop two values, push true if a < b"
-      action: "pop b; pop a; push a < b"
+      typed_action:
+        int64: "pop b; pop a; push a < b"
+        double: "pop b; pop a; push a < b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+              return -1;
+          }
       stack_effect: -1
 
     - name: GT
       operands: []
       description: "Pop two values, push true if a > b"
-      action: "pop b; pop a; push a > b"
+      typed_action:
+        int64: "pop b; pop a; push a > b"
+        double: "pop b; pop a; push a > b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+              return -1;
+          }
       stack_effect: -1
 
     - name: LTE
       operands: []
       description: "Pop two values, push true if a <= b"
-      action: "pop b; pop a; push a <= b"
+      typed_action:
+        int64: "pop b; pop a; push a <= b"
+        double: "pop b; pop a; push a <= b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+              return -1;
+          }
       stack_effect: -1
 
     - name: GTE
       operands: []
       description: "Pop two values, push true if a >= b"
-      action: "pop b; pop a; push a >= b"
+      typed_action:
+        int64: "pop b; pop a; push a >= b"
+        double: "pop b; pop a; push a >= b"
+        default: |
+          if (vm->arith_fallback) {
+              vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+          } else {
+              clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+              return -1;
+          }
       stack_effect: -1
 
     - name: NOT
@@ -231,3 +338,4 @@ vm:
   vm_extensions:
     - { name: natives, type: "clayvm_native_table_t", include: "native.h" }
     - { name: globals, type: "void *", comment: "HashTable* for REPL variable persistence" }
+    - { name: arith_fallback, type: "void (*)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int)", comment: "Fallback for non-numeric binary ops" }

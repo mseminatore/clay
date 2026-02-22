@@ -125,37 +125,101 @@ int handle_DUP(clayvm_vm_t *vm) {
 }
 
 int handle_ADD(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_SUB(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_MUL(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_DIV(clayvm_vm_t *vm) {
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+        if (b.as.i64 == 0) {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                return -1;
+            }
+        } else {
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+        }
+    } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+    } else if (vm->arith_fallback) {
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+        return -1;
+    }
     return 0;
 }
 
 int handle_MOD(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+    (void)vm;
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -166,44 +230,116 @@ int handle_NEGATE(clayvm_vm_t *vm) {
 }
 
 int handle_EQ(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 == b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_NEQ(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 != b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_LT(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 < b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_GT(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 > b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_LTE(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 <= b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+            return -1;
+        }
+    }
     return 0;
 }
 
 int handle_GTE(clayvm_vm_t *vm) {
+    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 >= b.as.f64)));
+    } else {
+        if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -439,7 +575,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -449,7 +596,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -459,7 +617,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -469,7 +638,25 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            if (b.as.i64 == 0) {
+                if (vm->arith_fallback) {
+                    vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                } else {
+                    clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                    return -1;
+                }
+            } else {
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+            }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+            return -1;
+        }
         DISPATCH();
     }
 
@@ -477,9 +664,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -498,7 +694,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 == b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -508,7 +715,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 != b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -518,7 +736,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 < b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -528,7 +757,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 > b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -538,7 +778,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 <= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -548,7 +799,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 >= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+                return -1;
+            }
+        }
         DISPATCH();
     }
 
@@ -763,31 +1025,91 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_ADD: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_SUB: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_MUL: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_DIV: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            if (b.as.i64 == 0) {
+                if (vm->arith_fallback) {
+                    vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                } else {
+                    clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
+                    return -1;
+                }
+            } else {
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
+            }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 / b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in DIV");
+            return -1;
+        }
         break;
     }
     case CLAYVM_OP_MOD: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64(a % b));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_NEGATE: {
@@ -798,37 +1120,103 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_EQ: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 == b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_EQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in EQ");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_NEQ: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 != b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_NEQ);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEQ");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_LT: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 < b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LT");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_GT: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 > b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GT);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GT");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_LTE: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 <= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_LTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in LTE");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_GTE: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
+            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
+        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 >= b.as.f64)));
+        } else {
+            if (vm->arith_fallback) {
+                vm->arith_fallback(vm, a, b, CLAYVM_OP_GTE);
+            } else {
+                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in GTE");
+                return -1;
+            }
+        }
         break;
     }
     case CLAYVM_OP_NOT: {
