@@ -217,11 +217,14 @@ static ClayValue file_isFile(ClayObject *self, int argc, ClayValue *argv) {
 #endif
 }
 
-/* File mkdir(path) - create a directory */
+/* File mkdir(path) - create a directory (no error if already exists) */
 static ClayValue file_mkdir(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     const char *path = get_path_arg(argc, argv, 0, "mkdir");
     if (!path) return CLAY_NIL;
+    /* Check if already exists */
+    struct stat st;
+    if (stat(path, &st) == 0) return CLAY_TRUE; /* already exists, OK */
     int rc;
 #ifdef _WIN32
     rc = _mkdir(path);

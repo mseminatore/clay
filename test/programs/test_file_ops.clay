@@ -12,6 +12,12 @@ assert = { |cond, msg|
     })
 }
 
+// Cleanup from any previous failed run
+File exists("_test_tmp.txt") ifTrue({ File delete("_test_tmp.txt") })
+File exists("_test_tmp2.txt") ifTrue({ File delete("_test_tmp2.txt") })
+File exists("_test_tmpdir/_a.txt") ifTrue({ File delete("_test_tmpdir/_a.txt") })
+File exists("_test_tmpdir/_b.txt") ifTrue({ File delete("_test_tmpdir/_b.txt") })
+
 // Setup: write a test file
 File write("_test_tmp.txt", "hello world")
 

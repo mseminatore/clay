@@ -825,6 +825,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Boolean", clay_Boolean}, {"Error", clay_Error}, {"Dict", clay_Dict},
         {"Math", clay_Math}, {"Console", clay_Console}, {"File", clay_File},
         {"System", clay_System},
+        {"FFI", clay_FFI},
         {NULL, NULL}
     };
 

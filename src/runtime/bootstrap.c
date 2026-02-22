@@ -2,6 +2,7 @@
  * bootstrap.c - Initialize core prototype objects
  */
 #include "clay.h"
+#include "ffi.h"
 
 /* Core prototypes - global singletons */
 ClayObject *clay_Object  = NULL;
@@ -17,6 +18,7 @@ ClayObject *clay_Math   = NULL;
 ClayObject *clay_Console = NULL;
 ClayObject *clay_File    = NULL;
 ClayObject *clay_System  = NULL;
+ClayObject *clay_FFI     = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -474,6 +476,13 @@ void clay_bootstrap(void) {
     clay_set_slot(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
+
+    /* FFI object — foreign function interface */
+    clay_FFI = clay_object_new();
+    clay_FFI->parent = clay_Object;
+    clay_FFI->refcount = 1000000;
+    clay_set_slot(clay_FFI, "_name", CLAY_VAL(clay_string_new("FFI")));
+    clay_ffi_init(clay_FFI);
 }
 
 void clay_shutdown(void) {
