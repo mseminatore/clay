@@ -1,0 +1,59 @@
+/* Test clone { } syntax (no parens) */
+
+Test = Object clone({
+    _p = 0
+    _f = 0
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({ self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() })
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+})
+
+/* New syntax: clone { ... } without parens */
+A = Object clone {
+    x = 5
+    greet() { "hello" }
+}
+
+Test eq(A x, 5)
+Test eq(A greet(), "hello")
+
+/* Inheritance with new syntax */
+B = A clone {
+    x = 10
+    greet() { super greet() + " world" }
+}
+
+Test eq(B x, 10)
+Test eq(B greet(), "hello world")
+
+/* Old syntax still works */
+C = Object clone({
+    y = 42
+})
+
+Test eq(C y, 42)
+
+/* Empty clone (both syntaxes) */
+D = A clone {}
+Test eq(D x, 5)
+Test eq(D greet(), "hello")
+
+E = A clone()
+Test eq(E x, 5)
+
+/* Clone instance */
+inst = B clone {
+    x = 99
+}
+Test eq(inst x, 99)
+Test eq(inst greet(), "hello world")
+
+Test done()

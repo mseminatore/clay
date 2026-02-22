@@ -552,7 +552,16 @@ static AstNode *parse_postfix(Parser *p) {
             char *msg_name = token_strdup(&p->previous);
             int send_line = p->previous.line;
 
-            /* Check for clone with body: expr clone({ ... }) */
+            /* Check for clone with body: expr clone { ... } or expr clone({ ... }) */
+            if (strcmp(msg_name, "clone") == 0 && check(p, TOK_LBRACE)) {
+                /* Short form: clone { ... } (no parens) */
+                AstNode *clone = parse_clone_body(p);
+                clone->as.clone.proto = expr;
+                clone->line = send_line;
+                free(msg_name);
+                expr = clone;
+                continue;
+            }
             if (strcmp(msg_name, "clone") == 0 && check(p, TOK_LPAREN)) {
                 parser_advance(p); /* consume ( */
                 if (check(p, TOK_LBRACE)) {
