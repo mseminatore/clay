@@ -3,14 +3,23 @@
 // Usage:
 //   import("clay-json")
 //
-//   Json stringify(Dict clone set("name", "Clay") set("version", 1))
-//   // => {"name": "Clay", "version": 1}
+//   Json stringify(Dict new() set("name", "Clay") set("age", 1))
+//   // => {"name":"Clay","age":1}
 //
-//   Json prettyPrint(dict, 2)
+//   Json parse("{\"name\":\"Clay\",\"age\":1}")
+//   // => Dict with name="Clay", age=1
+//
+//   Json prettyPrint(dict)
 //   // => formatted with indentation
 
 Json = Object clone({
     _result = "null"
+    _src = ""
+    _pos = 0
+    _len = 0
+    _ch = ""
+    _done = false
+
     // --- Stringify ---
 
     stringify(val) {
@@ -18,7 +27,7 @@ Json = Object clone({
     }
 
     _encode(val) {
-        t = val type
+        t = val type()
         (t == "Nil") ifTrue({ self _result = "null" })
         (t == "Number") ifTrue({ self _result = val toString() })
         (t == "Boolean") ifTrue({ self _result = val toString() })
@@ -44,7 +53,7 @@ Json = Object clone({
 
     _encodeDict(dict) {
         parts = []
-        dict keys each({ |k|
+        dict keys() each({ |k|
             parts append(self _encodeString(k) + ": " + self _encode(dict get(k)))
         })
         "{" + parts join(", ") + "}"
@@ -57,7 +66,7 @@ Json = Object clone({
     }
 
     _pretty(val, depth) {
-        t = val type
+        t = val type()
         self _result = self _encode(val)
         (t == "Dict") ifTrue({ self _result = self _prettyDict(val, depth) })
         (t == "Array") ifTrue({ self _result = self _prettyArray(val, depth) })
@@ -69,15 +78,15 @@ Json = Object clone({
         i = 0
         { i < depth } whileTrue({
             result = result + "  "
-            i += 1
+            i = i + 1
         })
         result
     }
 
     _prettyDict(dict, depth) {
-        keys = dict keys
+        keys = dict keys()
         result = "{}"
-        (keys size > 0) ifTrue({
+        (keys size() > 0) ifTrue({
             parts = []
             pad = self _indent(depth + 1)
             keys each({ |k|
@@ -90,7 +99,7 @@ Json = Object clone({
 
     _prettyArray(arr, depth) {
         result = "[]"
-        (arr size > 0) ifTrue({
+        (arr size() > 0) ifTrue({
             parts = []
             pad = self _indent(depth + 1)
             arr each({ |item|
@@ -99,5 +108,164 @@ Json = Object clone({
             result = "[\n" + parts join(",\n") + "\n" + self _indent(depth) + "]"
         })
         result
+    }
+
+    // --- Parse ---
+
+    parse(str) {
+        self _src = str
+        self _pos = 0
+        self _len = str length()
+        self _skipWhitespace()
+        result = self _parseValue()
+        result
+    }
+
+    _peek() {
+        self _ch = ""
+        (self _pos < self _len) ifTrue({ self _ch = self _src at(self _pos) })
+        self _ch
+    }
+
+    _advance() {
+        self _ch = self _peek()
+        self _pos = self _pos + 1
+        self _ch
+    }
+
+    _skipWhitespace() {
+        self _skipWs()
+    }
+
+    _parseValue() {
+        self _skipWs()
+        self _ch = self _peek()
+        self _result = nil
+        (self _ch == "\"") ifTrue({ self _result = self _parseString() })
+        (self _ch == "{" && self _result == nil) ifTrue({ self _result = self _parseObject() })
+        (self _ch == "[" && self _result == nil) ifTrue({ self _result = self _parseArray() })
+        (self _ch == "t" && self _result == nil) ifTrue({ self _result = self _parseLiteral("true", true) })
+        (self _ch == "f" && self _result == nil) ifTrue({ self _result = self _parseLiteral("false", false) })
+        (self _ch == "n" && self _result == nil) ifTrue({ self _result = self _parseLiteral("null", nil) })
+        (("0123456789-" contains(self _ch)) && self _result == nil) ifTrue({
+            self _result = self _parseNumber()
+        })
+        self _result
+    }
+
+    _skipWs() {
+        self _done = false
+        { self _done == false && self _pos < self _len } whileTrue({
+            self _ch = self _src at(self _pos)
+            (self _ch == " " || self _ch == "\n" || self _ch == "\r" || self _ch == "\t") ifTrue({
+                self _pos = self _pos + 1
+            })
+            (!(self _ch == " " || self _ch == "\n" || self _ch == "\r" || self _ch == "\t")) ifTrue({
+                self _done = true
+            })
+        })
+    }
+
+    _parseString() {
+        self _advance()  // skip opening "
+        self _result = ""
+        self _done = false
+        { self _done == false && self _pos < self _len } whileTrue({
+            self _ch = self _advance()
+            (self _ch == "\"") ifTrue({ self _done = true })
+            (self _ch != "\"" && self _ch == "\\") ifTrue({
+                self _ch = self _advance()
+                (self _ch == "n") ifTrue({ self _ch = "\n" })
+                (self _ch == "t") ifTrue({ self _ch = "\t" })
+                (self _ch == "r") ifTrue({ self _ch = "\r" })
+                self _result = self _result + self _ch
+            })
+            (self _ch != "\"" && self _ch != "\\") ifTrue({
+                self _result = self _result + self _ch
+            })
+        })
+        self _result
+    }
+
+    _parseNumber() {
+        _start = self _pos
+        _isFloat = false
+        _digits = "0123456789"
+        (self _peek() == "-") ifTrue({ self _pos = self _pos + 1 })
+        self _done = false
+        { self _done == false && self _pos < self _len } whileTrue({
+            self _ch = self _src at(self _pos)
+            (_digits contains(self _ch)) ifTrue({ self _pos = self _pos + 1 })
+            (!(_digits contains(self _ch)) && self _ch == "." && _isFloat == false) ifTrue({
+                _isFloat = true
+                self _pos = self _pos + 1
+            })
+            (!(_digits contains(self _ch)) && self _ch != ".") ifTrue({
+                self _done = true
+            })
+            (!(_digits contains(self _ch)) && self _ch == "." && _isFloat == true) ifTrue({
+                self _done = true
+            })
+        })
+        _numStr = self _src slice(_start, self _pos)
+        self _result = _numStr toInt()
+        (_isFloat == true) ifTrue({ self _result = _numStr toFloat() })
+        self _result
+    }
+
+    _parseArray() {
+        self _advance()  // skip [
+        self _fillArray([])
+    }
+
+    _fillArray(arr) {
+        self _skipWs()
+        (self _peek() != "]") ifTrue({
+            arr append(self _parseValue())
+            self _skipWs()
+            { self _peek() == "," } whileTrue({
+                self _advance()  // skip ,
+                arr append(self _parseValue())
+                self _skipWs()
+            })
+        })
+        self _advance()  // skip ]
+        arr
+    }
+
+    _parseObject() {
+        self _advance()  // skip {
+        self _fillObject(Dict new())
+    }
+
+    _fillObject(dict) {
+        self _skipWs()
+        (self _peek() != "}") ifTrue({
+            self _addKV(dict)
+            self _skipWs()
+            { self _peek() == "," } whileTrue({
+                self _advance()  // skip ,
+                self _addKV(dict)
+                self _skipWs()
+            })
+        })
+        self _advance()  // skip }
+        dict
+    }
+
+    _addKV(dict) {
+        self _skipWs()
+        self _setKV(dict, self _parseString())
+    }
+
+    _setKV(dict, key) {
+        self _skipWs()
+        self _advance()  // skip :
+        dict set(key, self _parseValue())
+    }
+
+    _parseLiteral(expected, value) {
+        self _pos = self _pos + expected length()
+        value
     }
 })
