@@ -61,7 +61,6 @@ typedef struct {
     int native_set_method;
     int native_println;
     int native_print;
-    int native_make_string;
     int native_make_array;
     int native_make_block;
     int native_load_global;
@@ -72,6 +71,8 @@ typedef struct {
     int native_cell_set;
     int native_is_truthy;
     int native_to_bool;
+    int native_try_catch;
+    int native_raise;
 
     int had_error;
 

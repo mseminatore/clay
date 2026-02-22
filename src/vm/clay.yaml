@@ -24,6 +24,8 @@ vm:
     coroutines: false
     debug_tracing: true
     nan_boxing: false
+    exception_handling: true
+    expose_dispatch_table: true
 
   dispatch: "auto"
 
@@ -192,7 +194,40 @@ vm:
         /* Close upvalue is handled through native calls for now */
         (void)slot;
 
+    # Exception handling
+    - name: TRY_BEGIN
+      operands: [{ name: handler_offset, type: int16 }]
+      description: "Begin try block; handler at ip + offset"
+      action: "try_begin $handler_offset"
+
+    - name: TRY_END
+      operands: []
+      description: "End try block; pop exception frame"
+      action: "try_end"
+
+    - name: CATCH
+      operands: []
+      description: "Catch exception; push exception value"
+      action: "catch ex; push ex"
+
+    - name: THROW
+      operands: []
+      description: "Throw top of stack as exception"
+      action: "pop ex; throw ex"
+
   constants:
     - int64
     - double
     - string
+
+  constant_pool:
+    type: "dynamic"
+    initial_capacity: 256
+
+  frames:
+    type: "dynamic"
+    max_depth: 64
+
+  vm_extensions:
+    - { name: natives, type: "clayvm_native_table_t", include: "native.h" }
+    - { name: globals, type: "void *", comment: "HashTable* for REPL variable persistence" }

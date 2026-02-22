@@ -76,7 +76,7 @@ static int fold_constants(uint8_t *code, size_t code_len,
             result = a / b;
             matched = 1;
         }
-        if (matched && constants->count < CLAYVM_MAX_CONSTANTS) {
+        if (matched && constants->count < constants->capacity) {
             int new_idx = constants->count;
             constants->values[new_idx] = CLAYVM_INT64(result);
             constants->count++;

@@ -68,7 +68,8 @@ clay: $(COMPILER_OBJS) libclay.a libclayvm.a
 
 CLAY_TESTS = test/programs/test_numbers.clay test/programs/test_strings.clay \
              test/programs/test_arrays.clay test/programs/test_blocks.clay \
-             test/programs/test_objects.clay test/programs/test_control.clay
+             test/programs/test_objects.clay test/programs/test_control.clay \
+             test/programs/test_errors.clay
 
 # Test binary
 test: test_runner

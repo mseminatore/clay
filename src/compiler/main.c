@@ -733,6 +733,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         printf("  Objects freed:     %zu\n", clay_dealloc_count);
         printf("  Still live:        %zu\n", clay_alloc_count - clay_dealloc_count);
     }
+    clayvm_vm_free(&vm);
     return 0;
 }
 
@@ -812,6 +813,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 
     ast_free(program);
     free(source);
+    clayvm_vm_free(&vm);
     return exit_code;
 }
 

@@ -5,17 +5,17 @@ Test = Object clone({
     _f = 0
     eq(a, b) {
         (a == b) ifTrue({ self _p = self _p + 1 })
-        (!(a == b)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        (!(a == b)) ifTrue({ self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() })
         self
     }
     ok(v) {
         (v == true) ifTrue({ self _p = self _p + 1 })
-        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: expected true" println() })
         self
     }
     no(v) {
         (v == false) ifTrue({ self _p = self _p + 1 })
-        (!(v == false)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        (!(v == false)) ifTrue({ self _f = self _f + 1; "FAIL: expected false" println() })
         self
     }
     done() {
@@ -47,5 +47,65 @@ i = 0; s = 0
 { i < 5 } whileTrue({ s = s + i; i = i + 1 })
 Test eq(s, 10)
 Test eq(i, 5)
+
+// Nested conditionals
+x = 10
+r5 = 0
+(x > 5) ifTrue({
+    (x > 15) ifTrue({ r5 = 1 })
+    (x > 15) ifFalse({ r5 = 2 })
+})
+Test eq(r5, 2)
+
+// Short-circuit && — right side not evaluated when left is false
+sc1 = 0
+flag = { sc1 = 1 }
+false && flag value()
+Test eq(sc1, 0)
+
+// Short-circuit || — right side not evaluated when left is true
+sc2 = 0
+flag2 = { sc2 = 1 }
+true || flag2 value()
+Test eq(sc2, 0)
+
+// Nested whileTrue
+total = 0
+i = 0
+{ i < 3 } whileTrue({
+    j = 0
+    { j < 3 } whileTrue({
+        total = total + 1
+        j = j + 1
+    })
+    i = i + 1
+})
+Test eq(total, 9)
+
+// Complex boolean
+Test ok((3 > 1) && (5 < 10))
+Test no((3 > 1) && (5 > 10))
+Test ok((3 > 5) || (5 < 10))
+Test no((3 > 5) || (5 > 10))
+
+// Chained logical
+Test ok(true && true && true)
+Test no(true && true && false)
+Test ok(false || false || true)
+Test no(false || false || false)
+
+// Comparison operators
+Test ok(1 < 2)
+Test no(2 < 1)
+Test ok(2 > 1)
+Test no(1 > 2)
+Test ok(1 <= 1)
+Test ok(1 <= 2)
+Test ok(2 >= 2)
+Test ok(3 >= 2)
+Test ok(1 == 1)
+Test no(1 == 2)
+Test ok(1 != 2)
+Test no(1 != 1)
 
 Test done()

@@ -39,6 +39,7 @@ static void test_vm_init(void) {
     clayvm_vm_init(&vm);
     TEST_ASSERT(vm.sp == 0, "vm init: sp should be 0");
     TEST_ASSERT(vm.ip == 0, "vm init: ip should be 0");
+    clayvm_vm_free(&vm);
 }
 
 static void test_push_pop(void) {
@@ -49,6 +50,7 @@ static void test_push_pop(void) {
     clayvm_value_t val = clayvm_vm_pop(&vm);
     TEST_ASSERT(vm.sp == 0, "pop: sp should be 0");
     TEST_ASSERT_INT(val.as.i64, 42, "pop: value should be 42");
+    clayvm_vm_free(&vm);
 }
 
 static void test_constants(void) {

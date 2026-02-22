@@ -92,6 +92,14 @@ static ClayValue object_type(ClayObject *self, int argc, ClayValue *argv) {
                         if (p == clay_Error) { name = "Error"; break; }
                         p = p->parent;
                     }
+                    /* Check _name slot for user-defined prototypes */
+                    if (strcmp(name, "Object") == 0) {
+                        ClayValue nv = clay_get_slot(self, "_name");
+                        if (!CLAY_IS_NIL(nv) && CLAY_IS_PTR(nv) &&
+                            CLAY_OBJ(nv)->type == CLAY_TYPE_STRING) {
+                            name = clay_string_data(CLAY_OBJ(nv));
+                        }
+                    }
                 }
                 else name = "Object";
                 break;
