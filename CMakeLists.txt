@@ -101,3 +101,11 @@ endif()
 
 enable_testing()
 add_test(NAME clay_tests COMMAND test_runner)
+
+# Clay language integration tests (run via bytecode VM)
+add_test(NAME clay_test_numbers  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_numbers.clay)
+add_test(NAME clay_test_strings  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_strings.clay)
+add_test(NAME clay_test_arrays   COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_arrays.clay)
+add_test(NAME clay_test_blocks   COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_blocks.clay)
+add_test(NAME clay_test_objects  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_objects.clay)
+add_test(NAME clay_test_control  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_control.clay)

@@ -1,6 +1,10 @@
 # Directories
 build/
 
+# Test output captures
+stdout_*.txt
+stderr_*.txt
+
 # Installed brick dependencies (created by `bricks install`)
 **/bricks/bricks/
 

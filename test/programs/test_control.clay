@@ -1,0 +1,51 @@
+// test_control.clay — Control flow and boolean logic
+
+Test = Object clone({
+    _p = 0
+    _f = 0
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        self
+    }
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        self
+    }
+    no(v) {
+        (v == false) ifTrue({ self _p = self _p + 1 })
+        (!(v == false)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+})
+
+// Boolean logic
+Test ok(true && true)
+Test no(true && false)
+Test no(false && true)
+Test ok(true || false)
+Test ok(false || true)
+Test no(false || false)
+Test no(!true)
+Test ok(!false)
+
+// ifTrue / ifFalse
+r1 = 0; true ifTrue({ r1 = 42 }); Test eq(r1, 42)
+r2 = 0; false ifTrue({ r2 = 42 }); Test eq(r2, 0)
+r3 = 0; false ifFalse({ r3 = 99 }); Test eq(r3, 99)
+r4 = 0; true ifFalse({ r4 = 99 }); Test eq(r4, 0)
+
+// whileTrue
+i = 0; s = 0
+{ i < 5 } whileTrue({ s = s + i; i = i + 1 })
+Test eq(s, 10)
+Test eq(i, 5)
+
+Test done()

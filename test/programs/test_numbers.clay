@@ -1,0 +1,58 @@
+// test_numbers.clay — Number operations
+
+// Minimal test helper — uses few constants
+Test = Object clone({
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        })
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: not true" println() })
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+})
+
+// Arithmetic
+Test eq(2 + 3, 5)
+Test eq(10 - 4, 6)
+Test eq(6 * 7, 42)
+Test eq(20 / 5, 4)
+Test eq(17 % 5, 2)
+Test eq(0 + 0, 0)
+Test eq(5 * 0, 0)
+Test eq(3 - 10, -7)
+
+// Comparison
+Test ok(5 == 5)
+Test ok(5 != 6)
+Test ok(3 < 5)
+Test ok(5 > 3)
+Test ok(3 <= 5)
+Test ok(5 <= 5)
+Test ok(5 >= 3)
+Test ok(5 >= 5)
+
+// Compound assignment
+x = 10; x += 5; Test eq(x, 15)
+x = 10; x -= 3; Test eq(x, 7)
+x = 6; x *= 4; Test eq(x, 24)
+x = 20; x /= 5; Test eq(x, 4)
+x = 17; x %= 5; Test eq(x, 2)
+
+Test done()

@@ -1,0 +1,59 @@
+// test_strings.clay — String operations
+
+Test = Object clone({
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        })
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: not true" println() })
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+})
+
+// Concatenation
+Test eq("hello" + " " + "world", "hello world")
+Test eq("a" + "b", "ab")
+
+// Length
+Test eq("Clay" length(), 4)
+Test eq("" length(), 0)
+Test eq("hello" length(), 5)
+
+// Case conversion
+Test eq("hello" upper(), "HELLO")
+Test eq("HELLO" lower(), "hello")
+
+// Contains
+Test ok("hello world" contains("world"))
+Test ok("hello world" contains("hello"))
+Test ok("hello" contains(""))
+
+// Number to string
+Test eq(42 toString(), "42")
+Test eq(0 toString(), "0")
+
+// Boolean to string
+Test eq(true toString(), "true")
+Test eq(false toString(), "false")
+
+// String + number
+Test eq("val: " + 42, "val: 42")
+
+Test done()

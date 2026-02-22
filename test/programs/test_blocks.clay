@@ -1,0 +1,67 @@
+// test_blocks.clay — Block/closure operations
+
+Test = Object clone({
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        })
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: not true" println() })
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+})
+
+// Basic blocks
+Test eq({ 42 } value(), 42)
+Test eq({ |a, b| a + b } value(3, 4), 7)
+
+// Closures — capture outer variable
+x = 10
+Test eq({ x + 5 } value(), 15)
+
+// Adder closure
+makeAdder = { |n| { |x| n + x } }
+add5 = makeAdder value(5)
+Test eq(add5 value(10), 15)
+Test eq(add5 value(20), 25)
+
+// Capture survives scope
+wrap = { |n| { n } }
+getter = wrap value(42)
+Test eq(getter value(), 42)
+
+// Multiple captures
+pair = { |a, b| { a + b } }
+sum = pair value(10, 20)
+Test eq(sum value(), 30)
+
+// Counter pattern (shared capture)
+makeCounter = { |start| { start = start + 1; start } }
+counter = makeCounter value(0)
+Test eq(counter value(), 1)
+Test eq(counter value(), 2)
+Test eq(counter value(), 3)
+
+// Three-level nesting
+f = { |a| { |b| { a * b } } }
+g = f value(3)
+h = g value(5)
+Test eq(h value(), 15)
+
+Test done()

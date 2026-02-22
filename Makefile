@@ -47,7 +47,7 @@ else
 endif
 
 # Targets
-.PHONY: all clean test
+.PHONY: all clean test test-clay
 
 all: libclay.a libclayvm.a clay
 
@@ -66,9 +66,18 @@ libclayvm.a: $(VM_OBJS)
 clay: $(COMPILER_OBJS) libclay.a libclayvm.a
 	$(CC) $(CFLAGS) -o $@ $(COMPILER_OBJS) -L. -lclayvm -lclay -lm
 
+CLAY_TESTS = test/programs/test_numbers.clay test/programs/test_strings.clay \
+             test/programs/test_arrays.clay test/programs/test_blocks.clay \
+             test/programs/test_objects.clay test/programs/test_control.clay
+
 # Test binary
 test: test_runner
 	./test_runner
+
+# Clay integration tests (requires clay binary)
+test-clay: clay
+	@for f in $(CLAY_TESTS); do echo "=== $$f ==="; ./clay $$f || exit 1; done
+	@echo "All Clay tests passed."
 
 test_runner: $(TEST_OBJS) libclay.a libclayvm.a
 	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) -L. -lclayvm -lclay -lm $(STACK_FLAGS)
