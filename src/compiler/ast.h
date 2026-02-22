@@ -59,6 +59,7 @@ struct AstNode {
             AstNode *receiver;
             char *message;
             NodeList args;
+            int is_super;   /* 1 if receiver is 'super' */
         } send;
 
         /* NODE_BINARY */

@@ -56,6 +56,7 @@ typedef struct {
 
     /* Native function indices (pre-registered) */
     int native_send;      /* clay_send bridge */
+    int native_super_send; /* clay_send_super bridge */
     int native_clone;     /* clay_clone bridge */
     int native_set_slot;  /* clay_set_slot bridge */
     int native_set_method;

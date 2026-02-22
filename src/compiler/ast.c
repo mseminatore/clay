@@ -40,6 +40,7 @@ AstNode *ast_clone(AstNode *node) {
         case NODE_SEND:
             c->as.send.receiver = ast_clone(node->as.send.receiver);
             c->as.send.message = strdup(node->as.send.message);
+            c->as.send.is_super = node->as.send.is_super;
             nodelist_clone(&c->as.send.args, &node->as.send.args);
             break;
         case NODE_BINARY:

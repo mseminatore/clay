@@ -1223,6 +1223,57 @@ static void test_method_cache(void) {
     clay_release(obj);
 }
 
+/* Helper methods for super dispatch tests */
+static ClayValue base_greet(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new("hello"));
+}
+
+static ClayObject *g_test_base = NULL; /* defining prototype for super */
+
+static ClayValue derived_greet(ClayObject *self, int argc, ClayValue *argv) {
+    /* Call super greet() — start lookup from g_test_base->parent */
+    ClayValue parent_result = clay_send_super(CLAY_VAL(self), g_test_base, "greet", argc, argv);
+    /* Append " world" */
+    ClayValue suffix = CLAY_VAL(clay_string_new(" world"));
+    ClayValue result = clay_send_val(parent_result, "+", 1, &suffix);
+    clay_release(CLAY_OBJ(suffix));
+    if (!CLAY_IS_NIL(parent_result) && !CLAY_IS_INT(parent_result))
+        clay_release(CLAY_OBJ(parent_result));
+    return result;
+}
+
+static void test_super_dispatch(void) {
+    SUITE("Super Dispatch");
+
+    COMMENT("super calls parent method...");
+    /* Create: Base with greet() -> "hello" */
+    ClayObject *base = clay_clone(clay_Object);
+    clay_set_method(base, "greet", base_greet);
+
+    /* Create: Derived with greet() -> super greet() + " world" */
+    ClayObject *derived = clay_clone(base);
+    clay_set_method(derived, "greet", derived_greet);
+    g_test_base = derived; /* method defined on derived, super starts from derived->parent = base */
+
+    ClayValue result = clay_send(derived, "greet", 0, NULL);
+    TEST(!CLAY_IS_NIL(result));
+    TEST(strcmp(clay_string_data(CLAY_OBJ(result)), "hello world") == 0);
+    clay_release(CLAY_OBJ(result));
+
+    COMMENT("super on cloned instance...");
+    ClayObject *inst = clay_clone(derived);
+    result = clay_send(inst, "greet", 0, NULL);
+    TEST(!CLAY_IS_NIL(result));
+    TEST(strcmp(clay_string_data(CLAY_OBJ(result)), "hello world") == 0);
+    clay_release(CLAY_OBJ(result));
+
+    clay_release(inst);
+    clay_release(derived);
+    clay_release(base);
+    g_test_base = NULL;
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -1255,6 +1306,7 @@ void test_main(int argc, char *argv[]) {
     test_vm_shared_captures();
     test_vm_logical_operators();
     test_method_cache();
+    test_super_dispatch();
     /* test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures(); */

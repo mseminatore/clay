@@ -546,7 +546,21 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_line(cg, node->line);
     emit_indent(cg);
-    if (argc == 0) {
+    if (node->as.send.is_super && cg->super_proto) {
+        /* super send: start lookup from defining prototype's parent */
+        if (argc == 0) {
+            fprintf(cg->out, "ClayValue %s = clay_send_super(%s, CLAY_OBJ(%s), \"%s\", 0, NULL);\n",
+                    t, recv, cg->super_proto, node->as.send.message);
+        } else {
+            fprintf(cg->out, "ClayValue %s = clay_send_super(%s, CLAY_OBJ(%s), \"%s\", %d, (ClayValue[]){",
+                    t, recv, cg->super_proto, node->as.send.message, argc);
+            for (int i = 0; i < argc; i++) {
+                if (i > 0) fprintf(cg->out, ", ");
+                fprintf(cg->out, "%s", arg_temps[i]);
+            }
+            fprintf(cg->out, "});\n");
+        }
+    } else if (argc == 0) {
         fprintf(cg->out, "ClayValue %s = clay_send_val(%s, \"%s\", 0, NULL);\n",
                 t, recv, node->as.send.message);
     } else {
@@ -992,8 +1006,10 @@ static void emit_method_bodies(CodeGen *cg) {
         int saved_local_count = cg->local_count;
         int saved_boxed_count = cg->boxed_count;
         int saved_method_local_base = cg->method_local_base;
+        const char *saved_super_proto = cg->super_proto;
         cg->method_local_base = cg->local_count;
         cg->in_method = 1;
+        cg->super_proto = cur->obj_context;
 
         if (node->type == NODE_METHOD_DEF) {
             /* Make method's self available for capture by nested blocks */
@@ -1097,6 +1113,7 @@ static void emit_method_bodies(CodeGen *cg) {
 
         /* Restore context */
         cg->in_method = saved_in_method;
+        cg->super_proto = saved_super_proto;
         cg->method_local_base = saved_method_local_base;
         /* Clear locals added in this scope */
         while (cg->local_count > saved_local_count) {

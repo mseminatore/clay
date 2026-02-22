@@ -19,6 +19,7 @@
 
 static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
 static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
+static ClayObject *g_super_proto = NULL; /* defining prototype for super dispatch */
 
 /* Dispatch table from vm.c for direct chunk execution */
 extern int (*clayvm_dispatch_table[])(clayvm_vm_t *vm);
@@ -131,6 +132,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 typedef struct {
     int chunk_id;
     int param_count;
+    ClayObject *defining_obj; /* prototype where this method was defined */
 } MethodSlot;
 
 static MethodSlot g_method_slots[BC_MAX_METHOD_SLOTS];
@@ -143,6 +145,10 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
     if (ms->chunk_id < 0 || ms->chunk_id >= g_bc->chunk_count) return CLAY_NIL;
 
     BcChunk *chunk = g_bc->chunks[ms->chunk_id];
+
+    /* Save and set super prototype context */
+    ClayObject *saved_super_proto = g_super_proto;
+    g_super_proto = ms->defining_obj;
 
     /* Save and set self as global (methods access self via global).
      * Reuse existing hash entry when possible to avoid heap churn. */
@@ -228,6 +234,9 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
         ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
         if (cur_self) { free((void *)cur_self); ht_remove(globals, (ht_key_t)"self"); }
     }
+
+    /* Restore super prototype context */
+    g_super_proto = saved_super_proto;
 
     return retval;
 }
@@ -430,6 +439,31 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
 
     ClayValue result = clay_send_val(receiver, selector, msg_argc, args);
+    free(args);
+
+    clayvm_vm_push(vm, clay_to_vm(result));
+    return 0;
+}
+
+/* native_super_send(receiver, selector_str, arg1, arg2, ...) */
+static int native_super_send_fn(clayvm_vm_t *vm, int argc) {
+    if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
+
+    int msg_argc = argc - 2;
+    ClayValue *args = NULL;
+    if (msg_argc > 0) {
+        args = (ClayValue *)malloc(sizeof(ClayValue) * msg_argc);
+        for (int i = msg_argc - 1; i >= 0; i--)
+            args[i] = vm_to_clay(clayvm_vm_pop(vm));
+    }
+
+    clayvm_value_t sel_val = clayvm_vm_pop(vm);
+    clayvm_value_t recv_val = clayvm_vm_pop(vm);
+
+    ClayValue receiver = vm_to_clay(recv_val);
+    const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
+
+    ClayValue result = clay_send_super(receiver, g_super_proto, selector, msg_argc, args);
     free(args);
 
     clayvm_vm_push(vm, clay_to_vm(result));
@@ -677,6 +711,7 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
     ClayObject *obj = (ClayObject *)obj_val.as.obj;
 
     if (slot_idx >= 0 && slot_idx < BC_MAX_METHOD_SLOTS) {
+        g_method_slots[slot_idx].defining_obj = obj;
         clay_set_method(obj, name, g_method_trampoline_table[slot_idx]);
     } else {
         fprintf(stderr, "clay: method trampoline limit exceeded (%d/%d)\n",
@@ -766,6 +801,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     /* Register native functions */
     vm->arith_fallback = arith_fallback_fn;
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);
+    bc->native_super_send = clayvm_native_register(&vm->natives, "super_send", native_super_send_fn, -1);
     bc->native_clone = clayvm_native_register(&vm->natives, "clone", native_clone_fn, 1);
     bc->native_set_slot = clayvm_native_register(&vm->natives, "set_slot", native_set_slot_fn, 3);
     bc->native_set_method = clayvm_native_register(&vm->natives, "set_method", native_set_method_fn, 3);
@@ -1399,9 +1435,10 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             for (int i = 0; i < node->as.send.args.count; i++) {
                 bc_emit_expr(bc, node->as.send.args.items[i]);
             }
-            /* Call native send: argc = 2 + arg_count (receiver + selector + args) */
+            /* Call native send or super_send */
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            emit_u16(bc, (uint16_t)bc->native_send);
+            int send_fn = node->as.send.is_super ? bc->native_super_send : bc->native_send;
+            emit_u16(bc, (uint16_t)send_fn);
             emit_byte(bc, (uint8_t)(2 + node->as.send.args.count));
             break;
         }

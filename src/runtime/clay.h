@@ -153,6 +153,8 @@ extern size_t clay_dealloc_count;
 
 /* --- Message dispatch --- */
 ClayValue   clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv);
+ClayValue   clay_send_super(ClayValue receiver, ClayObject *defining_obj,
+                            const char *selector, int argc, ClayValue *argv);
 
 /* Legacy API - still works for object pointers */
 #define clay_send(recv, sel, ac, av) clay_send_val(CLAY_VAL(recv), sel, ac, av)

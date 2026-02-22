@@ -11,6 +11,7 @@ typedef enum {
 
     /* Keywords */
     TOK_SELF,           /* self */
+    TOK_SUPER,          /* super */
     TOK_IMPORT,         /* import */
     TOK_TRY,            /* try */
     TOK_CATCH,          /* catch */

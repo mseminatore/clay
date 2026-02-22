@@ -375,6 +375,19 @@ static AstNode *parse_primary(Parser *p) {
         return ast_new(NODE_SELF, p->previous.line);
     }
 
+    /* Super — returns NODE_SELF; parse_postfix marks the send as is_super */
+    if (match(p, TOK_SUPER)) {
+        if (!check(p, TOK_IDENT)) {
+            parser_error(p, "Expected method name after 'super'");
+            return ast_new(NODE_SELF, p->previous.line);
+        }
+        /* We return NODE_SELF but tag it so parse_postfix can detect it.
+         * Reuse the int_lit.value field (NODE_SELF doesn't use the union). */
+        AstNode *node = ast_new(NODE_SELF, p->previous.line);
+        node->as.int_lit.value = 1; /* marker for super */
+        return node;
+    }
+
     /* Parenthesized expression */
     if (match(p, TOK_LPAREN)) {
         AstNode *expr = parse_expression(p);
@@ -528,6 +541,10 @@ static AstNode *parse_postfix(Parser *p) {
     AstNode *expr = parse_primary(p);
     if (!expr) return NULL;
 
+    /* Detect super marker (NODE_SELF with int_lit.value == 1) */
+    int next_is_super = (expr->type == NODE_SELF && expr->as.int_lit.value == 1);
+    if (next_is_super) expr->as.int_lit.value = 0; /* clear marker */
+
     for (;;) {
         if (check(p, TOK_IDENT)) {
             /* message send: expr ident or expr ident(args) */
@@ -551,6 +568,8 @@ static AstNode *parse_postfix(Parser *p) {
                 AstNode *send = ast_new(NODE_SEND, send_line);
                 send->as.send.receiver = expr;
                 send->as.send.message = msg_name;
+                send->as.send.is_super = next_is_super;
+                next_is_super = 0;
                 nodelist_init(&send->as.send.args);
                 if (!check(p, TOK_RPAREN)) {
                     nodelist_push(&send->as.send.args, parse_expression(p));
@@ -568,6 +587,8 @@ static AstNode *parse_postfix(Parser *p) {
                 AstNode *send = ast_new(NODE_SEND, send_line);
                 send->as.send.receiver = expr;
                 send->as.send.message = msg_name;
+                send->as.send.is_super = next_is_super;
+                next_is_super = 0;
                 nodelist_init(&send->as.send.args);
                 if (!check(p, TOK_RPAREN)) {
                     nodelist_push(&send->as.send.args, parse_expression(p));
@@ -583,6 +604,8 @@ static AstNode *parse_postfix(Parser *p) {
                 AstNode *send = ast_new(NODE_SEND, send_line);
                 send->as.send.receiver = expr;
                 send->as.send.message = msg_name;
+                send->as.send.is_super = next_is_super;
+                next_is_super = 0;
                 nodelist_init(&send->as.send.args);
                 expr = send;
             }

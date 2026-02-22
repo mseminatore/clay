@@ -106,3 +106,20 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     return CLAY_NIL;
 }
+
+ClayValue clay_send_super(ClayValue receiver, ClayObject *defining_obj,
+                          const char *selector, int argc, ClayValue *argv) {
+    /* Start method lookup from the parent of the defining prototype */
+    ClayObject *start = defining_obj ? defining_obj->parent : NULL;
+    if (start) {
+        ClayMethodFunc func = clay_lookup_method(start, selector);
+        if (func) {
+            ClayObject *self = CLAY_OBJ(receiver);
+            return func(self, argc, argv);
+        }
+    }
+    char buf[128];
+    snprintf(buf, sizeof(buf), "super does not understand '%s'", selector);
+    clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
+    return CLAY_NIL;
+}

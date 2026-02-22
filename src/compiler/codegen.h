@@ -18,6 +18,7 @@ typedef struct {
     char **boxed_names;  /* variables boxed into cells (by-reference capture) */
     int boxed_count;
     int boxed_capacity;
+    const char *super_proto; /* variable name of defining prototype (for super) */
 } CodeGen;
 
 void codegen_init(CodeGen *cg, FILE *out, const char *source_file);
