@@ -1,0 +1,67 @@
+// test_file_ops.clay — Test new File methods
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Setup: write a test file
+File write("_test_tmp.txt", "hello world")
+
+// Test 1: exists
+assert value(File exists("_test_tmp.txt"), "exists should find test file")
+
+// Test 2: isFile
+assert value(File isFile("_test_tmp.txt"), "isFile should be true for file")
+
+// Test 3: isDir on file
+assert value(File isDir("_test_tmp.txt") == false, "isDir should be false for file")
+
+// Test 4: size
+sz = File size("_test_tmp.txt")
+assert value(sz == 11, "size should be 11 bytes")
+
+// Test 5: rename
+File rename("_test_tmp.txt", "_test_tmp2.txt")
+assert value(File exists("_test_tmp2.txt"), "renamed file should exist")
+assert value(File exists("_test_tmp.txt") == false, "old name should not exist")
+
+// Test 6: read renamed file
+content = File read("_test_tmp2.txt")
+assert value(content == "hello world", "renamed file content preserved")
+
+// Test 7: delete
+File delete("_test_tmp2.txt")
+assert value(File exists("_test_tmp2.txt") == false, "deleted file should not exist")
+
+// Test 8: mkdir
+File mkdir("_test_tmpdir")
+assert value(File isDir("_test_tmpdir"), "mkdir should create directory")
+assert value(File isFile("_test_tmpdir") == false, "dir is not a file")
+
+// Test 9: listDir
+File write("_test_tmpdir/_a.txt", "a")
+File write("_test_tmpdir/_b.txt", "b")
+entries = File listDir("_test_tmpdir")
+assert value(entries size() == 2, "listDir should find 2 files")
+
+// Test 10: isDir on non-existent
+assert value(File isDir("_nonexistent_") == false, "isDir false for missing path")
+
+// Test 11: isFile on non-existent
+assert value(File isFile("_nonexistent_") == false, "isFile false for missing path")
+
+// Cleanup
+File delete("_test_tmpdir/_a.txt")
+File delete("_test_tmpdir/_b.txt")
+// Remove directory — use delete which calls remove()
+// Note: remove() works on empty dirs on most platforms
+
+(passed toString() + " passed, " + failed toString() + " failed") println()
