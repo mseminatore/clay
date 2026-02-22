@@ -45,6 +45,10 @@ Test ok("hello world" contains("world"))
 Test ok("hello world" contains("hello"))
 Test ok("hello" contains(""))
 
+// Inequality
+Test ok("hello" != "world")
+Test ok(!("hello" != "hello"))
+
 // Number to string
 Test eq(42 toString(), "42")
 Test eq(0 toString(), "0")

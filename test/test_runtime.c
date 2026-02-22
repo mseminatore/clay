@@ -149,6 +149,16 @@ static void test_strings(void) {
     ClayValue eq = clay_send(s, "==", 1, &arg);
     TEST(CLAY_IS_TRUE(eq));
 
+    COMMENT("inequality...");
+    ClayObject *s4 = clay_string_new("world");
+    arg = CLAY_VAL(s4);
+    ClayValue neq = clay_send(s, "!=", 1, &arg);
+    TEST(CLAY_IS_TRUE(neq));
+    arg = CLAY_VAL(s3);
+    ClayValue neq2 = clay_send(s, "!=", 1, &arg);
+    TEST(CLAY_IS_FALSE(neq2));
+    clay_release(s4);
+
     COMMENT("at...");
     ClayValue idx = clay_int(0);
     ClayValue ch = clay_send(s, "at", 1, &idx);
@@ -235,6 +245,19 @@ static void test_arrays(void) {
     idx = clay_int(99);
     item = clay_send(arr, "at", 1, &idx);
     TEST(CLAY_IS_NIL(item));
+
+    COMMENT("push (alias for append)...");
+    ClayObject *arr2 = clay_array_new();
+    ClayValue push_arg = clay_int(42);
+    clay_send(arr2, "push", 1, &push_arg);
+    push_arg = clay_int(99);
+    clay_send(arr2, "push", 1, &push_arg);
+    TEST(clay_to_int(clay_send(arr2, "size", 0, NULL)) == 2);
+    idx = clay_int(0);
+    TEST(clay_to_int(clay_send(arr2, "at", 1, &idx)) == 42);
+    idx = clay_int(1);
+    TEST(clay_to_int(clay_send(arr2, "at", 1, &idx)) == 99);
+    clay_release(arr2);
 
     clay_release(arr);
 }

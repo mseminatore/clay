@@ -286,6 +286,7 @@ static ClayValue array_removeAt(ClayObject *self, int argc, ClayValue *argv) {
 
 void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "append", array_append);
+    clay_set_method(proto, "push", array_append);
     clay_set_method(proto, "at", array_at);
     clay_set_method(proto, "size", array_size);
     clay_set_method(proto, "length", array_size);

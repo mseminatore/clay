@@ -39,9 +39,11 @@ Test eq(a at(2), 30)
 Test eq(a first(), 10)
 Test eq(a last(), 30)
 
-// Push — skip (not in VM yet)
-// b = [1, 2]
-// b push(3)
+// Push
+b = [1, 2]
+b push(3)
+Test eq(b size(), 3)
+Test eq(b at(2), 3)
 
 // Map
 c = [1, 2, 3]

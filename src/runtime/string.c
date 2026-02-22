@@ -100,6 +100,13 @@ static ClayValue string_equals(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) == 0);
 }
 
+static ClayValue string_neq(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_TRUE;
+    ClayObject *other = CLAY_OBJ(argv[0]);
+    if (other->type != CLAY_TYPE_STRING) return CLAY_TRUE;
+    return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) != 0);
+}
+
 static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     intptr_t idx = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0])
@@ -289,6 +296,7 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "toString", string_toString);
     clay_set_method(proto, "+", string_concat);
     clay_set_method(proto, "==", string_equals);
+    clay_set_method(proto, "!=", string_neq);
     clay_set_method(proto, "at", string_at);
     clay_set_method(proto, "contains", string_contains);
     clay_set_method(proto, "slice", string_slice);
