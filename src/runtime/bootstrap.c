@@ -269,6 +269,18 @@ static ClayValue nil_type(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(clay_string_new("Nil"));
 }
 
+static ClayValue nil_eq(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1) return CLAY_FALSE;
+    return CLAY_BOOL(CLAY_IS_NIL(argv[0]));
+}
+
+static ClayValue nil_neq(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1) return CLAY_TRUE;
+    return CLAY_BOOL(!CLAY_IS_NIL(argv[0]));
+}
+
 /* Console methods */
 static ClayValue console_readLine(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
@@ -386,6 +398,8 @@ void clay_bootstrap(void) {
     clay_Nil->refcount = 1000000;
     clay_set_method(clay_Nil, "toString", nil_toString);
     clay_set_method(clay_Nil, "type", nil_type);
+    clay_set_method(clay_Nil, "==", nil_eq);
+    clay_set_method(clay_Nil, "!=", nil_neq);
 
     /* Error prototype */
     clay_Error = clay_object_new();

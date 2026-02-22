@@ -82,11 +82,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     }
 
     /* Slot access fallback: if a slot exists with this name, return its value */
-    if (argc == 0) {
-        ClayValue slot_val = clay_get_slot(obj, selector);
-        if (!CLAY_IS_NIL(slot_val)) {
-            return slot_val;
-        }
+    if (argc == 0 && clay_has_slot(obj, selector)) {
+        return clay_get_slot(obj, selector);
     }
 
     /* Try doesNotUnderstand */

@@ -106,6 +106,20 @@ ClayValue clay_get_slot(ClayObject *obj, const char *name) {
     return CLAY_NIL;
 }
 
+int clay_has_slot(ClayObject *obj, const char *name) {
+    ClayObject *cur = obj;
+    while (cur) {
+        if (cur->slots) {
+            ht_value_t val;
+            if (ht_lookup(cur->slots, name, &val)) {
+                return 1;
+            }
+        }
+        cur = cur->parent;
+    }
+    return 0;
+}
+
 void clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func) {
     /* Allocate a ClayMethod struct to store the function pointer */
     ClayMethod *m = (ClayMethod *)malloc(sizeof(ClayMethod));

@@ -133,6 +133,7 @@ ClayObject *clay_object_new(void);
 ClayObject *clay_clone(ClayObject *proto);
 void        clay_set_slot(ClayObject *obj, const char *name, ClayValue value);
 ClayValue   clay_get_slot(ClayObject *obj, const char *name);
+int         clay_has_slot(ClayObject *obj, const char *name);
 void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func);
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
 
