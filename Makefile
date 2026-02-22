@@ -36,7 +36,7 @@ COMPILER_OBJS = $(COMPILER_SRCS:.c=.o)
 HASH_SRC = deps/hash/hash.c
 HASH_OBJ = deps/hash/hash.o
 
-TEST_SRCS = test/test_runtime.c deps/testy/test_main.c
+TEST_SRCS = test/test_runtime.c test/test_lexer.c test/test_parser.c deps/testy/test_main.c
 TEST_OBJS = $(TEST_SRCS:.c=.o)
 
 # Stack size flags for test_runner (BcCompiler + VM structs are large)

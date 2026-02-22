@@ -86,7 +86,7 @@ target_link_libraries(clay_compiler clay_compiler_lib)
 set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 
 # Test runner
-add_executable(test_runner test/test_runtime.c)
+add_executable(test_runner test/test_runtime.c test/test_lexer.c test/test_parser.c)
 target_link_libraries(test_runner clay_compiler_lib testy)
 # Increase stack size — vm_eval allocates ~400KB per call (BcCompiler + VM stack)
 if(MSVC)

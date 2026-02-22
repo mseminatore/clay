@@ -8,6 +8,10 @@
 #include "vm.h"
 #include "hash.h"
 
+/* External test modules */
+extern void test_lexer(void);
+extern void test_parser(void);
+
 static void test_tagged_values(void) {
     SUITE("Tagged Values");
 
@@ -1125,6 +1129,11 @@ static void test_method_cache(void) {
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
+    /* Compiler frontend tests (no bootstrap needed) */
+    test_lexer();
+    test_parser();
+
+    /* Runtime tests */
     clay_bootstrap();
 
     MODULE("Clay Runtime");
