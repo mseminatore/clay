@@ -200,6 +200,33 @@ static ClayValue dict_toString(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+static ClayValue dict_equals(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    ClayObject *other = CLAY_OBJ(argv[0]);
+    if (other->type != CLAY_TYPE_DICT) return CLAY_FALSE;
+    if (self == other) return CLAY_TRUE;
+    int self_size = self->as.dict.map ? (int)ht_size(self->as.dict.map) : 0;
+    int other_size = other->as.dict.map ? (int)ht_size(other->as.dict.map) : 0;
+    if (self_size != other_size) return CLAY_FALSE;
+    if (self_size == 0) return CLAY_TRUE;
+    size_t pos = 0;
+    ht_key_t key;
+    ht_value_t val;
+    while (ht_next(self->as.dict.map, &pos, &key, &val)) {
+        ht_value_t oval = ht_find(other->as.dict.map, key);
+        if (!oval) return CLAY_FALSE;
+        ClayValue a = (ClayValue)(uintptr_t)val;
+        ClayValue b = (ClayValue)(uintptr_t)oval;
+        ClayValue eq = clay_send_val(a, "==", 1, &b);
+        if (eq != CLAY_TRUE) return CLAY_FALSE;
+    }
+    return CLAY_TRUE;
+}
+
+static ClayValue dict_neq(ClayObject *self, int argc, ClayValue *argv) {
+    return dict_equals(self, argc, argv) == CLAY_TRUE ? CLAY_FALSE : CLAY_TRUE;
+}
+
 void clay_dict_init_methods(ClayObject *proto) {
     clay_set_method(proto, "set", dict_set);
     clay_set_method(proto, "get", dict_get);
@@ -210,4 +237,6 @@ void clay_dict_init_methods(ClayObject *proto) {
     clay_set_method(proto, "values", dict_values);
     clay_set_method(proto, "each", dict_each);
     clay_set_method(proto, "toString", dict_toString);
+    clay_set_method(proto, "==", dict_equals);
+    clay_set_method(proto, "!=", dict_neq);
 }

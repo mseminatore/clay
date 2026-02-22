@@ -5,6 +5,7 @@
  *   clay bricks init
  *   clay bricks add <url>
  *   clay bricks install
+ *   clay bricks update
  *   clay bricks list
  *   clay bricks remove <name>
  */
@@ -392,12 +393,77 @@ static int cmd_list(void) {
     return 0;
 }
 
+/* Update a single installed dependency by pulling latest or re-cloning */
+static int update_dep(const char *url, const char *name) {
+    char dest[BRICK_MAX_PATH];
+    snprintf(dest, sizeof(dest), "bricks/%s", name);
+
+    struct stat st;
+    if (stat(dest, &st) != 0) {
+        printf("  %s: not installed, installing...\n", name);
+        return install_dep(url, name);
+    }
+
+    char clone_url[BRICK_MAX_PATH], ref[256];
+    split_url_ref(url, clone_url, sizeof(clone_url), ref, sizeof(ref));
+
+    if (ref[0]) {
+        /* Pinned ref: fetch and checkout the specific ref */
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "git -C \"%s\" fetch --quiet origin", dest);
+        printf("  Updating %s (ref: %s)...\n", name, ref);
+        int rc = system(cmd);
+        if (rc != 0) {
+            fprintf(stderr, "  warning: fetch failed for %s\n", name);
+            return -1;
+        }
+        snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"", dest, ref);
+        system(cmd);
+    } else {
+        /* No pinned ref: pull latest from default branch */
+        char cmd[2048];
+        printf("  Updating %s...\n", name);
+        snprintf(cmd, sizeof(cmd), "git -C \"%s\" pull --quiet", dest);
+        int rc = system(cmd);
+        if (rc != 0) {
+            fprintf(stderr, "  warning: pull failed for %s\n", name);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int cmd_update(void) {
+    BrickManifest m;
+    if (brick_parse("brick.json", &m) != 0) {
+        fprintf(stderr, "error: no brick.json found\n");
+        return 1;
+    }
+    if (m.dep_count == 0) {
+        printf("No dependencies to update.\n");
+        return 0;
+    }
+    printf("Updating %d dependenc%s...\n", m.dep_count,
+           m.dep_count == 1 ? "y" : "ies");
+    int failures = 0;
+    for (int i = 0; i < m.dep_count; i++) {
+        if (update_dep(m.deps[i].url, m.deps[i].name) != 0)
+            failures++;
+    }
+    if (failures)
+        printf("Done with %d failure(s).\n", failures);
+    else
+        printf("All dependencies up to date.\n");
+    return failures ? 1 : 0;
+}
+
 int brick_command(int argc, char **argv) {
     if (argc < 1) {
         fprintf(stderr, "Usage: clay bricks <command>\n\n");
         fprintf(stderr, "Commands:\n");
         fprintf(stderr, "  init              Create a new brick.json\n");
         fprintf(stderr, "  install           Install dependencies from brick.json\n");
+        fprintf(stderr, "  update            Update installed dependencies\n");
         fprintf(stderr, "  add <url>         Add a dependency\n");
         fprintf(stderr, "  remove <name>     Remove a dependency\n");
         fprintf(stderr, "  list              Show project info and dependencies\n");
@@ -409,6 +475,8 @@ int brick_command(int argc, char **argv) {
         return cmd_init();
     } else if (strcmp(cmd, "install") == 0) {
         return cmd_install();
+    } else if (strcmp(cmd, "update") == 0) {
+        return cmd_update();
     } else if (strcmp(cmd, "add") == 0) {
         if (argc < 2) {
             fprintf(stderr, "Usage: clay bricks add <url>\n");

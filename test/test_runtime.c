@@ -259,6 +259,50 @@ static void test_arrays(void) {
     TEST(clay_to_int(clay_send(arr2, "at", 1, &idx)) == 99);
     clay_release(arr2);
 
+    COMMENT("array equality...");
+    ClayObject *eq1 = clay_array_new();
+    clay_array_append(eq1, clay_int(1));
+    clay_array_append(eq1, clay_int(2));
+    clay_array_append(eq1, clay_int(3));
+    ClayObject *eq2 = clay_array_new();
+    clay_array_append(eq2, clay_int(1));
+    clay_array_append(eq2, clay_int(2));
+    clay_array_append(eq2, clay_int(3));
+    ClayObject *eq3 = clay_array_new();
+    clay_array_append(eq3, clay_int(1));
+    clay_array_append(eq3, clay_int(2));
+    clay_array_append(eq3, clay_int(4));
+    ClayValue eq_arg = CLAY_VAL(eq2);
+    TEST(clay_send(eq1, "==", 1, &eq_arg) == CLAY_TRUE);
+    eq_arg = CLAY_VAL(eq3);
+    TEST(clay_send(eq1, "==", 1, &eq_arg) == CLAY_FALSE);
+    eq_arg = CLAY_VAL(eq1);
+    TEST(clay_send(eq1, "!=", 1, &eq_arg) == CLAY_FALSE);
+    eq_arg = CLAY_VAL(eq3);
+    TEST(clay_send(eq1, "!=", 1, &eq_arg) == CLAY_TRUE);
+    /* Different sizes */
+    ClayObject *eq4 = clay_array_new();
+    clay_array_append(eq4, clay_int(1));
+    eq_arg = CLAY_VAL(eq4);
+    TEST(clay_send(eq1, "==", 1, &eq_arg) == CLAY_FALSE);
+
+    COMMENT("array clone copies elements...");
+    ClayObject *cloned = clay_clone(arr);
+    TEST(clay_array_size(cloned) == 3);
+    idx = clay_int(0);
+    TEST(clay_to_int(clay_send(cloned, "at", 1, &idx)) == 10);
+    /* Cloned array is independent */
+    ClayValue push_val = clay_int(99);
+    clay_send(cloned, "push", 1, &push_val);
+    TEST(clay_array_size(cloned) == 4);
+    TEST(clay_array_size(arr) == 3);
+
+    clay_release(cloned);
+    clay_release(eq4);
+    clay_release(eq3);
+    clay_release(eq2);
+    clay_release(eq1);
+
     clay_release(arr);
 }
 
@@ -608,6 +652,36 @@ static void test_dict(void) {
     clay_release(CLAY_OBJ(ts));
     clay_release(CLAY_OBJ(keys));
     clay_release(CLAY_OBJ(vals));
+
+    COMMENT("dict clone copies entries...");
+    ClayObject *d3 = clay_dict_new();
+    clay_dict_set(d3, "x", clay_int(1));
+    clay_dict_set(d3, "y", clay_int(2));
+    ClayObject *d4 = clay_clone(d3);
+    TEST(clay_dict_size(d4) == 2);
+    TEST(clay_to_int(clay_dict_get(d4, "x")) == 1);
+    TEST(clay_to_int(clay_dict_get(d4, "y")) == 2);
+    /* Cloned dict is independent */
+    clay_dict_set(d4, "z", clay_int(3));
+    TEST(clay_dict_size(d4) == 3);
+    TEST(clay_dict_size(d3) == 2);
+
+    COMMENT("dict equality...");
+    ClayObject *d5 = clay_dict_new();
+    clay_dict_set(d5, "x", clay_int(1));
+    clay_dict_set(d5, "y", clay_int(2));
+    ClayValue deq_arg = CLAY_VAL(d5);
+    TEST(clay_send(d3, "==", 1, &deq_arg) == CLAY_TRUE);
+    deq_arg = CLAY_VAL(d4);
+    TEST(clay_send(d3, "==", 1, &deq_arg) == CLAY_FALSE);
+    deq_arg = CLAY_VAL(d5);
+    TEST(clay_send(d3, "!=", 1, &deq_arg) == CLAY_FALSE);
+    deq_arg = CLAY_VAL(d4);
+    TEST(clay_send(d3, "!=", 1, &deq_arg) == CLAY_TRUE);
+
+    clay_release(d5);
+    clay_release(d4);
+    clay_release(d3);
     clay_release(d2);
     clay_release(d);
 }

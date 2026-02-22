@@ -75,3 +75,4 @@ dkms.conf
 # debug information files
 *.dwo
 
+build_asan/

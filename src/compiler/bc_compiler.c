@@ -1221,18 +1221,24 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     }
 
     /* Compile body: intermediate stmts POP, last expr stays on stack */
+    int last_was_stmt = 0;
     for (int i = 0; i < body->count; i++) {
         AstNode *stmt = body->items[i];
         int is_last = (i == body->count - 1);
         if (is_last && stmt->type != NODE_ASSIGN && stmt->type != NODE_SLOT_ASSIGN) {
             bc_emit_expr(bc, stmt);
+            last_was_stmt = 0;
         } else {
             bc_emit_stmt(bc, stmt);
+            last_was_stmt = 1;
         }
     }
 
-    /* If body was empty, push nil */
-    if (body->count == 0) {
+    /* If body was empty or last stmt was an assignment (value was POP'd),
+     * push nil so the block has a valid return value on the stack.
+     * Without this, the "return value" would be a stale local slot
+     * (possibly a cell pointer), causing heap corruption. */
+    if (body->count == 0 || last_was_stmt) {
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
             (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
     }

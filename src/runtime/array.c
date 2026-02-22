@@ -284,6 +284,25 @@ static ClayValue array_removeAt(ClayObject *self, int argc, ClayValue *argv) {
     return removed;
 }
 
+static ClayValue array_equals(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    ClayObject *other = CLAY_OBJ(argv[0]);
+    if (other->type != CLAY_TYPE_ARRAY) return CLAY_FALSE;
+    if (self == other) return CLAY_TRUE;
+    if (self->as.array.size != other->as.array.size) return CLAY_FALSE;
+    for (int i = 0; i < self->as.array.size; i++) {
+        ClayValue a = self->as.array.items[i];
+        ClayValue b = other->as.array.items[i];
+        ClayValue eq = clay_send_val(a, "==", 1, &b);
+        if (eq != CLAY_TRUE) return CLAY_FALSE;
+    }
+    return CLAY_TRUE;
+}
+
+static ClayValue array_neq(ClayObject *self, int argc, ClayValue *argv) {
+    return array_equals(self, argc, argv) == CLAY_TRUE ? CLAY_FALSE : CLAY_TRUE;
+}
+
 void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "append", array_append);
     clay_set_method(proto, "push", array_append);
@@ -304,4 +323,6 @@ void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "join", array_join);
     clay_set_method(proto, "removeAt", array_removeAt);
     clay_set_method(proto, "toString", array_toString);
+    clay_set_method(proto, "==", array_equals);
+    clay_set_method(proto, "!=", array_neq);
 }
