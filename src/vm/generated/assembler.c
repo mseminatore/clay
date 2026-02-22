@@ -119,6 +119,15 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
     } else if (strcmp(mnemonic, "CLOSE_UPVALUE") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CLOSE_UPVALUE);
         { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "TRY_BEGIN") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_TRY_BEGIN);
+        { int val = 0; sscanf(line, " %d", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "TRY_END") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_TRY_END);
+    } else if (strcmp(mnemonic, "CATCH") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_CATCH);
+    } else if (strcmp(mnemonic, "THROW") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_THROW);
     } else {
         fprintf(stderr, "assembler: unknown mnemonic '%s'\n", mnemonic);
         as->error = 1;

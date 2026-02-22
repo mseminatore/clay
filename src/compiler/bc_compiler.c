@@ -58,7 +58,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     size_t base = g_vm->sp;   /* locals start here */
 
-    if (g_vm->frame_count < CLAYVM_MAX_FRAMES) {
+    if (g_vm->frame_count < g_vm->frame_capacity) {
         g_vm->frames[g_vm->frame_count].return_ip = 0;
         g_vm->frames[g_vm->frame_count].base_sp = base;
         g_vm->frames[g_vm->frame_count].func_index = 0;
@@ -171,7 +171,7 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
 
     size_t base = g_vm->sp;
 
-    if (g_vm->frame_count < CLAYVM_MAX_FRAMES) {
+    if (g_vm->frame_count < g_vm->frame_capacity) {
         g_vm->frames[g_vm->frame_count].return_ip = 0;
         g_vm->frames[g_vm->frame_count].base_sp = base;
         g_vm->frames[g_vm->frame_count].func_index = 0;
@@ -231,6 +231,30 @@ METHOD_TRAMP(16) METHOD_TRAMP(17) METHOD_TRAMP(18) METHOD_TRAMP(19)
 METHOD_TRAMP(20) METHOD_TRAMP(21) METHOD_TRAMP(22) METHOD_TRAMP(23)
 METHOD_TRAMP(24) METHOD_TRAMP(25) METHOD_TRAMP(26) METHOD_TRAMP(27)
 METHOD_TRAMP(28) METHOD_TRAMP(29) METHOD_TRAMP(30) METHOD_TRAMP(31)
+METHOD_TRAMP(32) METHOD_TRAMP(33) METHOD_TRAMP(34) METHOD_TRAMP(35)
+METHOD_TRAMP(36) METHOD_TRAMP(37) METHOD_TRAMP(38) METHOD_TRAMP(39)
+METHOD_TRAMP(40) METHOD_TRAMP(41) METHOD_TRAMP(42) METHOD_TRAMP(43)
+METHOD_TRAMP(44) METHOD_TRAMP(45) METHOD_TRAMP(46) METHOD_TRAMP(47)
+METHOD_TRAMP(48) METHOD_TRAMP(49) METHOD_TRAMP(50) METHOD_TRAMP(51)
+METHOD_TRAMP(52) METHOD_TRAMP(53) METHOD_TRAMP(54) METHOD_TRAMP(55)
+METHOD_TRAMP(56) METHOD_TRAMP(57) METHOD_TRAMP(58) METHOD_TRAMP(59)
+METHOD_TRAMP(60) METHOD_TRAMP(61) METHOD_TRAMP(62) METHOD_TRAMP(63)
+METHOD_TRAMP(64)  METHOD_TRAMP(65)  METHOD_TRAMP(66)  METHOD_TRAMP(67)
+METHOD_TRAMP(68)  METHOD_TRAMP(69)  METHOD_TRAMP(70)  METHOD_TRAMP(71)
+METHOD_TRAMP(72)  METHOD_TRAMP(73)  METHOD_TRAMP(74)  METHOD_TRAMP(75)
+METHOD_TRAMP(76)  METHOD_TRAMP(77)  METHOD_TRAMP(78)  METHOD_TRAMP(79)
+METHOD_TRAMP(80)  METHOD_TRAMP(81)  METHOD_TRAMP(82)  METHOD_TRAMP(83)
+METHOD_TRAMP(84)  METHOD_TRAMP(85)  METHOD_TRAMP(86)  METHOD_TRAMP(87)
+METHOD_TRAMP(88)  METHOD_TRAMP(89)  METHOD_TRAMP(90)  METHOD_TRAMP(91)
+METHOD_TRAMP(92)  METHOD_TRAMP(93)  METHOD_TRAMP(94)  METHOD_TRAMP(95)
+METHOD_TRAMP(96)  METHOD_TRAMP(97)  METHOD_TRAMP(98)  METHOD_TRAMP(99)
+METHOD_TRAMP(100) METHOD_TRAMP(101) METHOD_TRAMP(102) METHOD_TRAMP(103)
+METHOD_TRAMP(104) METHOD_TRAMP(105) METHOD_TRAMP(106) METHOD_TRAMP(107)
+METHOD_TRAMP(108) METHOD_TRAMP(109) METHOD_TRAMP(110) METHOD_TRAMP(111)
+METHOD_TRAMP(112) METHOD_TRAMP(113) METHOD_TRAMP(114) METHOD_TRAMP(115)
+METHOD_TRAMP(116) METHOD_TRAMP(117) METHOD_TRAMP(118) METHOD_TRAMP(119)
+METHOD_TRAMP(120) METHOD_TRAMP(121) METHOD_TRAMP(122) METHOD_TRAMP(123)
+METHOD_TRAMP(124) METHOD_TRAMP(125) METHOD_TRAMP(126) METHOD_TRAMP(127)
 
 static ClayMethodFunc g_method_trampoline_table[] = {
     bc_mtramp_0,  bc_mtramp_1,  bc_mtramp_2,  bc_mtramp_3,
@@ -241,6 +265,30 @@ static ClayMethodFunc g_method_trampoline_table[] = {
     bc_mtramp_20, bc_mtramp_21, bc_mtramp_22, bc_mtramp_23,
     bc_mtramp_24, bc_mtramp_25, bc_mtramp_26, bc_mtramp_27,
     bc_mtramp_28, bc_mtramp_29, bc_mtramp_30, bc_mtramp_31,
+    bc_mtramp_32, bc_mtramp_33, bc_mtramp_34, bc_mtramp_35,
+    bc_mtramp_36, bc_mtramp_37, bc_mtramp_38, bc_mtramp_39,
+    bc_mtramp_40, bc_mtramp_41, bc_mtramp_42, bc_mtramp_43,
+    bc_mtramp_44, bc_mtramp_45, bc_mtramp_46, bc_mtramp_47,
+    bc_mtramp_48, bc_mtramp_49, bc_mtramp_50, bc_mtramp_51,
+    bc_mtramp_52, bc_mtramp_53, bc_mtramp_54, bc_mtramp_55,
+    bc_mtramp_56, bc_mtramp_57, bc_mtramp_58, bc_mtramp_59,
+    bc_mtramp_60, bc_mtramp_61, bc_mtramp_62, bc_mtramp_63,
+    bc_mtramp_64,  bc_mtramp_65,  bc_mtramp_66,  bc_mtramp_67,
+    bc_mtramp_68,  bc_mtramp_69,  bc_mtramp_70,  bc_mtramp_71,
+    bc_mtramp_72,  bc_mtramp_73,  bc_mtramp_74,  bc_mtramp_75,
+    bc_mtramp_76,  bc_mtramp_77,  bc_mtramp_78,  bc_mtramp_79,
+    bc_mtramp_80,  bc_mtramp_81,  bc_mtramp_82,  bc_mtramp_83,
+    bc_mtramp_84,  bc_mtramp_85,  bc_mtramp_86,  bc_mtramp_87,
+    bc_mtramp_88,  bc_mtramp_89,  bc_mtramp_90,  bc_mtramp_91,
+    bc_mtramp_92,  bc_mtramp_93,  bc_mtramp_94,  bc_mtramp_95,
+    bc_mtramp_96,  bc_mtramp_97,  bc_mtramp_98,  bc_mtramp_99,
+    bc_mtramp_100, bc_mtramp_101, bc_mtramp_102, bc_mtramp_103,
+    bc_mtramp_104, bc_mtramp_105, bc_mtramp_106, bc_mtramp_107,
+    bc_mtramp_108, bc_mtramp_109, bc_mtramp_110, bc_mtramp_111,
+    bc_mtramp_112, bc_mtramp_113, bc_mtramp_114, bc_mtramp_115,
+    bc_mtramp_116, bc_mtramp_117, bc_mtramp_118, bc_mtramp_119,
+    bc_mtramp_120, bc_mtramp_121, bc_mtramp_122, bc_mtramp_123,
+    bc_mtramp_124, bc_mtramp_125, bc_mtramp_126, bc_mtramp_127,
 };
 
 /* --- Bytecode emission helpers --- */
@@ -302,7 +350,8 @@ ClayValue vm_to_clay(clayvm_value_t v) {
         case CLAYVM_VAL_BOOL:   return v.as.boolean ? CLAY_TRUE : CLAY_FALSE;
         case CLAYVM_VAL_NIL:    return CLAY_NIL;
         case CLAYVM_VAL_OBJECT: return CLAY_VAL(v.as.obj);
-        case CLAYVM_VAL_DOUBLE: return clay_int((intptr_t)v.as.f64); /* truncate */
+        case CLAYVM_VAL_DOUBLE: return CLAY_VAL(clay_float_new((float)v.as.f64));
+        default: break;
     }
     return CLAY_NIL;
 }
@@ -383,15 +432,6 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
         clay_release(CLAY_OBJ(sv));
     }
     clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-    return 0;
-}
-
-/* native_make_string(const_index) — push string from constant pool */
-static int native_make_string_fn(clayvm_vm_t *vm, int argc) {
-    (void)argc;
-    clayvm_value_t v = clayvm_vm_pop(vm);
-    /* v is an OBJ pointing to a ClayObject string */
-    clayvm_vm_push(vm, v);
     return 0;
 }
 
@@ -503,6 +543,65 @@ static int native_to_bool_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* native_try_catch(try_block, catch_block) — setjmp-based exception handling */
+static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t catch_val = clayvm_vm_pop(vm);
+    clayvm_value_t try_val = clayvm_vm_pop(vm);
+    ClayValue try_block = vm_to_clay(try_val);
+    ClayValue catch_block = vm_to_clay(catch_val);
+
+    /* Save VM state — longjmp from raise() bypasses trampoline restore */
+    const uint8_t *saved_code = vm->code;
+    size_t saved_code_len = vm->code_len;
+    size_t saved_ip = vm->ip;
+    size_t saved_sp = vm->sp;
+    int saved_running = vm->running;
+    int saved_frame_count = vm->frame_count;
+
+    if (clay_try_push() == 0) {
+        ClayValue result = clay_send_val(try_block, "value", 0, NULL);
+        clay_try_pop();
+        vm->code = saved_code;
+        vm->code_len = saved_code_len;
+        vm->ip = saved_ip;
+        vm->sp = saved_sp;
+        vm->running = saved_running;
+        vm->frame_count = saved_frame_count;
+        clayvm_vm_push(vm, clay_to_vm(result));
+    } else {
+        /* Error path — trampoline's restore was skipped by longjmp */
+        vm->code = saved_code;
+        vm->code_len = saved_code_len;
+        vm->ip = saved_ip;
+        vm->sp = saved_sp;
+        vm->running = saved_running;
+        vm->frame_count = saved_frame_count;
+
+        ClayValue error = clay_error_stack.current_error;
+        if (!CLAY_IS_NIL(catch_block)) {
+            ClayValue result = clay_send_val(catch_block, "value", 1, &error);
+            clayvm_vm_push(vm, clay_to_vm(result));
+        } else {
+            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+        }
+    }
+    return 0;
+}
+
+/* native_raise(value) — raise an exception via longjmp */
+static int native_raise_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    ClayValue val = vm_to_clay(clayvm_vm_pop(vm));
+    if (CLAY_IS_PTR(val) && !CLAY_IS_NIL(val) &&
+        CLAY_OBJ(val)->type == CLAY_TYPE_STRING) {
+        val = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(val)), "RuntimeError"));
+    }
+    clay_raise(val);
+    /* clay_raise never returns (longjmp) */
+    return 0;
+}
+
 /* native_make_array() — create empty array */
 static int native_make_array_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
@@ -533,8 +632,11 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
     const char *name = clay_string_data((ClayObject *)name_val.as.obj);
     ClayObject *obj = (ClayObject *)obj_val.as.obj;
 
-    if (slot_idx >= 0 && slot_idx < 32) {
+    if (slot_idx >= 0 && slot_idx < BC_MAX_METHOD_SLOTS) {
         clay_set_method(obj, name, g_method_trampoline_table[slot_idx]);
+    } else {
+        fprintf(stderr, "clay: method trampoline limit exceeded (%d/%d)\n",
+                slot_idx, BC_MAX_METHOD_SLOTS);
     }
 
     clayvm_vm_push(vm, obj_val);
@@ -635,6 +737,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_cell_set = clayvm_native_register(&vm->natives, "cell_set", native_cell_set_fn, 2);
     bc->native_is_truthy = clayvm_native_register(&vm->natives, "is_truthy", native_is_truthy_fn, 1);
     bc->native_to_bool = clayvm_native_register(&vm->natives, "to_bool", native_to_bool_fn, 1);
+    bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 2);
+    bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
 
     /* Pre-register Clay builtin prototypes as globals */
     struct { const char *name; ClayObject *obj; } builtins[] = {
@@ -1373,7 +1477,12 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     int chunk_id = bc_compile_chunk(bc,
                         &member->as.method_def.body,
                         &member->as.method_def.params, NULL, 1);
-                    if (chunk_id < 0 || g_method_slot_count >= 32) continue;
+                    if (chunk_id < 0 || g_method_slot_count >= BC_MAX_METHOD_SLOTS) {
+                        if (g_method_slot_count >= BC_MAX_METHOD_SLOTS) {
+                            fprintf(stderr, "clay: too many methods (%d max)\n", BC_MAX_METHOD_SLOTS);
+                        }
+                        continue;
+                    }
 
                     /* Register in method slot table */
                     int slot_idx = g_method_slot_count++;
@@ -1392,6 +1501,30 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_op(bc, CLAYVM_OP_POP); /* discard set_method return */
                 }
             }
+            break;
+        }
+
+        case NODE_TRY_CATCH: {
+            /* Compile try block (produces a block object on stack) */
+            bc_emit_expr(bc, node->as.try_catch.try_block);
+            /* Compile catch block (or push nil if absent) */
+            if (node->as.try_catch.catch_block) {
+                bc_emit_expr(bc, node->as.try_catch.catch_block);
+            } else {
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+                    (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            }
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_try_catch);
+            emit_byte(bc, 2);
+            break;
+        }
+
+        case NODE_RAISE: {
+            bc_emit_expr(bc, node->as.raise.expr);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_raise);
+            emit_byte(bc, 1);
             break;
         }
 

@@ -6,6 +6,7 @@
 
 #include "vm.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "disasm.h"
 
@@ -39,11 +40,22 @@ void clayvm_vm_set_error_handler(clayvm_vm_t *vm, clayvm_error_handler_t handler
     vm->error_userdata = userdata;
 }
 
-void clayvm_vm_push(clayvm_vm_t *vm, clayvm_value_t value) {
-    if (vm->sp >= 4096) {
-        clayvm_vm_error(vm, CLAYVM_ERR_STACK_OVERFLOW, "stack overflow");
+static void clayvm_vm_ensure_stack(clayvm_vm_t *vm, int needed) {
+    if (needed <= vm->stack_capacity) return;
+    int new_cap = vm->stack_capacity * 2;
+    if (new_cap < needed) new_cap = needed;
+    clayvm_value_t *tmp = (clayvm_value_t *)realloc(vm->stack,
+        (size_t)new_cap * sizeof(clayvm_value_t));
+    if (!tmp) {
+        clayvm_vm_error(vm, CLAYVM_ERR_STACK_OVERFLOW, "stack realloc failed");
         return;
     }
+    vm->stack = tmp;
+    vm->stack_capacity = new_cap;
+}
+
+void clayvm_vm_push(clayvm_vm_t *vm, clayvm_value_t value) {
+    clayvm_vm_ensure_stack(vm, vm->sp + 1);
     vm->stack[vm->sp++] = value;
 }
 
@@ -57,139 +69,164 @@ clayvm_value_t clayvm_vm_pop(clayvm_vm_t *vm) {
 
 void clayvm_vm_init(clayvm_vm_t *vm) {
     memset(vm, 0, sizeof(*vm));
+    vm->stack_capacity = 4096;
+    vm->stack = (clayvm_value_t *)calloc((size_t)vm->stack_capacity, sizeof(clayvm_value_t));
+    vm->constants.capacity = 256;
+    vm->constants.values = (clayvm_value_t *)calloc((size_t)vm->constants.capacity, sizeof(clayvm_value_t));
+    vm->frame_capacity = 64;
+    vm->frames = (clayvm_frame_t *)calloc((size_t)vm->frame_capacity, sizeof(clayvm_frame_t));
 }
 
 int clayvm_vm_add_constant(clayvm_vm_t *vm, clayvm_value_t value) {
-    if (vm->constants.count >= CLAYVM_MAX_CONSTANTS) {
-        clayvm_vm_error(vm, CLAYVM_ERR_CONST_OVERFLOW, "constant pool overflow");
-        return -1;
+    if (vm->constants.count >= vm->constants.capacity) {
+        int new_cap = vm->constants.capacity * 2;
+        if (new_cap < 16) new_cap = 16;
+        clayvm_value_t *tmp = (clayvm_value_t *)realloc(vm->constants.values,
+            (size_t)new_cap * sizeof(clayvm_value_t));
+        if (!tmp) {
+            clayvm_vm_error(vm, CLAYVM_ERR_CONST_OVERFLOW, "constant pool realloc failed");
+            return -1;
+        }
+        vm->constants.values = tmp;
+        vm->constants.capacity = new_cap;
     }
     int index = vm->constants.count;
     vm->constants.values[vm->constants.count++] = value;
     return index;
 }
 
-typedef int (*clayvm_handler_t)(clayvm_vm_t *vm);
+void clayvm_vm_free(clayvm_vm_t *vm) {
+    if (vm->cleanup) vm->cleanup(vm);
+    free(vm->stack);
+    free(vm->constants.values);
+    free(vm->frames);
+    memset(vm, 0, sizeof(*vm));
+}
 
-static int handle_PUSH_CONST(clayvm_vm_t *vm) {
+void clayvm_vm_set_cleanup(clayvm_vm_t *vm, void (*cleanup)(clayvm_vm_t *vm)) {
+    vm->cleanup = cleanup;
+}
+
+int handle_PUSH_CONST(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
     clayvm_vm_push(vm, vm->constants.values[index]);
     return 0;
 }
 
-static int handle_POP(clayvm_vm_t *vm) {
-    clayvm_vm_pop(vm);
+int handle_POP(clayvm_vm_t *vm) {
+    (void)clayvm_vm_pop(vm);
     return 0;
 }
 
-static int handle_DUP(clayvm_vm_t *vm) {
-    clayvm_vm_push(vm, vm->stack[vm->sp - 1]);
+int handle_DUP(clayvm_vm_t *vm) {
+    clayvm_value_t a = vm->stack[vm->sp - 1];
+    clayvm_vm_push(vm, a);
     return 0;
 }
 
-static int handle_ADD(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a + b)));
+int handle_ADD(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
     return 0;
 }
 
-static int handle_SUB(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a - b)));
+int handle_SUB(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
     return 0;
 }
 
-static int handle_MUL(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a * b)));
+int handle_MUL(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
     return 0;
 }
 
-static int handle_DIV(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a / b)));
+int handle_DIV(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
     return 0;
 }
 
-static int handle_MOD(clayvm_vm_t *vm) {
+int handle_MOD(clayvm_vm_t *vm) {
     int64_t b = clayvm_vm_pop(vm).as.i64;
     int64_t a = clayvm_vm_pop(vm).as.i64;
     clayvm_vm_push(vm, CLAYVM_INT64(a % b));
     return 0;
 }
 
-static int handle_NEGATE(clayvm_vm_t *vm) {
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((-(a))));
+int handle_NEGATE(clayvm_vm_t *vm) {
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((-(a.as.i64))));
     return 0;
 }
 
-static int handle_EQ(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a == b)));
+int handle_EQ(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
     return 0;
 }
 
-static int handle_NEQ(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a != b)));
+int handle_NEQ(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
     return 0;
 }
 
-static int handle_LT(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a < b)));
+int handle_LT(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
     return 0;
 }
 
-static int handle_GT(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a > b)));
+int handle_GT(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
     return 0;
 }
 
-static int handle_LTE(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a <= b)));
+int handle_LTE(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
     return 0;
 }
 
-static int handle_GTE(clayvm_vm_t *vm) {
-    int64_t b = clayvm_vm_pop(vm).as.i64;
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((a >= b)));
+int handle_GTE(clayvm_vm_t *vm) {
+    clayvm_value_t b = clayvm_vm_pop(vm);
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
     return 0;
 }
 
-static int handle_NOT(clayvm_vm_t *vm) {
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    clayvm_vm_push(vm, CLAYVM_INT64((!(a))));
+int handle_NOT(clayvm_vm_t *vm) {
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, CLAYVM_INT64((!(a.as.i64))));
     return 0;
 }
 
-static int handle_JUMP(clayvm_vm_t *vm) {
+int handle_JUMP(clayvm_vm_t *vm) {
     int16_t offset = READ_INT16();
     vm->ip += offset;
     return 0;
 }
 
-static int handle_JUMP_IF_FALSE(clayvm_vm_t *vm) {
+int handle_JUMP_IF_FALSE(clayvm_vm_t *vm) {
     int16_t offset = READ_INT16();
-    int64_t a = clayvm_vm_pop(vm).as.i64;
-    if (a == 0) vm->ip += offset;
+    clayvm_value_t a = clayvm_vm_pop(vm);
+    if (a.as.i64 == 0) vm->ip += offset;
     return 0;
 }
 
-static int handle_CALL(clayvm_vm_t *vm) {
+int handle_CALL(clayvm_vm_t *vm) {
     uint16_t func_index = READ_UINT16();
     uint8_t arity = READ_UINT8();
     /* call func_index=func_index, arity=arity */
@@ -200,14 +237,14 @@ static int handle_CALL(clayvm_vm_t *vm) {
     return 0;
 }
 
-static int handle_CALL_NATIVE(clayvm_vm_t *vm) {
+int handle_CALL_NATIVE(clayvm_vm_t *vm) {
     uint16_t func_index = READ_UINT16();
     uint8_t arity = READ_UINT8();
     clayvm_native_call(&vm->natives, func_index, vm, arity);
     return 0;
 }
 
-static int handle_RETURN(clayvm_vm_t *vm) {
+int handle_RETURN(clayvm_vm_t *vm) {
     if (vm->frame_count == 0) return 0;
     vm->frame_count--;
     vm->ip = vm->frames[vm->frame_count].return_ip;
@@ -215,45 +252,81 @@ static int handle_RETURN(clayvm_vm_t *vm) {
     return 0;
 }
 
-static int handle_HALT(clayvm_vm_t *vm) {
-    vm->running = 0;
+int handle_HALT(clayvm_vm_t *vm) {
     return 0;
 }
 
-static int handle_GET_LOCAL(clayvm_vm_t *vm) {
+int handle_GET_LOCAL(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
     clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
     return 0;
 }
 
-static int handle_SET_LOCAL(clayvm_vm_t *vm) {
+int handle_SET_LOCAL(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
     vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
     return 0;
 }
 
-static int handle_GET_UPVALUE(clayvm_vm_t *vm) {
+int handle_GET_UPVALUE(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
     /* Upvalue access is handled through native calls for now */
     (void)index;
     return 0;
 }
 
-static int handle_SET_UPVALUE(clayvm_vm_t *vm) {
+int handle_SET_UPVALUE(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
     /* Upvalue write is handled through native calls for now */
     (void)index;
     return 0;
 }
 
-static int handle_CLOSE_UPVALUE(clayvm_vm_t *vm) {
+int handle_CLOSE_UPVALUE(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
     /* Close upvalue is handled through native calls for now */
     (void)slot;
     return 0;
 }
 
-/* Non-static so trampolines can use the dispatch table directly */
+int handle_TRY_BEGIN(clayvm_vm_t *vm) {
+    int16_t handler_offset = READ_INT16();
+    /* push exception frame */
+    vm->exception_frames[vm->exception_count].handler_ip = vm->ip + handler_offset;
+    vm->exception_frames[vm->exception_count].saved_sp = vm->sp;
+    vm->exception_frames[vm->exception_count].saved_frame_count = vm->frame_count;
+    vm->exception_count++;
+    return 0;
+}
+
+int handle_TRY_END(clayvm_vm_t *vm) {
+    /* pop exception frame */
+    if (vm->exception_count > 0) vm->exception_count--;
+    return 0;
+}
+
+int handle_CATCH(clayvm_vm_t *vm) {
+    clayvm_value_t ex = vm->current_exception;
+    clayvm_vm_push(vm, ex);
+    return 0;
+}
+
+int handle_THROW(clayvm_vm_t *vm) {
+    clayvm_value_t ex = clayvm_vm_pop(vm);
+    /* throw exception */
+    vm->current_exception = ex;
+    if (vm->exception_count > 0) {
+        vm->exception_count--;
+        vm->sp = vm->exception_frames[vm->exception_count].saved_sp;
+        vm->frame_count = vm->exception_frames[vm->exception_count].saved_frame_count;
+        vm->ip = vm->exception_frames[vm->exception_count].handler_ip;
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_UNHANDLED_EXCEPTION, "unhandled exception");
+        return -1;
+    }
+    return 0;
+}
+
 clayvm_handler_t clayvm_dispatch_table[] = {
     handle_PUSH_CONST,
     handle_POP,
@@ -282,6 +355,10 @@ clayvm_handler_t clayvm_dispatch_table[] = {
     handle_GET_UPVALUE,
     handle_SET_UPVALUE,
     handle_CLOSE_UPVALUE,
+    handle_TRY_BEGIN,
+    handle_TRY_END,
+    handle_CATCH,
+    handle_THROW,
 };
 
 int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
@@ -320,6 +397,10 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         &&op_GET_UPVALUE,
         &&op_SET_UPVALUE,
         &&op_CLOSE_UPVALUE,
+        &&op_TRY_BEGIN,
+        &&op_TRY_END,
+        &&op_CATCH,
+        &&op_THROW,
     };
 
 #define DISPATCH() goto *dispatch_table[vm->code[vm->ip++]]
@@ -339,7 +420,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        clayvm_vm_pop(vm);
+        (void)clayvm_vm_pop(vm);
         DISPATCH();
     }
 
@@ -347,7 +428,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        clayvm_vm_push(vm, vm->stack[vm->sp - 1]);
+        clayvm_value_t a = vm->stack[vm->sp - 1];
+        clayvm_vm_push(vm, a);
         DISPATCH();
     }
 
@@ -355,9 +437,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a + b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
         DISPATCH();
     }
 
@@ -365,9 +447,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a - b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
         DISPATCH();
     }
 
@@ -375,9 +457,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a * b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
         DISPATCH();
     }
 
@@ -385,9 +467,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a / b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
         DISPATCH();
     }
 
@@ -405,8 +487,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((-(a))));
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((-(a.as.i64))));
         DISPATCH();
     }
 
@@ -414,9 +496,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a == b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
         DISPATCH();
     }
 
@@ -424,9 +506,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a != b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
         DISPATCH();
     }
 
@@ -434,9 +516,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a < b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
         DISPATCH();
     }
 
@@ -444,9 +526,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a > b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
         DISPATCH();
     }
 
@@ -454,9 +536,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a <= b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
         DISPATCH();
     }
 
@@ -464,9 +546,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a >= b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
         DISPATCH();
     }
 
@@ -474,8 +556,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((!(a))));
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((!(a.as.i64))));
         DISPATCH();
     }
 
@@ -493,8 +575,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         int16_t offset = READ_INT16();
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        if (a == 0) vm->ip += offset;
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (a.as.i64 == 0) vm->ip += offset;
         DISPATCH();
     }
 
@@ -588,6 +670,56 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         DISPATCH();
     }
 
+    op_TRY_BEGIN: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        int16_t handler_offset = READ_INT16();
+        /* push exception frame */
+        vm->exception_frames[vm->exception_count].handler_ip = vm->ip + handler_offset;
+        vm->exception_frames[vm->exception_count].saved_sp = vm->sp;
+        vm->exception_frames[vm->exception_count].saved_frame_count = vm->frame_count;
+        vm->exception_count++;
+        DISPATCH();
+    }
+
+    op_TRY_END: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        /* pop exception frame */
+        if (vm->exception_count > 0) vm->exception_count--;
+        DISPATCH();
+    }
+
+    op_CATCH: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        clayvm_value_t ex = vm->current_exception;
+        clayvm_vm_push(vm, ex);
+        DISPATCH();
+    }
+
+    op_THROW: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        clayvm_value_t ex = clayvm_vm_pop(vm);
+        /* throw exception */
+        vm->current_exception = ex;
+        if (vm->exception_count > 0) {
+            vm->exception_count--;
+            vm->sp = vm->exception_frames[vm->exception_count].saved_sp;
+            vm->frame_count = vm->exception_frames[vm->exception_count].saved_frame_count;
+            vm->ip = vm->exception_frames[vm->exception_count].handler_ip;
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_UNHANDLED_EXCEPTION, "unhandled exception");
+            return -1;
+        }
+        DISPATCH();
+    }
+
 #undef DISPATCH
 #else
     while (vm->running && vm->ip < vm->code_len) {
@@ -620,35 +752,36 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         break;
     }
     case CLAYVM_OP_POP: {
-        clayvm_vm_pop(vm);
+        (void)clayvm_vm_pop(vm);
         break;
     }
     case CLAYVM_OP_DUP: {
-        clayvm_vm_push(vm, vm->stack[vm->sp - 1]);
+        clayvm_value_t a = vm->stack[vm->sp - 1];
+        clayvm_vm_push(vm, a);
         break;
     }
     case CLAYVM_OP_ADD: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a + b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
         break;
     }
     case CLAYVM_OP_SUB: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a - b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
         break;
     }
     case CLAYVM_OP_MUL: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a * b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
         break;
     }
     case CLAYVM_OP_DIV: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a / b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 / b.as.i64)));
         break;
     }
     case CLAYVM_OP_MOD: {
@@ -658,49 +791,49 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         break;
     }
     case CLAYVM_OP_NEGATE: {
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((-(a))));
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((-(a.as.i64))));
         break;
     }
     case CLAYVM_OP_EQ: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a == b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 == b.as.i64)));
         break;
     }
     case CLAYVM_OP_NEQ: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a != b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 != b.as.i64)));
         break;
     }
     case CLAYVM_OP_LT: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a < b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 < b.as.i64)));
         break;
     }
     case CLAYVM_OP_GT: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a > b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 > b.as.i64)));
         break;
     }
     case CLAYVM_OP_LTE: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a <= b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 <= b.as.i64)));
         break;
     }
     case CLAYVM_OP_GTE: {
-        int64_t b = clayvm_vm_pop(vm).as.i64;
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((a >= b)));
+        clayvm_value_t b = clayvm_vm_pop(vm);
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 >= b.as.i64)));
         break;
     }
     case CLAYVM_OP_NOT: {
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        clayvm_vm_push(vm, CLAYVM_INT64((!(a))));
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        clayvm_vm_push(vm, CLAYVM_INT64((!(a.as.i64))));
         break;
     }
     case CLAYVM_OP_JUMP: {
@@ -710,8 +843,8 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     }
     case CLAYVM_OP_JUMP_IF_FALSE: {
         int16_t offset = (int16_t)READ_UINT16();
-        int64_t a = clayvm_vm_pop(vm).as.i64;
-        if (a == 0) vm->ip += offset;
+        clayvm_value_t a = clayvm_vm_pop(vm);
+        if (a.as.i64 == 0) vm->ip += offset;
         break;
     }
     case CLAYVM_OP_CALL: {
@@ -766,6 +899,40 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         uint16_t slot = READ_UINT16();
         /* Close upvalue is handled through native calls for now */
         (void)slot;
+        break;
+    }
+    case CLAYVM_OP_TRY_BEGIN: {
+        int16_t handler_offset = (int16_t)READ_UINT16();
+        /* push exception frame */
+        vm->exception_frames[vm->exception_count].handler_ip = vm->ip + handler_offset;
+        vm->exception_frames[vm->exception_count].saved_sp = vm->sp;
+        vm->exception_frames[vm->exception_count].saved_frame_count = vm->frame_count;
+        vm->exception_count++;
+        break;
+    }
+    case CLAYVM_OP_TRY_END: {
+        /* pop exception frame */
+        if (vm->exception_count > 0) vm->exception_count--;
+        break;
+    }
+    case CLAYVM_OP_CATCH: {
+        clayvm_value_t ex = vm->current_exception;
+        clayvm_vm_push(vm, ex);
+        break;
+    }
+    case CLAYVM_OP_THROW: {
+        clayvm_value_t ex = clayvm_vm_pop(vm);
+        /* throw exception */
+        vm->current_exception = ex;
+        if (vm->exception_count > 0) {
+            vm->exception_count--;
+            vm->sp = vm->exception_frames[vm->exception_count].saved_sp;
+            vm->frame_count = vm->exception_frames[vm->exception_count].saved_frame_count;
+            vm->ip = vm->exception_frames[vm->exception_count].handler_ip;
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_UNHANDLED_EXCEPTION, "unhandled exception");
+            return -1;
+        }
         break;
     }
     default: {

@@ -756,8 +756,8 @@ static ClayValue vm_eval(const char *source) {
 
     ast_free(program);
 
-    /* Note: vm/bc resources (chunks, globals, natives) are intentionally
-     * not freed here to avoid use-after-free. Each vm_eval creates its own. */
+    /* Note: vm resources not freed here — g_vm global pointer is used
+     * by the bc_compiler trampoline and must remain valid. */
 
     return result;
 }

@@ -185,6 +185,21 @@ int clayvm_verify(const uint8_t *code, size_t code_len,
             (void)slot;
             break;
         }
+        case CLAYVM_OP_TRY_BEGIN: {
+            int16_t handler_offset = (int16_t)(code[instr_start + 1] |
+                         (code[instr_start + 2] << 8));
+            (void)handler_offset;
+            break;
+        }
+        case CLAYVM_OP_TRY_END: {
+            break;
+        }
+        case CLAYVM_OP_CATCH: {
+            break;
+        }
+        case CLAYVM_OP_THROW: {
+            break;
+        }
         default:
             break;
         }

@@ -13,10 +13,11 @@
 #include "native.h"
 
 typedef enum {
+    CLAYVM_VAL_NIL,
     CLAYVM_VAL_INT64,
     CLAYVM_VAL_DOUBLE,
     CLAYVM_VAL_BOOL,
-    CLAYVM_VAL_NIL,
+    CLAYVM_VAL_STRING,
     CLAYVM_VAL_OBJECT,
 } clayvm_val_type_t;
 
@@ -30,20 +31,18 @@ typedef struct {
     } as;
 } clayvm_value_t;
 
+#define CLAYVM_NIL_VAL   ((clayvm_value_t){ .type = CLAYVM_VAL_NIL,    .as.i64 = 0 })
 #define CLAYVM_INT64(v)  ((clayvm_value_t){ .type = CLAYVM_VAL_INT64,  .as.i64 = (v) })
 #define CLAYVM_DOUBLE(v) ((clayvm_value_t){ .type = CLAYVM_VAL_DOUBLE, .as.f64 = (v) })
 #define CLAYVM_BOOL(v)   ((clayvm_value_t){ .type = CLAYVM_VAL_BOOL,   .as.boolean = (v) })
-#define CLAYVM_NIL_VAL   ((clayvm_value_t){ .type = CLAYVM_VAL_NIL })
-#define CLAYVM_OBJ(v)    ((clayvm_value_t){ .type = CLAYVM_VAL_OBJECT, .as.obj = (v) })
-
-#define CLAYVM_MAX_CONSTANTS 256
+#define CLAYVM_OBJ(v)    ((clayvm_value_t){ .type = CLAYVM_VAL_OBJECT, .as.obj = (void*)(v) })
 
 typedef struct {
-    clayvm_value_t values[CLAYVM_MAX_CONSTANTS];
+    clayvm_value_t *values;
     int count;
+    int capacity;
 } clayvm_const_pool_t;
 
-#define CLAYVM_MAX_FRAMES 64
 #define CLAYVM_MAX_BREAKPOINTS 32
 
 typedef struct {
@@ -61,21 +60,32 @@ typedef enum {
     CLAYVM_ERR_CONST_OVERFLOW,
     CLAYVM_ERR_DIV_BY_ZERO,
     CLAYVM_ERR_TYPE_MISMATCH,
+    CLAYVM_ERR_UNHANDLED_EXCEPTION,
 } clayvm_error_t;
 
 /* Error handler callback: receives VM pointer, error code, and message */
 typedef void (*clayvm_error_handler_t)(void *vm, clayvm_error_t err, const char *msg);
 
-struct clayvm_vm {
+#define CLAYVM_MAX_EXCEPTION_FRAMES 16
+
+typedef struct {
+    size_t handler_ip;
+    int saved_sp;
+    int saved_frame_count;
+} clayvm_exception_frame_t;
+
+typedef struct clayvm_vm {
     const uint8_t *code;
     size_t code_len;
     size_t ip;
-    clayvm_value_t stack[4096];
+    clayvm_value_t *stack;
     int sp;
+    int stack_capacity;
     int running;
     clayvm_const_pool_t constants;
-    clayvm_frame_t frames[CLAYVM_MAX_FRAMES];
+    clayvm_frame_t *frames;
     int frame_count;
+    int frame_capacity;
     int trace_enabled;
     clayvm_error_t last_error;
     clayvm_error_handler_t error_handler;
@@ -84,12 +94,18 @@ struct clayvm_vm {
     size_t breakpoints[CLAYVM_MAX_BREAKPOINTS];
     int breakpoint_count;
     void (*step_callback)(void *vm, size_t ip);
+    /* Exception handling */
+    clayvm_exception_frame_t exception_frames[CLAYVM_MAX_EXCEPTION_FRAMES];
+    int exception_count;
+    clayvm_value_t current_exception;
     clayvm_native_table_t natives;
-    /* Globals table for REPL variable persistence */
-    void *globals;  /* HashTable* — set up externally */
-} /* clayvm_vm */;
+    void * globals; /* HashTable* for REPL variable persistence */
+    void (*cleanup)(struct clayvm_vm *vm);
+} clayvm_vm_t;
 
 void clayvm_vm_init(clayvm_vm_t *vm);
+void clayvm_vm_free(clayvm_vm_t *vm);
+void clayvm_vm_set_cleanup(clayvm_vm_t *vm, void (*cleanup)(clayvm_vm_t *vm));
 int  clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len);
 void clayvm_vm_push(clayvm_vm_t *vm, clayvm_value_t value);
 clayvm_value_t clayvm_vm_pop(clayvm_vm_t *vm);
@@ -100,5 +116,9 @@ int  clayvm_vm_step(clayvm_vm_t *vm);
 int  clayvm_vm_set_breakpoint(clayvm_vm_t *vm, size_t offset);
 int  clayvm_vm_clear_breakpoint(clayvm_vm_t *vm, size_t offset);
 void clayvm_vm_set_step_callback(clayvm_vm_t *vm, void (*cb)(void *vm, size_t ip));
+
+/* Dispatch table (externally visible) */
+typedef int (*clayvm_handler_t)(clayvm_vm_t *vm);
+extern clayvm_handler_t clayvm_dispatch_table[];
 
 #endif /* CLAYVM_VM_H */

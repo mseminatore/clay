@@ -4,6 +4,11 @@ build/
 # Test output captures
 stdout_*.txt
 stderr_*.txt
+se*.txt
+so*.txt
+
+# Ad-hoc test artifacts
+vm_quick.*
 
 # Installed brick dependencies (created by `bricks install`)
 **/bricks/bricks/

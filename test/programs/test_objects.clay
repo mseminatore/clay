@@ -5,7 +5,12 @@ Test = Object clone({
     _f = 0
     eq(a, b) {
         (a == b) ifTrue({ self _p = self _p + 1 })
-        (!(a == b)) ifTrue({ self _f = self _f + 1; "FAIL" println() })
+        (!(a == b)) ifTrue({ self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() })
+        self
+    }
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: expected true" println() })
         self
     }
     done() {
@@ -52,5 +57,54 @@ Ctr = Object clone({
 c = Ctr clone({})
 c inc(); c inc()
 Test eq(c n, 2)
+
+// type() returns prototype name
+Test eq(Object type(), "Object")
+Test eq(P2 type(), "P2")
+
+// Deep prototype chain
+A = Object clone({ a() { 1 } })
+B2 = A clone({ b() { 2 } })
+C2 = B2 clone({ c() { 3 } })
+Test eq(C2 a(), 1)
+Test eq(C2 b(), 2)
+Test eq(C2 c(), 3)
+
+// Clone inherits slots
+Base = Object clone({ color = "red" })
+Child = Base clone({})
+Test eq(Child color, "red")
+
+// Child slot override
+Child color = "blue"
+Test eq(Child color, "blue")
+Test eq(Base color, "red")
+
+// Method with multiple statements
+Calc = Object clone({
+    compute(a, b) {
+        sum = a + b
+        prod = a * b
+        sum + prod
+    }
+})
+Test eq(Calc compute(3, 4), 19)
+
+// doesNotUnderstand
+Proxy = Object clone({
+    doesNotUnderstand(name, args) {
+        "forwarded: " + name
+    }
+})
+px = Proxy clone()
+Test eq(px banana(), "forwarded: banana")
+
+// Multiple clones from same proto
+F = Object clone({ val = 0 })
+f1 = F clone({}); f1 val = 10
+f2 = F clone({}); f2 val = 20
+Test eq(f1 val, 10)
+Test eq(f2 val, 20)
+Test eq(F val, 0)
 
 Test done()

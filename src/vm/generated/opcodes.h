@@ -37,7 +37,11 @@ typedef enum {
     CLAYVM_OP_GET_UPVALUE = 24,
     CLAYVM_OP_SET_UPVALUE = 25,
     CLAYVM_OP_CLOSE_UPVALUE = 26,
-    CLAYVM_OP_COUNT = 27
+    CLAYVM_OP_TRY_BEGIN = 27,
+    CLAYVM_OP_TRY_END = 28,
+    CLAYVM_OP_CATCH = 29,
+    CLAYVM_OP_THROW = 30,
+    CLAYVM_OP_COUNT = 31
 } clayvm_opcode_t;
 
 static const char *clayvm_opcode_names[] = {
@@ -68,6 +72,10 @@ static const char *clayvm_opcode_names[] = {
     "GET_UPVALUE",
     "SET_UPVALUE",
     "CLOSE_UPVALUE",
+    "TRY_BEGIN",
+    "TRY_END",
+    "CATCH",
+    "THROW",
 };
 
 static const int clayvm_operand_counts[] = {
@@ -98,6 +106,10 @@ static const int clayvm_operand_counts[] = {
     1,  /* GET_UPVALUE */
     1,  /* SET_UPVALUE */
     1,  /* CLOSE_UPVALUE */
+    1,  /* TRY_BEGIN */
+    0,  /* TRY_END */
+    0,  /* CATCH */
+    0,  /* THROW */
 };
 
 /* Total instruction size in bytes (1 opcode byte + operands) */
@@ -129,6 +141,10 @@ static const int clayvm_instruction_sizes[] = {
     3,  /* GET_UPVALUE */
     3,  /* SET_UPVALUE */
     3,  /* CLOSE_UPVALUE */
+    3,  /* TRY_BEGIN */
+    1,  /* TRY_END */
+    1,  /* CATCH */
+    1,  /* THROW */
 };
 
 #endif /* CLAYVM_OPCODES_H */
