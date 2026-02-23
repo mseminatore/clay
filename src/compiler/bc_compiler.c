@@ -584,6 +584,17 @@ static int add_constant_obj(BcCompiler *bc, void *obj) {
 }
 
 static int add_constant_string(BcCompiler *bc, const char *s) {
+    /* Deduplicate: reuse existing constant with the same string value */
+    for (int i = 0; i < bc->vm->constants.count; i++) {
+        clayvm_value_t v = bc->vm->constants.values[i];
+        if (v.type == CLAYVM_VAL_OBJECT && v.as.obj) {
+            ClayObject *obj = (ClayObject *)v.as.obj;
+            if (obj->type == CLAY_TYPE_STRING &&
+                strcmp(clay_string_data(obj), s) == 0) {
+                return i;
+            }
+        }
+    }
     ClayObject *str = clay_string_new(s);
     clay_retain(str);
     return clayvm_vm_add_constant(bc->vm, CLAYVM_OBJ(str));
@@ -648,9 +659,11 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
 
     /* Pop args in reverse: first popped = last arg */
     int msg_argc = argc - 2;
+    ClayValue stack_args[8];
     ClayValue *args = NULL;
     if (msg_argc > 0) {
-        args = (ClayValue *)malloc(sizeof(ClayValue) * msg_argc);
+        args = (msg_argc <= 8) ? stack_args :
+               (ClayValue *)malloc(sizeof(ClayValue) * (size_t)msg_argc);
         for (int i = msg_argc - 1; i >= 0; i--)
             args[i] = vm_to_clay(clayvm_vm_pop(vm));
     }
@@ -662,7 +675,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
 
     ClayValue result = clay_send_val(receiver, selector, msg_argc, args);
-    free(args);
+    if (args && args != stack_args) free(args);
 
     clayvm_vm_push(vm, clay_to_vm(result));
     return 0;
@@ -673,9 +686,11 @@ static int native_super_send_fn(clayvm_vm_t *vm, int argc) {
     if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
 
     int msg_argc = argc - 2;
+    ClayValue stack_args[8];
     ClayValue *args = NULL;
     if (msg_argc > 0) {
-        args = (ClayValue *)malloc(sizeof(ClayValue) * msg_argc);
+        args = (msg_argc <= 8) ? stack_args :
+               (ClayValue *)malloc(sizeof(ClayValue) * (size_t)msg_argc);
         for (int i = msg_argc - 1; i >= 0; i--)
             args[i] = vm_to_clay(clayvm_vm_pop(vm));
     }
@@ -687,7 +702,7 @@ static int native_super_send_fn(clayvm_vm_t *vm, int argc) {
     const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
 
     ClayValue result = clay_send_super(receiver, g_super_proto, selector, msg_argc, args);
-    free(args);
+    if (args && args != stack_args) free(args);
 
     clayvm_vm_push(vm, clay_to_vm(result));
     return 0;

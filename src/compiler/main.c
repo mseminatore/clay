@@ -596,8 +596,6 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     char line[4096];
     char input[16384];
     int input_len = 0;
-    int brace_depth = 0;
-    int paren_depth = 0;
 
     while (fgets(line, sizeof(line), stdin)) {
         /* Check for quit */
@@ -616,15 +614,10 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             input[input_len] = '\0';
         }
 
-        /* Track braces/parens for multi-line */
-        for (size_t i = 0; i < ll; i++) {
-            if (line[i] == '{') brace_depth++;
-            else if (line[i] == '}') brace_depth--;
-            else if (line[i] == '(') paren_depth++;
-            else if (line[i] == ')') paren_depth--;
-        }
+        /* Track braces/parens for multi-line (string-aware) */
+        int open = count_open(input);
 
-        if (brace_depth > 0 || paren_depth > 0) {
+        if (open > 0) {
             printf("%s...%s ", C(C_DIM), C(C_RESET));
             fflush(stdout);
             continue;
@@ -639,8 +632,6 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             fprintf(stderr, "%s%sclay: parse error%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             if (program) ast_free(program);
             input_len = 0;
-            brace_depth = 0;
-            paren_depth = 0;
             printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
             fflush(stdout);
             continue;
@@ -720,8 +711,6 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
 
         ast_free(program);
         input_len = 0;
-        brace_depth = 0;
-        paren_depth = 0;
         printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
         fflush(stdout);
     }
