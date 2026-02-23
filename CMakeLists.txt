@@ -37,6 +37,7 @@ set(RUNTIME_SOURCES
     src/runtime/math.c
     src/runtime/file.c
     src/runtime/ffi.c
+    src/runtime/date.c
     src/runtime/bootstrap.c
     src/runtime/intern.c
 )
@@ -121,3 +122,4 @@ set_tests_properties(clay_test_monorepo_import PROPERTIES WORKING_DIRECTORY ${CM
 add_test(NAME clay_test_memory COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_memory.clay)
 add_test(NAME clay_test_file_ops COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_file_ops.clay)
 add_test(NAME clay_test_system COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_system.clay)
+add_test(NAME clay_test_date COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_date.clay)

@@ -776,6 +776,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Math", clay_Math}, {"Console", clay_Console}, {"File", clay_File},
         {"System", clay_System},
         {"FFI", clay_FFI},
+        {"Date", clay_Date},
         {NULL, NULL}
     };
 
@@ -823,6 +824,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "File") == 0 ||
            strcmp(name, "System") == 0 ||
            strcmp(name, "FFI") == 0 ||
+           strcmp(name, "Date") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -950,6 +952,7 @@ static int bc_is_builtin_global(const char *name) {
            strcmp(name, "Dict") == 0 || strcmp(name, "Math") == 0 ||
            strcmp(name, "Console") == 0 || strcmp(name, "File") == 0 ||
            strcmp(name, "System") == 0 || strcmp(name, "FFI") == 0 ||
+           strcmp(name, "Date") == 0 ||
            strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
 }

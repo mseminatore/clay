@@ -1,0 +1,63 @@
+// test_date.clay -- Test Date prototype
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Test 1: now returns a Date object
+d = Date now()
+assert value(d != nil, "Date now() should not be nil")
+
+// Test 2: year is reasonable
+assert value(d year() >= 2024, "year should be >= 2024")
+
+// Test 3: month is 1-12
+assert value(d month() >= 1, "month >= 1")
+assert value(d month() <= 12, "month <= 12")
+
+// Test 4: day is 1-31
+assert value(d day() >= 1, "day >= 1")
+assert value(d day() <= 31, "day <= 31")
+
+// Test 5: hour is 0-23
+assert value(d hour() >= 0, "hour >= 0")
+assert value(d hour() <= 23, "hour <= 23")
+
+// Test 6: minute is 0-59
+assert value(d minute() >= 0, "minute >= 0")
+assert value(d minute() <= 59, "minute <= 59")
+
+// Test 7: second is 0-59
+assert value(d second() >= 0, "second >= 0")
+assert value(d second() <= 59, "second <= 59")
+
+// Test 8: weekday is 0-6
+assert value(d weekday() >= 0, "weekday >= 0")
+assert value(d weekday() <= 6, "weekday <= 6")
+
+// Test 9: timestamp is positive
+assert value(d timestamp() > 0, "timestamp > 0")
+
+// Test 10: toString returns a string
+s = d toString()
+assert value(s length() > 0, "toString should return non-empty string")
+
+// Test 11: fromTimestamp round-trips
+ts = d timestamp()
+d2 = Date fromTimestamp(ts)
+assert value(d2 timestamp() == ts, "fromTimestamp round-trip")
+assert value(d2 year() == d year(), "fromTimestamp year matches")
+
+// Test 12: format returns formatted string
+f = d format("%Y")
+assert value(f == d year() toString(), "format %Y matches year")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

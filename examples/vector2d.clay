@@ -29,11 +29,9 @@ Vector2d = Object clone {
 
 // Example usage
 v1 = Vector2d new (3, 4)
-v1 toString println // Output: Vector2d(3, 4)
+v1 println
 v2 = Vector2d new (1, 2)
-v2 toString println // Output: Vector2d(1, 2)
+v2 println
 v3 = v1 add(v2)
-v3 toString println // Output: Vector2d(4, 6)
-v4 = v1 scale(2)
-v4 toString println // Output: Vector2d(6, 8)
+v3 println
 v4 magnitude println // Output: 10

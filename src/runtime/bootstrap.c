@@ -25,6 +25,7 @@ ClayObject *clay_Console = NULL;
 ClayObject *clay_File    = NULL;
 ClayObject *clay_System  = NULL;
 ClayObject *clay_FFI     = NULL;
+ClayObject *clay_Date    = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -35,6 +36,7 @@ extern void clay_error_init_methods(ClayObject *proto);
 extern void clay_dict_init_methods(ClayObject *proto);
 extern void clay_math_init(ClayObject *proto);
 extern void clay_file_init(ClayObject *proto);
+extern void clay_date_init_methods(ClayObject *proto);
 
 /* Object base methods */
 
@@ -546,6 +548,13 @@ void clay_bootstrap(void) {
     clay_FFI->refcount = 1000000;
     clay_set_slot(clay_FFI, "_name", CLAY_VAL(clay_string_new("FFI")));
     clay_ffi_init(clay_FFI);
+
+    /* Date prototype */
+    clay_Date = clay_object_new();
+    clay_Date->parent = clay_Object;
+    clay_Date->refcount = 1000000;
+    clay_set_slot(clay_Date, "_name", CLAY_VAL(clay_string_new("Date")));
+    clay_date_init_methods(clay_Date);
 }
 
 void clay_shutdown(void) {
