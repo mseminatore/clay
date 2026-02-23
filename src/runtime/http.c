@@ -186,6 +186,11 @@ static ClayValue do_http_request(const char *url, const char *method, const char
 #include <unistd.h>
 #include <errno.h>
 
+#ifdef CLAY_HAS_SSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 static ClayValue do_http_request(const char *url, const char *method, const char *req_body, size_t body_len) {
     /* Parse URL */
     const char *p = url;
@@ -193,11 +198,14 @@ static ClayValue do_http_request(const char *url, const char *method, const char
     if (strncmp(p, "https://", 8) == 0) { is_https = 1; p += 8; }
     else if (strncmp(p, "http://", 7) == 0) { p += 7; }
 
-    if (is_https) return make_error_response("HTTPS not supported on Unix (no TLS)");
+#ifndef CLAY_HAS_SSL
+    if (is_https) return make_error_response("HTTPS not supported (build without OpenSSL)");
+#endif
 
     char host[256] = {0};
     char path[1024] = "/";
-    char port_str[8] = "80";
+    char port_str[8];
+    snprintf(port_str, sizeof(port_str), "%d", is_https ? 443 : 80);
 
     const char *slash = strchr(p, '/');
     const char *colon = strchr(p, ':');
@@ -251,21 +259,50 @@ static ClayValue do_http_request(const char *url, const char *method, const char
             method, path, host);
     }
 
-    send(fd, header, strlen(header), 0);
+    /* Send and receive — with optional TLS */
+#ifdef CLAY_HAS_SSL
+    SSL_CTX *ssl_ctx = NULL;
+    SSL *ssl = NULL;
+    if (is_https) {
+        ssl_ctx = SSL_CTX_new(TLS_client_method());
+        if (!ssl_ctx) { close(fd); return make_error_response("SSL_CTX_new failed"); }
+        ssl = SSL_new(ssl_ctx);
+        SSL_set_fd(ssl, fd);
+        SSL_set_tlsext_host_name(ssl, host);
+        if (SSL_connect(ssl) <= 0) {
+            SSL_free(ssl); SSL_CTX_free(ssl_ctx); close(fd);
+            return make_error_response("SSL handshake failed");
+        }
+    }
+#define HTTP_SEND(buf, len) (is_https ? SSL_write(ssl, buf, (int)(len)) : send(fd, buf, len, 0))
+#define HTTP_RECV(buf, len) (is_https ? SSL_read(ssl, buf, (int)(len)) : (int)recv(fd, buf, len, 0))
+#else
+#define HTTP_SEND(buf, len) send(fd, buf, len, 0)
+#define HTTP_RECV(buf, len) (int)recv(fd, buf, len, 0)
+#endif
+
+    HTTP_SEND(header, strlen(header));
     if (req_body && body_len > 0)
-        send(fd, req_body, body_len, 0);
+        HTTP_SEND(req_body, body_len);
 
     /* Read response */
     char *buf = NULL;
     size_t total = 0;
     char chunk[4096];
-    ssize_t n;
-    while ((n = recv(fd, chunk, sizeof(chunk), 0)) > 0) {
+    int n;
+    while ((n = HTTP_RECV(chunk, sizeof(chunk))) > 0) {
         buf = (char *)realloc(buf, total + (size_t)n + 1);
         memcpy(buf + total, chunk, (size_t)n);
         total += (size_t)n;
     }
+
+#ifdef CLAY_HAS_SSL
+    if (is_https) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+#endif
     close(fd);
+
+#undef HTTP_SEND
+#undef HTTP_RECV
     if (buf) buf[total] = '\0';
 
     /* Parse status line */

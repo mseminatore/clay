@@ -581,13 +581,16 @@ resp = Http get("http://example.com")
 resp status() println()              // 200
 resp body() println()                // HTML content
 
+// HTTPS (Windows always, Unix/macOS with OpenSSL)
+resp = Http get("https://example.com")
+
 // POST request
 resp = Http post("http://api.example.com/data", "hello")
 resp status() println()
 resp body() println()
 ```
 
-> **Note:** On Windows, Http uses WinHTTP and supports HTTPS. On Unix/macOS, Http uses POSIX sockets and supports HTTP only (no TLS).
+> **Note:** On Windows, Http uses WinHTTP and supports HTTPS natively. On Unix/macOS, HTTPS requires OpenSSL (`brew install openssl` on macOS, typically pre-installed on Linux). Build with `cmake` and it will auto-detect OpenSSL. Without OpenSSL, only HTTP is supported.
 
 ## Core Objects
 
