@@ -4,10 +4,10 @@
   "description": "Clay standard library -- common utilities in one import",
   "main": "src/main.clay",
   "deps": {
-    "clay-collections": "github.com/mseminatore/clay-collections",
-    "clay-functional": "github.com/mseminatore/clay-functional",
-    "clay-format": "github.com/mseminatore/clay-format",
-    "clay-match": "github.com/mseminatore/clay-match",
-    "clay-iter": "github.com/mseminatore/clay-iter"
+    "clay-stdlib/clay-collections": "github.com/mseminatore/clay-stdlib/clay-collections",
+    "clay-stdlib/clay-functional": "github.com/mseminatore/clay-stdlib/clay-functional",
+    "clay-stdlib/clay-format": "github.com/mseminatore/clay-stdlib/clay-format",
+    "clay-stdlib/clay-match": "github.com/mseminatore/clay-stdlib/clay-match",
+    "clay-stdlib/clay-iter": "github.com/mseminatore/clay-stdlib/clay-iter"
   }
 }

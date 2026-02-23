@@ -1,12 +1,12 @@
 // clay-stdlib -- Clay Standard Library
 // Re-exports common bricks + adds utility objects
 
-// Re-export core bricks
-import("clay-collections")
-import("clay-functional")
-import("clay-format")
-import("clay-match")
-import("clay-iter")
+// Re-export core bricks (monorepo sub-bricks)
+import("clay-stdlib/clay-collections")
+import("clay-stdlib/clay-functional")
+import("clay-stdlib/clay-format")
+import("clay-stdlib/clay-match")
+import("clay-stdlib/clay-iter")
 
 // === Assert -- simple assertion helper ===
 Assert = Object clone {
