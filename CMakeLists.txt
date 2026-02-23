@@ -15,15 +15,10 @@ endif()
 
 # Link math library on Unix (via clay_runtime, which needs it)
 if(UNIX)
-    # Ensure POSIX functions like strdup are declared with -std=c99
-    add_compile_definitions(_POSIX_C_SOURCE=200809L)
-
     # Build linenoise for REPL line editing (Unix only)
+    # Built BEFORE the global _POSIX_C_SOURCE is applied to avoid strcasecmp issues
     add_library(linenoise STATIC deps/linenoise/linenoise.c)
     target_include_directories(linenoise PUBLIC deps/linenoise)
-    # linenoise uses strcasecmp (XSI extension) — needs _DEFAULT_SOURCE on Linux
-    # or broader POSIX/XOPEN visibility
-    target_compile_definitions(linenoise PRIVATE _DEFAULT_SOURCE _XOPEN_SOURCE=700)
 
     # Optional OpenSSL for HTTPS support
     find_package(OpenSSL QUIET)
@@ -37,6 +32,9 @@ endif()
 # Build hash library directly (avoid its CMakeLists which has subdirectory conflicts)
 add_library(ht STATIC deps/hash/hash.c)
 target_include_directories(ht PUBLIC deps/hash)
+if(UNIX)
+    target_compile_definitions(ht PRIVATE _POSIX_C_SOURCE=200809L)
+endif()
 
 # Build testy library directly
 add_library(testy STATIC deps/testy/test_main.c)
@@ -71,6 +69,7 @@ if(WIN32)
     target_link_libraries(clay_runtime PUBLIC winhttp)
 endif()
 if(UNIX)
+    target_compile_definitions(clay_runtime PRIVATE _POSIX_C_SOURCE=200809L)
     target_link_libraries(clay_runtime PUBLIC m dl)
     if(OPENSSL_FOUND)
         target_compile_definitions(clay_runtime PRIVATE CLAY_HAS_SSL)
@@ -94,6 +93,9 @@ set(VM_SOURCES
 
 add_library(clayvm STATIC ${VM_SOURCES})
 target_include_directories(clayvm PUBLIC src/vm/generated)
+if(UNIX)
+    target_compile_definitions(clayvm PRIVATE _POSIX_C_SOURCE=200809L)
+endif()
 
 # Compiler library (for testing — everything except main.c)
 set(COMPILER_LIB_SOURCES
@@ -118,6 +120,9 @@ endif()
 add_library(clay_compiler_lib STATIC ${COMPILER_LIB_SOURCES})
 target_include_directories(clay_compiler_lib PUBLIC src/compiler src/vm/generated src/runtime)
 target_compile_definitions(clay_compiler_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
+if(UNIX)
+    target_compile_definitions(clay_compiler_lib PRIVATE _POSIX_C_SOURCE=200809L)
+endif()
 target_link_libraries(clay_compiler_lib clayvm clay_runtime)
 
 # Compiler binary
@@ -128,7 +133,7 @@ target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated s
 target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(clay_compiler clay_compiler_lib)
 if(UNIX)
-    target_compile_definitions(clay_compiler PRIVATE CLAY_HAS_LINENOISE)
+    target_compile_definitions(clay_compiler PRIVATE CLAY_HAS_LINENOISE _POSIX_C_SOURCE=200809L)
     target_include_directories(clay_compiler PRIVATE deps/linenoise)
     target_link_libraries(clay_compiler linenoise)
 endif()
