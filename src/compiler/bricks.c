@@ -595,7 +595,7 @@ static int cmd_list(void) {
     } else {
         printf("  Dependencies:\n");
         for (int i = 0; i < m.dep_count; i++) {
-            printf("    %s → %s\n", m.deps[i].name, m.deps[i].url);
+            printf("    %s -> %s\n", m.deps[i].name, m.deps[i].url);
         }
     }
     return 0;
