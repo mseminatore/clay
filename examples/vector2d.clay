@@ -11,18 +11,27 @@ Vector2d = Object clone {
     }
 
     add (other) {
-        Vector2d new (self x + other x, self y + other y)
+        Vector2d new  (x + other x, y + other y)
     }
 
     toString () {
-        "Vector2d(" + self x + ", " + self y + ")"
+        "Vector2d(" + x + ", " + y + ")"
     }
 
     scale (factor) {
-        Vector2d new (self x * factor, self y * factor)
+        Vector2d new (x * factor, y * factor)
     }
 
     magnitude () {
-        ((self x * self x) + (self y * self y)) sqrt
+        ((x * x) + (y * y)) sqrt
     }
 }
+
+// Example usage
+v1 = Vector2d new (3, 4)
+v1 toString println // Output: Vector2d(3, 4)
+v2 = Vector2d new (1, 2)
+v2 toString println // Output: Vector2d(1, 2)
+v3 = v1 add(v2)
+// v4 = v1 scale(2)
+// mag = v4 magnitude

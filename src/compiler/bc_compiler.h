@@ -49,6 +49,11 @@ typedef struct {
     int     chunk_count;
     int     chunk_capacity;
 
+    /* Compile-time global name tracking (for resolving user globals in methods) */
+    char **known_globals;
+    int    known_global_count;
+    int    known_global_capacity;
+
     /* Native function indices (pre-registered) */
     int native_send;      /* clay_send bridge */
     int native_super_send; /* clay_send_super bridge */

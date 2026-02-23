@@ -828,6 +828,34 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "nil") == 0;
 }
 
+/* Check if a name exists as a user-defined global (compile-time tracking) */
+static int bc_is_user_global(const char *name) {
+    if (!g_bc) return 0;
+    for (int i = 0; i < g_bc->known_global_count; i++) {
+        if (strcmp(g_bc->known_globals[i], name) == 0) return 1;
+    }
+    /* Also check the VM's runtime globals table */
+    if (g_vm) {
+        HashTable *globals = (HashTable *)g_vm->globals;
+        if (globals && ht_find(globals, (ht_key_t)name)) return 1;
+    }
+    return 0;
+}
+
+/* Register a name as a known global at compile time */
+static void bc_register_global(BcCompiler *bc, const char *name) {
+    /* Skip if already known */
+    for (int i = 0; i < bc->known_global_count; i++) {
+        if (strcmp(bc->known_globals[i], name) == 0) return;
+    }
+    if (bc->known_global_count >= bc->known_global_capacity) {
+        bc->known_global_capacity = bc->known_global_capacity ? bc->known_global_capacity * 2 : 32;
+        bc->known_globals = (char **)realloc(bc->known_globals,
+            (size_t)bc->known_global_capacity * sizeof(char *));
+    }
+    bc->known_globals[bc->known_global_count++] = strdup(name);
+}
+
 static int bc_resolve_local(BcCompiler *bc, const char *name) {
     for (int i = bc->local_count - 1; i >= 0; i--) {
         if (strcmp(bc->locals[i].name, name) == 0)
@@ -1112,7 +1140,7 @@ static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
         AstNode *stmt = body->items[i];
         if (stmt && stmt->type == NODE_ASSIGN) {
             const char *name = stmt->as.assign.name;
-            if (!is_builtin_global(name) && bc_resolve_local(bc, name) < 0) {
+            if (!is_builtin_global(name) && !bc_is_user_global(name) && bc_resolve_local(bc, name) < 0) {
                 bc_add_local(bc, name);
             }
         }
@@ -1297,7 +1325,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_u16(bc, (uint16_t)bc->native_cell_get);
                     emit_byte(bc, 1);
                 }
-            } else if (bc->in_method && !is_builtin_global(ident_name)) {
+            } else if (bc->in_method && !is_builtin_global(ident_name) && !bc_is_user_global(ident_name)) {
                 /* Inside a method: bare identifier → implicit self slot lookup.
                  * Emit: load self, push slot name, send(name, 0 args) */
                 int self_idx = add_constant_string(bc, "self");
@@ -1347,7 +1375,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
                 }
                 /* Value stays on stack (expression context) */
-            } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
+            } else if (bc->in_method && !is_builtin_global(node->as.assign.name) && !bc_is_user_global(node->as.assign.name)) {
                 /* Inside a method scope: write to self slot.
                  * Method-level locals are pre-registered; this path handles
                  * bare assigns inside blocks within methods. */
@@ -1673,12 +1701,12 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
                 emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
             }
             emit_op(bc, CLAYVM_OP_POP); /* discard (stmt context) */
-        } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
-            /* Inside a method, unknown vars are self slot writes (matches C codegen) */
+        } else if (bc->in_method && !is_builtin_global(node->as.assign.name) && !bc_is_user_global(node->as.assign.name)) {
             bc_emit_expr(bc, node);  /* delegates to bc_emit_expr NODE_ASSIGN */
             emit_op(bc, CLAYVM_OP_POP);
         } else {
-            /* Global: push name first, then compile value */
+            /* Global: register name, push name, then compile value */
+            bc_register_global(bc, node->as.assign.name);
             int name_idx = add_constant_string(bc, node->as.assign.name);
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
             bc_emit_expr(bc, node->as.assign.value);
