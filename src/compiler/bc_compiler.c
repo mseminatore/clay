@@ -21,6 +21,10 @@ static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
 static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
 static ClayObject *g_super_proto = NULL; /* defining prototype for super dispatch */
 
+/* Fiber yield state — global since only one fiber runs at a time */
+int g_fiber_yielding = 0;
+static ClayValue g_fiber_yield_value = 0; /* CLAY_NIL */
+
 /* Dispatch table from vm.c for direct chunk execution */
 extern int (*clayvm_dispatch_table[])(clayvm_vm_t *vm);
 
@@ -99,6 +103,12 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
         if (rc != 0) break;
     }
 
+    /* If a fiber yield is propagating, don't restore state — let the
+     * fiber resume mechanism handle it. Just return immediately. */
+    if (g_fiber_yielding) {
+        return CLAY_NIL;
+    }
+
     /* Write back captured values from locals to env (by-reference semantics) */
     for (int i = 0; i < capture_count; i++) {
         size_t slot = base + (size_t)chunk->param_count + (size_t)i;
@@ -122,6 +132,227 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->frame_count = saved_frame_count;
 
     return retval;
+}
+
+/* --- Fiber (coroutine) support ---
+ * Each fiber owns a snapshot of VM state so execution can be
+ * suspended via yield() and later resumed.
+ * yield() sets g_vm->running=0 which propagates through nested
+ * block trampolines (they skip state restore when g_fiber_yielding).
+ */
+
+typedef struct {
+    int chunk_id;               /* bytecode chunk for the block */
+    ClayObject *block;          /* retained block object */
+    clayvm_value_t *stack;      /* saved stack snapshot */
+    int stack_size;             /* number of saved stack slots */
+    size_t ip;                  /* saved instruction pointer */
+    clayvm_frame_t *frames;     /* saved call frames */
+    int frame_count;            /* saved frame depth */
+    int status;                 /* 0=created, 1=suspended, 2=done */
+    ClayValue yield_value;      /* last yielded value */
+    size_t base_sp;             /* original base stack pointer */
+    const uint8_t *code;        /* saved code pointer */
+    size_t code_len;            /* saved code length */
+} FiberContext;
+
+/* Fiber yield(value) — set flag to break dispatch loops */
+static ClayValue fiber_yield(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    g_fiber_yielding = 1;
+    g_fiber_yield_value = (argc > 0) ? argv[0] : CLAY_NIL;
+    if (g_vm) g_vm->running = 0;
+    return CLAY_NIL;
+}
+
+/* Fiber new(block) — create a fiber from a block */
+static ClayValue fiber_new(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) {
+        return CLAY_NIL;
+    }
+    ClayObject *block = CLAY_OBJ(argv[0]);
+
+    /* Read chunk_id from block's env[0] */
+    int chunk_id = (int)clay_to_int(block->as.block.env[0]);
+
+    /* Create fiber object as clone of Fiber prototype */
+    extern ClayObject *clay_Fiber;
+    ClayObject *fiber = clay_clone(clay_Fiber);
+    clay_set_slot(fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
+
+    /* Allocate and initialize fiber context */
+    FiberContext *ctx = (FiberContext *)calloc(1, sizeof(FiberContext));
+    ctx->chunk_id = chunk_id;
+    ctx->block = block;
+    clay_retain(block);
+    ctx->status = 0; /* created */
+    ctx->yield_value = CLAY_NIL;
+
+    /* Store context pointer as integer slot */
+    clay_set_slot(fiber, "_ctx", clay_int((intptr_t)ctx));
+
+    return CLAY_VAL(fiber);
+}
+
+/* Helper: get FiberContext from a fiber object */
+static FiberContext *get_fiber_ctx(ClayObject *self) {
+    ClayValue v = clay_get_slot(self, "_ctx");
+    if (CLAY_IS_NIL(v)) return NULL;
+    return (FiberContext *)(intptr_t)clay_to_int(v);
+}
+
+/* Fiber resume() — run the fiber until it yields or completes */
+static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (!g_bc || !g_vm) return CLAY_NIL;
+
+    FiberContext *ctx = get_fiber_ctx(self);
+    if (!ctx || ctx->status == 2) return CLAY_NIL; /* done */
+
+    BcChunk *chunk = g_bc->chunks[ctx->chunk_id];
+
+    /* Save caller's VM state */
+    const uint8_t *saved_code = g_vm->code;
+    size_t saved_code_len = g_vm->code_len;
+    size_t saved_ip = g_vm->ip;
+    int saved_sp = g_vm->sp;
+    int saved_running = g_vm->running;
+    int saved_frame_count = g_vm->frame_count;
+
+    if (ctx->status == 0) {
+        /* First resume: set up fresh execution like block trampoline */
+        g_vm->code = chunk->code;
+        g_vm->code_len = chunk->len;
+        g_vm->ip = 0;
+        g_vm->running = 1;
+
+        ctx->base_sp = (size_t)g_vm->sp;
+
+        /* Push call frame */
+        if (g_vm->frame_count < g_vm->frame_capacity) {
+            g_vm->frames[g_vm->frame_count].return_ip = 0;
+            g_vm->frames[g_vm->frame_count].base_sp = (int)ctx->base_sp;
+            g_vm->frames[g_vm->frame_count].func_index = 0;
+            g_vm->frame_count++;
+        }
+
+        /* Push captured values as locals */
+        int capture_count = chunk->capture_count;
+        for (int i = 0; i < capture_count; i++) {
+            ClayValue cv = (1 + i < ctx->block->as.block.env_size) ?
+                            ctx->block->as.block.env[1 + i] : CLAY_NIL;
+            clayvm_vm_push(g_vm, clay_to_vm(cv));
+        }
+
+        /* Reserve locals */
+        for (int i = capture_count; i < chunk->local_count; i++) {
+            clayvm_vm_push(g_vm, CLAYVM_NIL_VAL);
+        }
+    } else {
+        /* Resuming a suspended fiber: restore saved state */
+        g_vm->code = ctx->code;
+        g_vm->code_len = ctx->code_len;
+        g_vm->ip = ctx->ip;
+        g_vm->running = 1;
+
+        /* Restore stack */
+        for (int i = 0; i < ctx->stack_size; i++) {
+            g_vm->stack[saved_sp + i] = ctx->stack[i];
+        }
+        g_vm->sp = saved_sp + ctx->stack_size;
+        ctx->base_sp = (size_t)saved_sp;
+
+        /* Restore frames (adjust base_sp to new stack position) */
+        int base_offset = saved_sp - (int)ctx->frames[0].base_sp;
+        for (int i = 0; i < ctx->frame_count; i++) {
+            g_vm->frames[saved_frame_count + i] = ctx->frames[i];
+            g_vm->frames[saved_frame_count + i].base_sp += base_offset;
+        }
+        g_vm->frame_count = saved_frame_count + ctx->frame_count;
+    }
+
+    /* Reset yield flag and run fiber */
+    g_fiber_yielding = 0;
+    g_fiber_yield_value = CLAY_NIL;
+
+    /* Run dispatch loop — yield() sets running=0 which propagates
+     * through any nested block trampolines back to here */
+    g_vm->running = 1;
+    while (g_vm->running && g_vm->ip < g_vm->code_len) {
+        uint8_t opcode = g_vm->code[g_vm->ip++];
+        if (opcode >= CLAYVM_OP_COUNT) { g_vm->running = 0; break; }
+        if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
+        int rc = clayvm_dispatch_table[opcode](g_vm);
+        if (rc != 0) break;
+    }
+
+    ClayValue retval = CLAY_NIL;
+
+    if (g_fiber_yielding) {
+        /* Fiber yielded: save state for later resume */
+        ctx->status = 1; /* suspended */
+        ctx->ip = g_vm->ip;
+        ctx->code = g_vm->code;
+        ctx->code_len = g_vm->code_len;
+        retval = g_fiber_yield_value;
+
+        /* Save stack snapshot */
+        int stack_slots = g_vm->sp - (int)ctx->base_sp;
+        if (stack_slots > 0) {
+            ctx->stack = (clayvm_value_t *)realloc(ctx->stack,
+                         (size_t)stack_slots * sizeof(clayvm_value_t));
+            memcpy(ctx->stack, g_vm->stack + ctx->base_sp,
+                   (size_t)stack_slots * sizeof(clayvm_value_t));
+            ctx->stack_size = stack_slots;
+        }
+
+        /* Save frame snapshot */
+        int fiber_frames = g_vm->frame_count - saved_frame_count;
+        if (fiber_frames > 0) {
+            ctx->frames = (clayvm_frame_t *)realloc(ctx->frames,
+                          (size_t)fiber_frames * sizeof(clayvm_frame_t));
+            memcpy(ctx->frames, g_vm->frames + saved_frame_count,
+                   (size_t)fiber_frames * sizeof(clayvm_frame_t));
+            ctx->frame_count = fiber_frames;
+        }
+
+        g_fiber_yielding = 0;
+    } else {
+        /* Fiber completed naturally */
+        ctx->status = 2; /* done */
+        if (g_vm->sp > (int)ctx->base_sp) {
+            retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
+        }
+        free(ctx->stack);  ctx->stack = NULL;
+        free(ctx->frames); ctx->frames = NULL;
+    }
+
+    /* Restore caller's VM state */
+    g_vm->code = saved_code;
+    g_vm->code_len = saved_code_len;
+    g_vm->ip = saved_ip;
+    g_vm->sp = saved_sp;
+    g_vm->running = saved_running;
+    g_vm->frame_count = saved_frame_count;
+
+    return retval;
+}
+
+/* Fiber isDone() — check if fiber has completed */
+static ClayValue fiber_isDone(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    FiberContext *ctx = get_fiber_ctx(self);
+    if (!ctx) return CLAY_TRUE;
+    return CLAY_BOOL(ctx->status == 2);
+}
+
+/* Register Fiber methods on prototype */
+void clay_fiber_init_methods(ClayObject *proto) {
+    clay_set_method(proto, "new", fiber_new);
+    clay_set_method(proto, "resume", fiber_resume);
+    clay_set_method(proto, "isDone", fiber_isDone);
+    clay_set_method(proto, "yield", fiber_yield);
 }
 
 /* --- Method dispatch via context ---
@@ -229,6 +460,12 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
         if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
         int rc = clayvm_dispatch_table[opcode](g_vm);
         if (rc != 0) break;
+    }
+
+    /* If a fiber yield is propagating, don't restore state */
+    if (g_fiber_yielding) {
+        g_super_proto = saved_super_proto;
+        return CLAY_NIL;
     }
 
     ClayValue retval = CLAY_NIL;
@@ -779,6 +1016,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Date", clay_Date},
         {"Http", clay_Http},
         {"Regex", clay_Regex},
+        {"Fiber", clay_Fiber},
         {NULL, NULL}
     };
 
@@ -829,6 +1067,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Date") == 0 ||
            strcmp(name, "Http") == 0 ||
            strcmp(name, "Regex") == 0 ||
+           strcmp(name, "Fiber") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -959,6 +1198,7 @@ static int bc_is_builtin_global(const char *name) {
            strcmp(name, "Date") == 0 ||
            strcmp(name, "Http") == 0 ||
            strcmp(name, "Regex") == 0 ||
+           strcmp(name, "Fiber") == 0 ||
            strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
 }

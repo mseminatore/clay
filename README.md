@@ -614,6 +614,32 @@ Regex find("a1 b2 c3", "\\d+")              // ["1", "2", "3"]
 
 Supports ERE (Extended Regular Expressions): `.`, `^`, `$`, `*`, `+`, `?`, `[...]`, `[^...]`, `\d`, `\w`, `\s`, `(...)`, `|`, `\\`.
 
+### Fibers (coroutines)
+
+```clay
+// Create a fiber from a block
+f = Fiber new({
+    Fiber yield(1)
+    Fiber yield(2)
+    3
+})
+
+f resume()     // 1
+f resume()     // 2
+f resume()     // 3 (final value)
+f isDone()     // true
+
+// Two independent fibers
+a = Fiber new({ Fiber yield(10); 20 })
+b = Fiber new({ Fiber yield(30); 40 })
+a resume()     // 10
+b resume()     // 30
+a resume()     // 20
+b resume()     // 40
+```
+
+> **Note:** Fibers support yielding from top-level code within the fiber block. Yielding from inside `whileTrue`, `each`, or other C-level iterators is not yet supported.
+
 ## Core Objects
 
 | Prototype | Methods |
@@ -634,6 +660,7 @@ Supports ERE (Extended Regular Expressions): `.`, `^`, `$`, `*`, `+`, `?`, `[...
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `status()`, `body()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
+| Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
 
 ## Generated C
 

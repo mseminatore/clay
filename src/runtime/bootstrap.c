@@ -28,6 +28,7 @@ ClayObject *clay_FFI     = NULL;
 ClayObject *clay_Date    = NULL;
 ClayObject *clay_Http    = NULL;
 ClayObject *clay_Regex   = NULL;
+ClayObject *clay_Fiber   = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -41,6 +42,7 @@ extern void clay_file_init(ClayObject *proto);
 extern void clay_date_init_methods(ClayObject *proto);
 extern void clay_http_init(ClayObject *proto);
 extern void clay_regex_init_methods(ClayObject *proto);
+extern void clay_fiber_init_methods(ClayObject *proto);
 
 /* Object base methods */
 
@@ -573,6 +575,13 @@ void clay_bootstrap(void) {
     clay_Regex->refcount = 1000000;
     clay_set_slot(clay_Regex, "_name", CLAY_VAL(clay_string_new("Regex")));
     clay_regex_init_methods(clay_Regex);
+
+    /* Fiber prototype */
+    clay_Fiber = clay_object_new();
+    clay_Fiber->parent = clay_Object;
+    clay_Fiber->refcount = 1000000;
+    clay_set_slot(clay_Fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
+    clay_fiber_init_methods(clay_Fiber);
 }
 
 void clay_shutdown(void) {

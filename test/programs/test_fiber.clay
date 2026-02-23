@@ -1,0 +1,95 @@
+// test_fiber.clay -- Test Fiber (coroutine) prototype
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Test 1: Fiber exists
+assert value(Fiber != nil, "Fiber should not be nil")
+
+// Test 2: Basic yield and resume
+f = Fiber new({
+    Fiber yield(10)
+    20
+})
+assert value(f resume() == 10, "first resume should yield 10")
+assert value(f resume() == 20, "second resume should return 20")
+assert value(f isDone() == true, "fiber should be done")
+
+// Test 3: Yield without value
+f2 = Fiber new({
+    Fiber yield()
+    42
+})
+assert value(f2 resume() == nil, "yield without value returns nil")
+assert value(f2 resume() == 42, "second resume returns final value")
+
+// Test 4: Multiple yields
+f3 = Fiber new({
+    Fiber yield(1)
+    Fiber yield(2)
+    Fiber yield(3)
+    4
+})
+assert value(f3 resume() == 1, "yield 1")
+assert value(f3 resume() == 2, "yield 2")
+assert value(f3 resume() == 3, "yield 3")
+assert value(f3 resume() == 4, "final value 4")
+assert value(f3 isDone() == true, "done after all yields")
+
+// Test 5: Resume after done returns nil
+assert value(f3 resume() == nil, "resume after done returns nil")
+
+// Test 6: isDone before completion
+f4 = Fiber new({
+    Fiber yield(1)
+    2
+})
+assert value(f4 isDone() == false, "not done before first resume")
+f4 resume()
+assert value(f4 isDone() == false, "not done after yield")
+f4 resume()
+assert value(f4 isDone() == true, "done after completion")
+
+// Test 7: Fiber with expressions
+f5 = Fiber new({
+    x = 10
+    y = 20
+    Fiber yield(x + y)
+    Fiber yield(x * y)
+    x - y
+})
+assert value(f5 resume() == 30, "yield x+y = 30")
+assert value(f5 resume() == 200, "yield x*y = 200")
+assert value(f5 resume() == -10, "final x-y = -10")
+
+// Test 8: Two independent fibers
+a = Fiber new({
+    Fiber yield(1)
+    Fiber yield(2)
+    3
+})
+b = Fiber new({
+    Fiber yield(10)
+    Fiber yield(20)
+    30
+})
+assert value(a resume() == 1, "fiber a yield 1")
+assert value(b resume() == 10, "fiber b yield 10")
+assert value(a resume() == 2, "fiber a yield 2")
+assert value(b resume() == 20, "fiber b yield 20")
+assert value(a resume() == 3, "fiber a final 3")
+assert value(b resume() == 30, "fiber b final 30")
+
+// Test 9: Fiber type
+assert value(Fiber type() == "Fiber", "Fiber type is Fiber")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

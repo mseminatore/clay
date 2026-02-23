@@ -182,6 +182,7 @@ extern ClayObject *clay_FFI;
 extern ClayObject *clay_Date;
 extern ClayObject *clay_Http;
 extern ClayObject *clay_Regex;
+extern ClayObject *clay_Fiber;
 
 /* Regex search — public API for String convenience methods */
 int clay_regex_search(const char *pat, const char *text, int *match_start, int *match_len);
