@@ -11,10 +11,10 @@
 #include "native.h"
 
 #define BC_MAX_CODE   65536
-#define BC_MAX_GLOBALS 256
-#define BC_MAX_CHUNKS  256
+#define BC_MAX_GLOBALS 512
+#define BC_MAX_CHUNKS  512
 #define BC_CHUNK_CODE  4096
-#define BC_MAX_METHOD_SLOTS 128
+#define BC_MAX_METHOD_SLOTS 256
 
 /* A compiled bytecode chunk (block or method body) */
 typedef struct {

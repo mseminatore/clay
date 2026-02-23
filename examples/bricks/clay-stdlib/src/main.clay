@@ -7,6 +7,11 @@ import("clay-stdlib/clay-functional")
 import("clay-stdlib/clay-format")
 import("clay-stdlib/clay-match")
 import("clay-stdlib/clay-iter")
+import("clay-stdlib/clay-test")
+import("clay-stdlib/clay-json")
+import("clay-stdlib/clay-csv")
+import("clay-stdlib/clay-log")
+import("clay-stdlib/clay-event")
 
 // === Assert -- simple assertion helper ===
 Assert = Object clone {

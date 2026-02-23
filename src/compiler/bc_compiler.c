@@ -279,6 +279,38 @@ METHOD_TRAMP(112) METHOD_TRAMP(113) METHOD_TRAMP(114) METHOD_TRAMP(115)
 METHOD_TRAMP(116) METHOD_TRAMP(117) METHOD_TRAMP(118) METHOD_TRAMP(119)
 METHOD_TRAMP(120) METHOD_TRAMP(121) METHOD_TRAMP(122) METHOD_TRAMP(123)
 METHOD_TRAMP(124) METHOD_TRAMP(125) METHOD_TRAMP(126) METHOD_TRAMP(127)
+METHOD_TRAMP(128) METHOD_TRAMP(129) METHOD_TRAMP(130) METHOD_TRAMP(131)
+METHOD_TRAMP(132) METHOD_TRAMP(133) METHOD_TRAMP(134) METHOD_TRAMP(135)
+METHOD_TRAMP(136) METHOD_TRAMP(137) METHOD_TRAMP(138) METHOD_TRAMP(139)
+METHOD_TRAMP(140) METHOD_TRAMP(141) METHOD_TRAMP(142) METHOD_TRAMP(143)
+METHOD_TRAMP(144) METHOD_TRAMP(145) METHOD_TRAMP(146) METHOD_TRAMP(147)
+METHOD_TRAMP(148) METHOD_TRAMP(149) METHOD_TRAMP(150) METHOD_TRAMP(151)
+METHOD_TRAMP(152) METHOD_TRAMP(153) METHOD_TRAMP(154) METHOD_TRAMP(155)
+METHOD_TRAMP(156) METHOD_TRAMP(157) METHOD_TRAMP(158) METHOD_TRAMP(159)
+METHOD_TRAMP(160) METHOD_TRAMP(161) METHOD_TRAMP(162) METHOD_TRAMP(163)
+METHOD_TRAMP(164) METHOD_TRAMP(165) METHOD_TRAMP(166) METHOD_TRAMP(167)
+METHOD_TRAMP(168) METHOD_TRAMP(169) METHOD_TRAMP(170) METHOD_TRAMP(171)
+METHOD_TRAMP(172) METHOD_TRAMP(173) METHOD_TRAMP(174) METHOD_TRAMP(175)
+METHOD_TRAMP(176) METHOD_TRAMP(177) METHOD_TRAMP(178) METHOD_TRAMP(179)
+METHOD_TRAMP(180) METHOD_TRAMP(181) METHOD_TRAMP(182) METHOD_TRAMP(183)
+METHOD_TRAMP(184) METHOD_TRAMP(185) METHOD_TRAMP(186) METHOD_TRAMP(187)
+METHOD_TRAMP(188) METHOD_TRAMP(189) METHOD_TRAMP(190) METHOD_TRAMP(191)
+METHOD_TRAMP(192) METHOD_TRAMP(193) METHOD_TRAMP(194) METHOD_TRAMP(195)
+METHOD_TRAMP(196) METHOD_TRAMP(197) METHOD_TRAMP(198) METHOD_TRAMP(199)
+METHOD_TRAMP(200) METHOD_TRAMP(201) METHOD_TRAMP(202) METHOD_TRAMP(203)
+METHOD_TRAMP(204) METHOD_TRAMP(205) METHOD_TRAMP(206) METHOD_TRAMP(207)
+METHOD_TRAMP(208) METHOD_TRAMP(209) METHOD_TRAMP(210) METHOD_TRAMP(211)
+METHOD_TRAMP(212) METHOD_TRAMP(213) METHOD_TRAMP(214) METHOD_TRAMP(215)
+METHOD_TRAMP(216) METHOD_TRAMP(217) METHOD_TRAMP(218) METHOD_TRAMP(219)
+METHOD_TRAMP(220) METHOD_TRAMP(221) METHOD_TRAMP(222) METHOD_TRAMP(223)
+METHOD_TRAMP(224) METHOD_TRAMP(225) METHOD_TRAMP(226) METHOD_TRAMP(227)
+METHOD_TRAMP(228) METHOD_TRAMP(229) METHOD_TRAMP(230) METHOD_TRAMP(231)
+METHOD_TRAMP(232) METHOD_TRAMP(233) METHOD_TRAMP(234) METHOD_TRAMP(235)
+METHOD_TRAMP(236) METHOD_TRAMP(237) METHOD_TRAMP(238) METHOD_TRAMP(239)
+METHOD_TRAMP(240) METHOD_TRAMP(241) METHOD_TRAMP(242) METHOD_TRAMP(243)
+METHOD_TRAMP(244) METHOD_TRAMP(245) METHOD_TRAMP(246) METHOD_TRAMP(247)
+METHOD_TRAMP(248) METHOD_TRAMP(249) METHOD_TRAMP(250) METHOD_TRAMP(251)
+METHOD_TRAMP(252) METHOD_TRAMP(253) METHOD_TRAMP(254) METHOD_TRAMP(255)
 
 static ClayMethodFunc g_method_trampoline_table[] = {
     bc_mtramp_0,  bc_mtramp_1,  bc_mtramp_2,  bc_mtramp_3,
@@ -313,6 +345,38 @@ static ClayMethodFunc g_method_trampoline_table[] = {
     bc_mtramp_116, bc_mtramp_117, bc_mtramp_118, bc_mtramp_119,
     bc_mtramp_120, bc_mtramp_121, bc_mtramp_122, bc_mtramp_123,
     bc_mtramp_124, bc_mtramp_125, bc_mtramp_126, bc_mtramp_127,
+    bc_mtramp_128, bc_mtramp_129, bc_mtramp_130, bc_mtramp_131,
+    bc_mtramp_132, bc_mtramp_133, bc_mtramp_134, bc_mtramp_135,
+    bc_mtramp_136, bc_mtramp_137, bc_mtramp_138, bc_mtramp_139,
+    bc_mtramp_140, bc_mtramp_141, bc_mtramp_142, bc_mtramp_143,
+    bc_mtramp_144, bc_mtramp_145, bc_mtramp_146, bc_mtramp_147,
+    bc_mtramp_148, bc_mtramp_149, bc_mtramp_150, bc_mtramp_151,
+    bc_mtramp_152, bc_mtramp_153, bc_mtramp_154, bc_mtramp_155,
+    bc_mtramp_156, bc_mtramp_157, bc_mtramp_158, bc_mtramp_159,
+    bc_mtramp_160, bc_mtramp_161, bc_mtramp_162, bc_mtramp_163,
+    bc_mtramp_164, bc_mtramp_165, bc_mtramp_166, bc_mtramp_167,
+    bc_mtramp_168, bc_mtramp_169, bc_mtramp_170, bc_mtramp_171,
+    bc_mtramp_172, bc_mtramp_173, bc_mtramp_174, bc_mtramp_175,
+    bc_mtramp_176, bc_mtramp_177, bc_mtramp_178, bc_mtramp_179,
+    bc_mtramp_180, bc_mtramp_181, bc_mtramp_182, bc_mtramp_183,
+    bc_mtramp_184, bc_mtramp_185, bc_mtramp_186, bc_mtramp_187,
+    bc_mtramp_188, bc_mtramp_189, bc_mtramp_190, bc_mtramp_191,
+    bc_mtramp_192, bc_mtramp_193, bc_mtramp_194, bc_mtramp_195,
+    bc_mtramp_196, bc_mtramp_197, bc_mtramp_198, bc_mtramp_199,
+    bc_mtramp_200, bc_mtramp_201, bc_mtramp_202, bc_mtramp_203,
+    bc_mtramp_204, bc_mtramp_205, bc_mtramp_206, bc_mtramp_207,
+    bc_mtramp_208, bc_mtramp_209, bc_mtramp_210, bc_mtramp_211,
+    bc_mtramp_212, bc_mtramp_213, bc_mtramp_214, bc_mtramp_215,
+    bc_mtramp_216, bc_mtramp_217, bc_mtramp_218, bc_mtramp_219,
+    bc_mtramp_220, bc_mtramp_221, bc_mtramp_222, bc_mtramp_223,
+    bc_mtramp_224, bc_mtramp_225, bc_mtramp_226, bc_mtramp_227,
+    bc_mtramp_228, bc_mtramp_229, bc_mtramp_230, bc_mtramp_231,
+    bc_mtramp_232, bc_mtramp_233, bc_mtramp_234, bc_mtramp_235,
+    bc_mtramp_236, bc_mtramp_237, bc_mtramp_238, bc_mtramp_239,
+    bc_mtramp_240, bc_mtramp_241, bc_mtramp_242, bc_mtramp_243,
+    bc_mtramp_244, bc_mtramp_245, bc_mtramp_246, bc_mtramp_247,
+    bc_mtramp_248, bc_mtramp_249, bc_mtramp_250, bc_mtramp_251,
+    bc_mtramp_252, bc_mtramp_253, bc_mtramp_254, bc_mtramp_255,
 };
 
 /* --- Bytecode emission helpers --- */
@@ -1176,6 +1240,7 @@ static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
 static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
                             BcCaptureList *captures, int is_method) {
     if (bc->chunk_count >= BC_MAX_CHUNKS) {
+        fprintf(stderr, "clay: too many chunks (%d max)\n", BC_MAX_CHUNKS);
         bc->had_error = 1;
         return -1;
     }

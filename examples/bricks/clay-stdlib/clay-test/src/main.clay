@@ -1,0 +1,107 @@
+// clay-test -- A simple testing framework for Clay
+//
+// Usage:
+//   import("clay-test")
+//
+//   Test describe("Math", {
+//       Test it("adds numbers", {
+//           Test assertEqual(1 + 1, 2)
+//       })
+//   })
+//
+//   Test run()
+
+Test = Object clone {
+    _passed = 0
+    _failed = 0
+    _errors = ""
+    _suite = ""
+    _green = "\x1b[32m"
+    _red = "\x1b[91m"
+    _bold = "\x1b[1m"
+    _cyan = "\x1b[36m"
+    _dim = "\x1b[2m"
+    _reset = "\x1b[0m"
+
+    describe(name, block) {
+        self _suite = name
+        (_bold + _cyan + "  " + name + _reset) println()
+        block value()
+        self _suite = ""
+        self
+    }
+
+    it(name, block) {
+        result = try({
+            block value()
+            "pass"
+        }) catch({ |e|
+            self _failed += 1
+            self _errors = _errors + "    " + _red + "FAIL: " + _suite + " > " + name + " - " + e message() + _reset + "\n"
+            "fail"
+        })
+        (result == "pass") ifTrue({
+            self _passed += 1
+            ("    " + _green + "✓" + _reset + _dim + " " + name + _reset) println()
+        })
+        (result == "fail") ifTrue({
+            ("    " + _red + "✗ " + name + _reset) println()
+        })
+        self
+    }
+
+    assertEqual(actual, expected) {
+        (actual == expected) ifFalse({
+            raise("expected " + expected + " but got " + actual)
+        })
+        self
+    }
+
+    assertNotEqual(actual, expected) {
+        (actual == expected) ifTrue({
+            raise("expected values to differ but both are " + actual)
+        })
+        self
+    }
+
+    assertTrue(value) {
+        (value == false) ifTrue({
+            raise("expected true but got false")
+        })
+        self
+    }
+
+    assertFalse(value) {
+        (value == true) ifTrue({
+            raise("expected false but got true")
+        })
+        self
+    }
+
+    assertRaises(block) {
+        caught = try({
+            block value()
+            "no error"
+        }) catch({ |e|
+            "caught"
+        })
+        (caught == "no error") ifTrue({
+            raise("expected an error but none was raised")
+        })
+        self
+    }
+
+    run() {
+        "" println()
+        total = _passed + _failed
+        color = _green
+        (_failed > 0) ifTrue({ color = _red })
+        (color + "" + total + " tests, " + _passed + " passed, " + _failed + " failed" + _reset) println()
+        (_failed > 0) ifTrue({
+            "" println()
+            (_red + "Failures:" + _reset) println()
+            _errors print()
+        })
+        self
+    }
+}
