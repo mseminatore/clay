@@ -5,9 +5,9 @@ Vector2d = Object clone {
     x = 0 // Default value for x
     y = 0 // Default value for y
 
-    init (x, y) {
-        self x = x
-        self y = y
+    init (anx, any) {
+        self x = anx
+        self y = any
     }
 
     add (other) {
@@ -34,4 +34,4 @@ v2 = Vector2d new (1, 2)
 v2 println
 v3 = v1 add(v2)
 v3 println
-v4 magnitude println // Output: 10
+v3 magnitude println // Output: 10

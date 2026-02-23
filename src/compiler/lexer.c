@@ -94,15 +94,29 @@ static Token lex_number(Lexer *lexer, const char *start) {
     while (isdigit((unsigned char)peek(lexer))) {
         advance(lexer);
     }
+    int is_float = 0;
     /* Check for decimal point followed by digit */
     if (peek(lexer) == '.' && isdigit((unsigned char)lexer->current[1])) {
         advance(lexer); /* consume '.' */
         while (isdigit((unsigned char)peek(lexer))) {
             advance(lexer);
         }
-        return make_token(lexer, TOK_FLOAT, start, (int)(lexer->current - start));
+        is_float = 1;
     }
-    return make_token(lexer, TOK_INT, start, (int)(lexer->current - start));
+    /* Check for scientific notation: e/E optionally followed by +/- and digits */
+    if ((peek(lexer) == 'e' || peek(lexer) == 'E') &&
+        (isdigit((unsigned char)lexer->current[1]) ||
+         ((lexer->current[1] == '+' || lexer->current[1] == '-') &&
+          isdigit((unsigned char)lexer->current[2])))) {
+        advance(lexer); /* consume 'e'/'E' */
+        if (peek(lexer) == '+' || peek(lexer) == '-') advance(lexer);
+        while (isdigit((unsigned char)peek(lexer))) {
+            advance(lexer);
+        }
+        is_float = 1;
+    }
+    return make_token(lexer, is_float ? TOK_FLOAT : TOK_INT, start,
+                      (int)(lexer->current - start));
 }
 
 static TokenType check_keyword(const char *start, int length) {
