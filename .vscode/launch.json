@@ -10,8 +10,7 @@
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
-            "console": "integratedTerminal",
-            "preLaunchTask": "CMake: Build All"
+            "console": "integratedTerminal"
         },
         {
             "name": "Debug: Test Runner",
