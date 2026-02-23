@@ -1,4 +1,4 @@
-// clay-iter — Lazy iterator pipelines for Clay
+// clay-iter -- Lazy iterator pipelines for Clay
 //
 // Usage:
 //   import("clay-iter")

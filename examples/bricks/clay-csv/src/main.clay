@@ -1,4 +1,4 @@
-// clay-csv — CSV parsing and generation for Clay
+// clay-csv -- CSV parsing and generation for Clay
 //
 // Usage:
 //   import("clay-csv")

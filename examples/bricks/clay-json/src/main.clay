@@ -1,4 +1,4 @@
-// clay-json — JSON stringify and parse for Clay
+// clay-json -- JSON stringify and parse for Clay
 //
 // Usage:
 //   import("clay-json")

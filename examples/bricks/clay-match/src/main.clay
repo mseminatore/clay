@@ -1,4 +1,4 @@
-// clay-match — Pattern matching for Clay
+// clay-match -- Pattern matching for Clay
 //
 // Usage:
 //   import("clay-match")

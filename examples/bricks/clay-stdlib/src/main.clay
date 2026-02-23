@@ -1,4 +1,4 @@
-// clay-stdlib — Clay Standard Library
+// clay-stdlib -- Clay Standard Library
 // Re-exports common bricks + adds utility objects
 
 // Re-export core bricks
@@ -8,7 +8,7 @@ import("clay-format")
 import("clay-match")
 import("clay-iter")
 
-// === Assert — simple assertion helper ===
+// === Assert -- simple assertion helper ===
 Assert = Object clone {
     that(cond, msg) {
         (cond == false) ifTrue({
@@ -39,7 +39,7 @@ Assert = Object clone {
     }
 }
 
-// === Time — elapsed time measurement ===
+// === Time -- elapsed time measurement ===
 Time = Object clone {
     now() { System clock() }
 
@@ -54,7 +54,7 @@ Time = Object clone {
     }
 }
 
-// === MathUtil — extra math utilities ===
+// === MathUtil -- extra math utilities ===
 MathUtil = Object clone {
     abs(n) {
         (n < 0) ifTrue({ 0 - n }) ifFalse({ n })

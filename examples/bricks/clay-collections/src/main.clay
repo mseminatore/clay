@@ -1,4 +1,4 @@
-// clay-collections — Data structures for Clay: Set, Stack, Queue, Range
+// clay-collections -- Data structures for Clay: Set, Stack, Queue, Range
 //
 // Usage:
 //   import("clay-collections")

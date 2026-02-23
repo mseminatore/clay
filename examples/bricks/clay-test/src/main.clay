@@ -1,4 +1,4 @@
-// clay-test — A simple testing framework for Clay
+// clay-test -- A simple testing framework for Clay
 //
 // Usage:
 //   import("clay-test")
@@ -37,7 +37,7 @@ Test = Object clone {
             "pass"
         }) catch({ |e|
             self _failed += 1
-            self _errors = _errors + "    " + _red + "FAIL: " + _suite + " > " + name + " — " + e message() + _reset + "\n"
+            self _errors = _errors + "    " + _red + "FAIL: " + _suite + " > " + name + " - " + e message() + _reset + "\n"
             "fail"
         })
         (result == "pass") ifTrue({

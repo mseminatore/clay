@@ -1,4 +1,4 @@
-// clay-format — String and number formatting utilities for Clay
+// clay-format -- String and number formatting utilities for Clay
 //
 // Usage:
 //   import("clay-format")

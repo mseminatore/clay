@@ -1,4 +1,4 @@
-// clay-log — Structured logging for Clay
+// clay-log -- Structured logging for Clay
 //
 // Usage:
 //   import("clay-log")

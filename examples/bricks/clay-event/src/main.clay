@@ -1,4 +1,4 @@
-// clay-event — Event emitter for Clay
+// clay-event -- Event emitter for Clay
 //
 // Usage:
 //   import("clay-event")

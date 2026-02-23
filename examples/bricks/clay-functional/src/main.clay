@@ -1,4 +1,4 @@
-// clay-functional — Functional programming utilities for Clay
+// clay-functional -- Functional programming utilities for Clay
 //
 // Usage:
 //   import("clay-functional")
