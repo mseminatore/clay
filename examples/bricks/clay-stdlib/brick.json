@@ -1,0 +1,6 @@
+{
+  "name": "clay-stdlib",
+  "version": "0.1.0",
+  "description": "Clay standard library — common utilities in one import",
+  "main": "src/main.clay"
+}

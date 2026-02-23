@@ -1,0 +1,58 @@
+import("clay-stdlib")
+
+pass = 0
+fail = 0
+check = { |name, a, b|
+    (a == b) ifTrue({
+        pass = pass + 1
+    }) ifFalse({
+        ("FAIL: " + name + " expected " + b toString() + " got " + a toString()) println()
+        fail = fail + 1
+    })
+}
+
+// Test Assert
+check value("Assert that true", Assert that(true, "should pass"), true)
+check value("Assert equal", Assert equal(1, 1), true)
+check value("Assert notNil", Assert notNil("hello"), true)
+
+// Test MathUtil
+check value("abs positive", MathUtil abs(5), 5)
+check value("abs negative", MathUtil abs(0 - 3), 3)
+check value("abs zero", MathUtil abs(0), 0)
+check value("clamp low", MathUtil clamp(0 - 5, 0, 10), 0)
+check value("clamp high", MathUtil clamp(15, 0, 10), 10)
+check value("clamp mid", MathUtil clamp(5, 0, 10), 5)
+check value("sign positive", MathUtil sign(42), 1)
+check value("sign negative", MathUtil sign(0 - 7), 0 - 1)
+check value("sign zero", MathUtil sign(0), 0)
+
+// Test Time
+t = Time now()
+check value("Time now >= 0", t >= 0, true)
+
+// Test re-exported bricks
+// Collections - Set
+s = Set new()
+s add(1)
+s add(2)
+s add(1)
+check value("Set size", s size(), 2)
+
+// Functional - Fn
+arr = Array clone {}
+arr append(1)
+arr append(2)
+arr append(3)
+doubled = Fn map(arr, { |x| x * 2 })
+check value("Fn map [0]", doubled at(0), 2)
+check value("Fn map [2]", doubled at(2), 6)
+
+// Format - Fmt
+check value("Fmt capitalize", Fmt capitalize("hello"), "Hello")
+
+// Match
+result = Match value(42) when(42, { "found" }) else({ "other" })
+check value("Match value", result, "found")
+
+(pass toString() + " passed, " + fail toString() + " failed") println()

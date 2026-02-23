@@ -1,0 +1,78 @@
+// clay-stdlib — Clay Standard Library
+// Re-exports common bricks + adds utility objects
+
+// Re-export core bricks
+import("clay-collections")
+import("clay-functional")
+import("clay-format")
+import("clay-match")
+import("clay-iter")
+
+// === Assert — simple assertion helper ===
+Assert = Object clone {
+    that(cond, msg) {
+        (cond == false) ifTrue({
+            raise("Assertion failed: " + msg)
+        })
+        true
+    }
+
+    equal(a, b) {
+        (a == b) ifFalse({
+            raise("Assertion failed: expected " + a toString() + " == " + b toString())
+        })
+        true
+    }
+
+    notEqual(a, b) {
+        (a != b) ifFalse({
+            raise("Assertion failed: expected " + a toString() + " != " + b toString())
+        })
+        true
+    }
+
+    notNil(val) {
+        (val == nil) ifTrue({
+            raise("Assertion failed: expected non-nil value")
+        })
+        true
+    }
+}
+
+// === Time — elapsed time measurement ===
+Time = Object clone {
+    now() { System clock() }
+
+    measure(block) {
+        start = System clock()
+        r = block value()
+        elapsed = System clock() - start
+        obj = Object clone {}
+        obj _result = r
+        obj _elapsed = elapsed
+        obj
+    }
+}
+
+// === MathUtil — extra math utilities ===
+MathUtil = Object clone {
+    abs(n) {
+        (n < 0) ifTrue({ 0 - n }) ifFalse({ n })
+    }
+
+    clamp(n, lo, hi) {
+        (n < lo) ifTrue({ lo }) ifFalse({
+            (n > hi) ifTrue({ hi }) ifFalse({ n })
+        })
+    }
+
+    lerp(a, b, t) {
+        a + (b - a) * t
+    }
+
+    sign(n) {
+        (n > 0) ifTrue({ 1 }) ifFalse({
+            (n < 0) ifTrue({ 0 - 1 }) ifFalse({ 0 })
+        })
+    }
+}
