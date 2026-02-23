@@ -653,6 +653,19 @@ static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
     clayvm_vm_push(vm, clay_to_vm(result));
 }
 
+/* --- Per-callsite inline cache --- */
+#define IC_TABLE_SIZE 512
+#define IC_TABLE_MASK (IC_TABLE_SIZE - 1)
+
+typedef struct {
+    size_t      callsite_ip;
+    HashTable  *methods_key;
+    const char *selector;
+    ClayMethod *method;
+} InlineCacheEntry;
+
+static InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
+
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
@@ -674,9 +687,53 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     ClayValue receiver = vm_to_clay(recv_val);
     const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
 
-    ClayValue result = clay_send_val(receiver, selector, msg_argc, args);
-    if (args && args != stack_args) free(args);
+    /* Determine receiver object for IC keying */
+    ClayObject *target_obj = NULL;
+    HashTable *target_methods = NULL;
 
+    if (CLAY_IS_INT(receiver)) {
+        target_obj = clay_Number;
+        target_methods = clay_Number->methods;
+    } else if (!CLAY_IS_NIL(receiver)) {
+        target_obj = CLAY_OBJ(receiver);
+        target_methods = target_obj->methods;
+    }
+
+    /* Per-callsite inline cache check */
+    size_t site_ip = vm->ip;
+    unsigned int ic_idx = (unsigned int)(site_ip >> 2) & IC_TABLE_MASK;
+    InlineCacheEntry *ic = &g_ic_table[ic_idx];
+    ClayValue result;
+
+    if (target_obj &&
+        ic->callsite_ip == site_ip &&
+        ic->methods_key == target_methods &&
+        ic->selector == selector) {
+        /* IC hit — invoke directly, skip dispatch */
+        if (CLAY_IS_INT(receiver)) {
+            ClayObject *wrapper = clay_clone(clay_Number);
+            clay_set_slot(wrapper, "_value", receiver);
+            result = clay_invoke(ic->method, wrapper, msg_argc, args);
+            clay_release(wrapper);
+        } else {
+            result = clay_invoke(ic->method, target_obj, msg_argc, args);
+        }
+    } else {
+        /* IC miss — full dispatch */
+        result = clay_send_val(receiver, selector, msg_argc, args);
+        /* Update IC if we found a method */
+        if (target_obj) {
+            ClayMethod *m = clay_cached_lookup(target_obj, selector);
+            if (m) {
+                ic->callsite_ip = site_ip;
+                ic->methods_key = target_methods;
+                ic->selector = selector;
+                ic->method = m;
+            }
+        }
+    }
+
+    if (args && args != stack_args) free(args);
     clayvm_vm_push(vm, clay_to_vm(result));
     return 0;
 }

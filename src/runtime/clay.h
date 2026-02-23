@@ -139,6 +139,12 @@ void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc fu
 void        clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func, void *context);
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
 
+/* Full method lookup (returns ClayMethod* with context, uses global cache) */
+ClayMethod *clay_cached_lookup(ClayObject *obj, const char *selector);
+
+/* Invoke a method, setting context before call */
+ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv);
+
 /* Context pointer set by dispatch before calling a method (for BC compiler) */
 extern void *clay_method_context;
 

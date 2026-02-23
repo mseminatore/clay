@@ -63,6 +63,16 @@ static inline ClayValue invoke_method(ClayMethod *m, ClayObject *obj, int argc, 
     return m->func(obj, argc, argv);
 }
 
+/* Public API: cached method lookup (returns full ClayMethod*) */
+ClayMethod *clay_cached_lookup(ClayObject *obj, const char *selector) {
+    return cached_lookup_method(obj, selector);
+}
+
+/* Public API: invoke method with context setup */
+ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv) {
+    return invoke_method(m, obj, argc, argv);
+}
+
 ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv) {
     /* Handle tagged integer receivers — skip clone, lookup directly on Number */
     if (CLAY_IS_INT(receiver)) {
