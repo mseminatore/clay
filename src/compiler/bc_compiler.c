@@ -20,12 +20,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
-#define _XOPEN_SOURCE
-#ifdef __APPLE__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#include <ucontext.h>
+#include "fiber_ctx.h"
 #endif
 
 #define FIBER_STACK_SIZE (256 * 1024)
@@ -171,9 +166,9 @@ typedef struct {
     LPVOID os_fiber;            /* Windows fiber handle */
     LPVOID caller_fiber;        /* caller's fiber handle (set by resume) */
 #else
-    ucontext_t fiber_ctx;
-    ucontext_t caller_ctx;
-    char *c_stack;              /* allocated C stack for ucontext */
+    clay_fiber_regs_t fiber_regs;
+    clay_fiber_regs_t caller_regs;
+    char *c_stack;              /* allocated C stack */
 #endif
 } FiberContext;
 
@@ -181,7 +176,7 @@ static FiberContext *g_current_fiber = NULL;
 #ifdef _WIN32
 static int g_main_thread_is_fiber = 0;
 #else
-static FiberContext *g_fiber_starting = NULL;
+/* No g_fiber_starting needed — entry function receives ctx as arg */
 #endif
 
 /* Helper: get FiberContext from a fiber object */
@@ -200,12 +195,11 @@ static VOID CALLBACK fiber_entry_win(LPVOID param) {
     SwitchToFiber(ctx->caller_fiber);
 }
 #else
-static void fiber_entry_unix(void) {
-    FiberContext *ctx = g_fiber_starting;
-    g_fiber_starting = NULL;
+static void fiber_entry_unix(void *param) {
+    FiberContext *ctx = (FiberContext *)param;
     ctx->result = ctx->block->as.block.func(ctx->block, 0, NULL);
     ctx->status = 2;
-    swapcontext(&ctx->fiber_ctx, &ctx->caller_ctx);
+    clay_fiber_swap(&ctx->fiber_regs, &ctx->caller_regs);
 }
 #endif
 
@@ -219,9 +213,8 @@ static ClayValue fiber_yield(ClayObject *self, int argc, ClayValue *argv) {
 #ifdef _WIN32
     SwitchToFiber(ctx->caller_fiber);
 #else
-    swapcontext(&ctx->fiber_ctx, &ctx->caller_ctx);
+    clay_fiber_swap(&ctx->fiber_regs, &ctx->caller_regs);
 #endif
-    /* Resumed — continue execution */
     return CLAY_NIL;
 }
 
@@ -257,11 +250,8 @@ static ClayValue fiber_new(ClayObject *self, int argc, ClayValue *argv) {
     ctx->os_fiber = CreateFiber(FIBER_STACK_SIZE, fiber_entry_win, ctx);
 #else
     ctx->c_stack = (char *)malloc(FIBER_STACK_SIZE);
-    getcontext(&ctx->fiber_ctx);
-    ctx->fiber_ctx.uc_stack.ss_sp = ctx->c_stack;
-    ctx->fiber_ctx.uc_stack.ss_size = FIBER_STACK_SIZE;
-    ctx->fiber_ctx.uc_link = NULL;
-    makecontext(&ctx->fiber_ctx, fiber_entry_unix, 0);
+    clay_fiber_init_stack(&ctx->fiber_regs, ctx->c_stack, FIBER_STACK_SIZE,
+                          fiber_entry_unix, ctx);
 #endif
 
     clay_set_slot(fiber, "_ctx", clay_int((intptr_t)ctx));
@@ -320,8 +310,7 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
     ctx->caller_fiber = GetCurrentFiber();
     SwitchToFiber(ctx->os_fiber);
 #else
-    if (ctx->status == 0) g_fiber_starting = ctx;
-    swapcontext(&ctx->caller_ctx, &ctx->fiber_ctx);
+    clay_fiber_swap(&ctx->caller_regs, &ctx->fiber_regs);
 #endif
 
     /* Back here after yield() or completion */
@@ -2141,8 +2130,3 @@ int bc_compile(BcCompiler *bc, AstNode *program) {
     emit_op(bc, CLAYVM_OP_HALT);
     return bc->had_error ? -1 : 0;
 }
-
-/* Close Apple deprecation suppression for ucontext */
-#if !defined(_WIN32) && defined(__APPLE__)
-#pragma GCC diagnostic pop
-#endif

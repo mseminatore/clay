@@ -89,7 +89,7 @@ add_library(clayvm STATIC ${VM_SOURCES})
 target_include_directories(clayvm PUBLIC src/vm/generated)
 
 # Compiler library (for testing — everything except main.c)
-add_library(clay_compiler_lib STATIC
+set(COMPILER_LIB_SOURCES
     src/compiler/lexer.c
     src/compiler/parser.c
     src/compiler/ast.c
@@ -97,6 +97,18 @@ add_library(clay_compiler_lib STATIC
     src/compiler/bc_compiler.c
     src/compiler/bricks.c
 )
+
+# Add assembly fiber context switching on Unix platforms
+if(NOT WIN32)
+    enable_language(ASM)
+    list(APPEND COMPILER_LIB_SOURCES
+        src/runtime/fiber_ctx.c
+        src/runtime/fiber_amd64.S
+        src/runtime/fiber_arm64.S
+    )
+endif()
+
+add_library(clay_compiler_lib STATIC ${COMPILER_LIB_SOURCES})
 target_include_directories(clay_compiler_lib PUBLIC src/compiler src/vm/generated src/runtime)
 target_compile_definitions(clay_compiler_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(clay_compiler_lib clayvm clay_runtime)
