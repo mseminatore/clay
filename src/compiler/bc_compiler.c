@@ -732,6 +732,10 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     memset(bc, 0, sizeof(*bc));
     bc->vm = vm;
 
+    /* Allocate dynamic chunks array */
+    bc->chunk_capacity = BC_INITIAL_CHUNKS;
+    bc->chunks = (BcChunk **)calloc((size_t)bc->chunk_capacity, sizeof(BcChunk *));
+
     /* Set global pointers for trampoline access */
     g_bc = bc;
     g_vm = vm;
@@ -1121,10 +1125,10 @@ static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
  * Returns the chunk_id, or -1 on error. */
 static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
                             BcCaptureList *captures, int is_method) {
-    if (bc->chunk_count >= BC_MAX_CHUNKS) {
-        fprintf(stderr, "clay: too many chunks (%d max)\n", BC_MAX_CHUNKS);
-        bc->had_error = 1;
-        return -1;
+    if (bc->chunk_count >= bc->chunk_capacity) {
+        bc->chunk_capacity *= 2;
+        bc->chunks = (BcChunk **)realloc(bc->chunks,
+            (size_t)bc->chunk_capacity * sizeof(BcChunk *));
     }
 
     int chunk_id = bc->chunk_count++;

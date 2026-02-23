@@ -11,9 +11,8 @@
 #include "native.h"
 
 #define BC_MAX_CODE   65536
-#define BC_MAX_GLOBALS 512
-#define BC_MAX_CHUNKS  512
 #define BC_CHUNK_CODE  4096
+#define BC_INITIAL_CHUNKS 64
 
 /* A compiled bytecode chunk (block or method body) */
 typedef struct {
@@ -45,13 +44,10 @@ typedef struct {
 
     clayvm_vm_t *vm;  /* VM to add constants to */
 
-    /* Global variable name tracking */
-    char *global_names[BC_MAX_GLOBALS];
-    int   global_count;
-
-    /* Bytecode chunks for blocks/methods (heap-allocated) */
-    BcChunk *chunks[BC_MAX_CHUNKS];
+    /* Bytecode chunks for blocks/methods (dynamically allocated) */
+    BcChunk **chunks;
     int     chunk_count;
+    int     chunk_capacity;
 
     /* Native function indices (pre-registered) */
     int native_send;      /* clay_send bridge */
