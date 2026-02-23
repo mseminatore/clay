@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "Clay programming language",
   "deps": {
-    "clay-stdlib": "github.com/mseminatore/clay-stdlib",
-    "clay-test": "github.com/mseminatore/clay-test"
+    "clay-stdlib": "github.com/mseminatore/clay-stdlib"
   }
 }
