@@ -551,6 +551,28 @@ File mkdir("output")
 File listDir("src")                  // array of filenames
 ```
 
+### Date and time
+
+```clay
+d = Date now()
+d toString() println()               // "2026-02-23 14:30:45"
+d year()                             // 2026
+d month()                            // 2 (1-12)
+d day()                              // 23 (1-31)
+d hour()                             // 14 (0-23)
+d minute()                           // 30 (0-59)
+d second()                           // 45 (0-59)
+d weekday()                          // 1 (0=Sun..6=Sat)
+d timestamp()                        // Unix epoch seconds
+
+// Create from timestamp
+d2 = Date fromTimestamp(1700000000)
+
+// strftime-style formatting
+d format("%A, %B %d, %Y") println()  // "Sunday, February 23, 2026"
+d format("%H:%M") println()          // "14:30"
+```
+
 ## Core Objects
 
 | Prototype | Methods |
@@ -568,6 +590,7 @@ File listDir("src")                  // array of filenames
 | File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` |
 | System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
+| Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 
 ## Generated C
 
