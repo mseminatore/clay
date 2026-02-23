@@ -629,6 +629,25 @@ f resume()     // 2
 f resume()     // 3 (final value)
 f isDone()     // true
 
+// Generator pattern — yield from inside loops
+counter = Fiber new({
+    i = 0
+    { i < 5 } whileTrue({
+        Fiber yield(i)
+        i = i + 1
+    })
+})
+counter resume()   // 0
+counter resume()   // 1
+counter resume()   // 2
+
+// Yield from array iteration
+items = Fiber new({
+    Array new() append(10) append(20) append(30) each({ |x| Fiber yield(x) })
+})
+items resume()     // 10
+items resume()     // 20
+
 // Two independent fibers
 a = Fiber new({ Fiber yield(10); 20 })
 b = Fiber new({ Fiber yield(30); 40 })
@@ -637,8 +656,6 @@ b resume()     // 30
 a resume()     // 20
 b resume()     // 40
 ```
-
-> **Note:** Fibers support yielding from top-level code within the fiber block. Yielding from inside `whileTrue`, `each`, or other C-level iterators is not yet supported.
 
 ## Core Objects
 

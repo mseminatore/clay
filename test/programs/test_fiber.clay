@@ -92,4 +92,51 @@ assert value(b resume() == 30, "fiber b final 30")
 // Test 9: Fiber type
 assert value(Fiber type() == "Fiber", "Fiber type is Fiber")
 
+// Test 10: Generator pattern — yield from inside whileTrue
+counter = Fiber new({
+    i = 0
+    { i < 5 } whileTrue({
+        Fiber yield(i)
+        i = i + 1
+    })
+})
+assert value(counter resume() == 0, "whileTrue yield 0")
+assert value(counter resume() == 1, "whileTrue yield 1")
+assert value(counter resume() == 2, "whileTrue yield 2")
+assert value(counter resume() == 3, "whileTrue yield 3")
+assert value(counter resume() == 4, "whileTrue yield 4")
+assert value(counter isDone() == false, "not done after last yield")
+counter resume()
+assert value(counter isDone() == true, "done after whileTrue exits")
+
+// Test 11: Yield from inside array each
+collector = Fiber new({
+    arr = Array new()
+    arr append(10)
+    arr append(20)
+    arr append(30)
+    arr each({ |item| Fiber yield(item) })
+})
+assert value(collector resume() == 10, "each yield 10")
+assert value(collector resume() == 20, "each yield 20")
+assert value(collector resume() == 30, "each yield 30")
+
+// Test 12: Yield from inside a method call
+Proto = Object clone {
+    count(n) {
+        i = 0
+        { i < n } whileTrue({
+            Fiber yield(i * 10)
+            i = i + 1
+        })
+    }
+}
+obj = Proto clone {}
+method_fiber = Fiber new({
+    obj count(3)
+})
+assert value(method_fiber resume() == 0, "method yield 0")
+assert value(method_fiber resume() == 10, "method yield 10")
+assert value(method_fiber resume() == 20, "method yield 20")
+
 (passed toString() + " passed, " + failed toString() + " failed") println()

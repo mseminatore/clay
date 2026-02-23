@@ -63,30 +63,24 @@ static ClayValue block_value(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
-    extern int g_fiber_yielding;
     ClayObject *body = CLAY_OBJ(argv[0]);
     ClayValue result = CLAY_NIL;
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
-        if (g_fiber_yielding) return CLAY_NIL;
         if (!CLAY_IS_TRUTHY(cond)) break;
         result = body->as.block.func(body, 0, NULL);
-        if (g_fiber_yielding) return CLAY_NIL;
     }
     return result;
 }
 
 static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
-    extern int g_fiber_yielding;
     ClayObject *body = CLAY_OBJ(argv[0]);
     ClayValue result = CLAY_NIL;
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
-        if (g_fiber_yielding) return CLAY_NIL;
         if (CLAY_IS_TRUTHY(cond)) break;
         result = body->as.block.func(body, 0, NULL);
-        if (g_fiber_yielding) return CLAY_NIL;
     }
     return result;
 }
