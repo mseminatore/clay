@@ -28,6 +28,10 @@ __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
 #else
 #include <unistd.h>
 #endif
+
+#ifdef CLAY_HAS_LINENOISE
+#include "linenoise.h"
+#endif
 #include "lexer.h"
 #include "parser.h"
 #include "codegen.h"
@@ -229,8 +233,41 @@ static int compile_c_file(const char *c_file, const char *output_name,
 #endif
     return system(cmd);
 }
-
+
 /* --- REPL --- */
+
+#ifdef CLAY_HAS_LINENOISE
+static void clay_completion(const char *buf, linenoiseCompletions *lc) {
+    static const char *builtins[] = {
+        "Object", "Number", "String", "Array", "Dict", "File",
+        "System", "Date", "Http", "Regex", "Fiber", "FFI", "Math",
+        "true", "false", "nil", "self", "super",
+        "import", "clone", "println", "print",
+        NULL
+    };
+    size_t len = strlen(buf);
+    for (int i = 0; builtins[i]; i++) {
+        if (strncmp(buf, builtins[i], len) == 0) {
+            linenoiseAddCompletion(lc, builtins[i]);
+        }
+    }
+}
+
+static const char *clay_history_path(void) {
+    static char path[1024];
+    if (path[0]) return path;
+    const char *home = getenv("HOME");
+    if (!home) home = ".";
+    snprintf(path, sizeof(path), "%s/.clay_history", home);
+    return path;
+}
+
+static void clay_linenoise_init(void) {
+    linenoiseSetCompletionCallback(clay_completion);
+    linenoiseHistorySetMaxLen(500);
+    linenoiseHistoryLoad(clay_history_path());
+}
+#endif
 
 /* Count unmatched braces/parens/brackets to detect multi-line input */
 static int count_open(const char *s) {
@@ -269,6 +306,10 @@ static int run_repl(const char *argv0) {
 
     printf("Clay REPL (type 'quit' or Ctrl+Z to exit)\n\n");
 
+#ifdef CLAY_HAS_LINENOISE
+    clay_linenoise_init();
+#endif
+
     /* Accumulated program */
     AstNode *accumulated = ast_new(NODE_PROGRAM, 1);
     nodelist_init(&accumulated->as.program.stmts);
@@ -282,54 +323,71 @@ static int run_repl(const char *argv0) {
     snprintf(exe_path, sizeof(exe_path), "%s/_clay_repl", clay_dir);
 #endif
 
-    char line_buf[4096];
+    char fgets_buf[4096];
     char input_buf[16384];
 
     while (1) {
         /* Read input (possibly multi-line) */
-        printf("clay> ");
-        fflush(stdout);
-
         input_buf[0] = '\0';
         int open_depth = 0;
         int first_line = 1;
 
         while (1) {
-            if (!fgets(line_buf, sizeof(line_buf), stdin)) {
-                /* EOF (Ctrl+Z on Windows, Ctrl+D on Unix) */
-                printf("\n");
-                goto cleanup;
+            char *line;
+#ifdef CLAY_HAS_LINENOISE
+            char *prompt = first_line ? "clay> " : "  ... ";
+            line = linenoise(prompt);
+            if (!line) { printf("\n"); goto cleanup; }
+#else
+            if (first_line) { printf("clay> "); fflush(stdout); }
+            if (!fgets(fgets_buf, sizeof(fgets_buf), stdin)) {
+                printf("\n"); goto cleanup;
             }
+            line = fgets_buf;
+#endif
 
             /* Check for quit */
             if (first_line) {
-                char *trimmed = line_buf;
+                char *trimmed = line;
                 while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
-                /* Strip trailing newline for comparison */
                 size_t tlen = strlen(trimmed);
                 while (tlen > 0 && (trimmed[tlen-1] == '\n' || trimmed[tlen-1] == '\r'))
                     tlen--;
-                if (tlen == 4 && strncmp(trimmed, "quit", 4) == 0) {
-                    goto cleanup;
-                }
-                if (tlen == 4 && strncmp(trimmed, "exit", 4) == 0) {
+                if ((tlen == 4 && strncmp(trimmed, "quit", 4) == 0) ||
+                    (tlen == 4 && strncmp(trimmed, "exit", 4) == 0)) {
+#ifdef CLAY_HAS_LINENOISE
+                    linenoiseFree(line);
+#endif
                     goto cleanup;
                 }
             }
 
             /* Append to input buffer */
-            if (strlen(input_buf) + strlen(line_buf) < sizeof(input_buf) - 1) {
-                strcat(input_buf, line_buf);
+            size_t ll = strlen(line);
+            if (strlen(input_buf) + ll < sizeof(input_buf) - 2) {
+                strcat(input_buf, line);
+                /* Ensure newline */
+                size_t cur = strlen(input_buf);
+                if (cur > 0 && input_buf[cur - 1] != '\n') {
+                    input_buf[cur] = '\n';
+                    input_buf[cur + 1] = '\0';
+                }
             }
 
-            open_depth += count_open(line_buf);
+#ifdef CLAY_HAS_LINENOISE
+            linenoiseFree(line);
+#endif
+
+            open_depth += count_open(input_buf);
             first_line = 0;
 
             if (open_depth <= 0) break;
 
+#ifndef CLAY_HAS_LINENOISE
             /* Multi-line continuation */
             printf("  ... ");
             fflush(stdout);
+#endif
         }
 
         /* Strip trailing whitespace */
@@ -340,6 +398,11 @@ static int run_repl(const char *argv0) {
         input_buf[ilen] = '\0';
 
         if (ilen == 0) continue; /* empty input */
+
+#ifdef CLAY_HAS_LINENOISE
+        linenoiseHistoryAdd(input_buf);
+        linenoiseHistorySave(clay_history_path());
+#endif
 
         /* Parse the new input */
         Parser parser;
@@ -590,38 +653,72 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
 
     printf("%s%sClay VM REPL%s v0.1 (type 'quit' or 'exit' to leave)\n",
            C(C_BOLD), C(C_CYAN), C(C_RESET));
+
+#ifdef CLAY_HAS_LINENOISE
+    clay_linenoise_init();
+#else
     printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
     fflush(stdout);
+#endif
 
-    char line[4096];
+    char line_buf[4096];  /* for fgets fallback */
     char input[16384];
     int input_len = 0;
+    int continuation = 0;
 
-    while (fgets(line, sizeof(line), stdin)) {
+    for (;;) {
+        char *line;
+#ifdef CLAY_HAS_LINENOISE
+        char *prompt = continuation ? "... " : ">>> ";
+        line = linenoise(prompt);
+        if (!line) break;  /* EOF / Ctrl-D */
+#else
+        if (!fgets(line_buf, sizeof(line_buf), stdin)) break;
+        line = line_buf;
+#endif
+
         /* Check for quit */
         char *trimmed = line;
         while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
-        if (strcmp(trimmed, "quit\n") == 0 || strcmp(trimmed, "exit\n") == 0 ||
-            strcmp(trimmed, "quit\r\n") == 0 || strcmp(trimmed, "exit\r\n") == 0) {
+        /* Strip trailing newline for comparison */
+        size_t tl = strlen(trimmed);
+        while (tl > 0 && (trimmed[tl-1] == '\n' || trimmed[tl-1] == '\r')) tl--;
+        if ((tl == 4 && strncmp(trimmed, "quit", 4) == 0) ||
+            (tl == 4 && strncmp(trimmed, "exit", 4) == 0)) {
+#ifdef CLAY_HAS_LINENOISE
+            linenoiseFree(line);
+#endif
             break;
         }
 
         /* Append to input buffer */
         size_t ll = strlen(line);
-        if (input_len + (int)ll < (int)sizeof(input) - 1) {
+        if (input_len + (int)ll < (int)sizeof(input) - 2) {
             memcpy(input + input_len, line, ll);
             input_len += (int)ll;
+            /* Ensure newline termination */
+            if (input_len > 0 && input[input_len - 1] != '\n') {
+                input[input_len++] = '\n';
+            }
             input[input_len] = '\0';
         }
+
+#ifdef CLAY_HAS_LINENOISE
+        linenoiseFree(line);
+#endif
 
         /* Track braces/parens for multi-line (string-aware) */
         int open = count_open(input);
 
         if (open > 0) {
+            continuation = 1;
+#ifndef CLAY_HAS_LINENOISE
             printf("%s...%s ", C(C_DIM), C(C_RESET));
             fflush(stdout);
+#endif
             continue;
         }
+        continuation = 0;
 
         /* Parse the input */
         Parser parser;
@@ -632,8 +729,10 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             fprintf(stderr, "%s%sclay: parse error%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             if (program) ast_free(program);
             input_len = 0;
+#ifndef CLAY_HAS_LINENOISE
             printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
             fflush(stdout);
+#endif
             continue;
         }
 
@@ -646,8 +745,10 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             fprintf(stderr, "clay: compilation error\n");
             ast_free(program);
             input_len = 0;
+#ifndef CLAY_HAS_LINENOISE
             printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
             fflush(stdout);
+#endif
             continue;
         }
 
@@ -710,9 +811,16 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         }
 
         ast_free(program);
+#ifdef CLAY_HAS_LINENOISE
+        /* Add completed input to history */
+        linenoiseHistoryAdd(input);
+        linenoiseHistorySave(clay_history_path());
+#endif
         input_len = 0;
+#ifndef CLAY_HAS_LINENOISE
         printf("%s>>>%s ", C(C_CYAN), C(C_RESET));
         fflush(stdout);
+#endif
     }
 
     printf("%sBye!%s\n", C(C_DIM), C(C_RESET));

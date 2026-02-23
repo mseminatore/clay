@@ -18,6 +18,10 @@ if(UNIX)
     # Ensure POSIX functions like strdup are declared with -std=c99
     add_compile_definitions(_POSIX_C_SOURCE=200809L)
 
+    # Build linenoise for REPL line editing (Unix only)
+    add_library(linenoise STATIC deps/linenoise/linenoise.c)
+    target_include_directories(linenoise PUBLIC deps/linenoise)
+
     # Optional OpenSSL for HTTPS support
     find_package(OpenSSL QUIET)
     if(OPENSSL_FOUND)
@@ -120,6 +124,11 @@ add_executable(clay_compiler
 target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime)
 target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(clay_compiler clay_compiler_lib)
+if(UNIX)
+    target_compile_definitions(clay_compiler PRIVATE CLAY_HAS_LINENOISE)
+    target_include_directories(clay_compiler PRIVATE deps/linenoise)
+    target_link_libraries(clay_compiler linenoise)
+endif()
 set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 
 # Test runner
