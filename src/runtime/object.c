@@ -141,9 +141,14 @@ int clay_has_slot(ClayObject *obj, const char *name) {
 }
 
 void clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func) {
+    clay_set_method_ctx(obj, name, func, NULL);
+}
+
+void clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func, void *context) {
     /* Allocate a ClayMethod struct to store the function pointer */
     ClayMethod *m = (ClayMethod *)malloc(sizeof(ClayMethod));
     m->func = func;
+    m->context = context;
 
     /* Remove old if exists */
     ht_value_t old;

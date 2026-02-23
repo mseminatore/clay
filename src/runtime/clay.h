@@ -47,6 +47,7 @@ typedef ClayValue (*ClayMethodFunc)(ClayObject *self, int argc, ClayValue *argv)
 /* Method entry stored in the methods table */
 typedef struct {
     ClayMethodFunc func;
+    void *context;       /* optional data for the method (used by BC compiler) */
 } ClayMethod;
 
 /*
@@ -135,7 +136,11 @@ void        clay_set_slot(ClayObject *obj, const char *name, ClayValue value);
 ClayValue   clay_get_slot(ClayObject *obj, const char *name);
 int         clay_has_slot(ClayObject *obj, const char *name);
 void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func);
+void        clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func, void *context);
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
+
+/* Context pointer set by dispatch before calling a method (for BC compiler) */
+extern void *clay_method_context;
 
 /* --- String interning --- */
 const char *clay_intern(const char *name);

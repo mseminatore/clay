@@ -3,6 +3,10 @@
  */
 #include "clay.h"
 
+/* Global method context pointer — set before calling a method function.
+ * Used by the BC compiler's generic dispatch to retrieve per-method data. */
+void *clay_method_context = NULL;
+
 /* --- Global method cache --- */
 #define METHOD_CACHE_SIZE 1024  /* must be power of 2 */
 #define METHOD_CACHE_MASK (METHOD_CACHE_SIZE - 1)
@@ -10,7 +14,7 @@
 typedef struct {
     HashTable      *methods;   /* methods table pointer (cache key part 1) */
     const char     *selector;  /* selector string (cache key part 2) */
-    ClayMethodFunc  func;      /* cached method function pointer */
+    ClayMethod     *method;    /* cached method struct */
 } MethodCacheEntry;
 
 static MethodCacheEntry method_cache[METHOD_CACHE_SIZE];
@@ -19,37 +23,55 @@ void clay_method_cache_clear(void) {
     memset(method_cache, 0, sizeof(method_cache));
 }
 
+/* Lookup returning full ClayMethod* (walks prototype chain) */
+static ClayMethod *lookup_method_full(ClayObject *obj, const char *name) {
+    ClayObject *cur = obj;
+    while (cur) {
+        if (cur->methods) {
+            ht_value_t val;
+            if (ht_lookup(cur->methods, name, &val)) {
+                return (ClayMethod *)val;
+            }
+        }
+        cur = cur->parent;
+    }
+    return NULL;
+}
+
 /* Cached method lookup — checks cache first, falls back to chain walk */
-static ClayMethodFunc cached_lookup(ClayObject *obj, const char *selector) {
+static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
     unsigned int idx = ((unsigned int)(uintptr_t)obj->methods ^
                         (unsigned int)(uintptr_t)selector) & METHOD_CACHE_MASK;
     MethodCacheEntry *entry = &method_cache[idx];
 
-    /* Fast pointer comparison — works when selector pointers are stable
-       (same TU string literals, or interned strings) */
     if (entry->methods == obj->methods && entry->selector == selector) {
-        return entry->func;
+        return entry->method;
     }
 
-    /* Cache miss — do full chain walk */
-    ClayMethodFunc func = clay_lookup_method(obj, selector);
-    if (func) {
+    ClayMethod *m = lookup_method_full(obj, selector);
+    if (m) {
         entry->methods  = obj->methods;
         entry->selector = selector;
-        entry->func     = func;
+        entry->method   = m;
     }
-    return func;
+    return m;
+}
+
+/* Helper: invoke method, setting context before call */
+static inline ClayValue invoke_method(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv) {
+    clay_method_context = m->context;
+    return m->func(obj, argc, argv);
 }
 
 ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv) {
     /* Handle tagged integer receivers — skip clone, lookup directly on Number */
     if (CLAY_IS_INT(receiver)) {
-        ClayMethodFunc func = cached_lookup(clay_Number, selector);
-        if (func) {
+        ClayMethod *m = cached_lookup_method(clay_Number, selector);
+        if (m) {
             /* Create wrapper only for the call (method needs self with _value) */
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
-            ClayValue result = func(wrapper, argc, argv);
+            ClayValue result = invoke_method(m, wrapper, argc, argv);
             clay_release(wrapper);
             return result;
         }
@@ -62,9 +84,9 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     /* Handle nil */
     if (CLAY_IS_NIL(receiver)) {
         if (clay_Nil) {
-            ClayMethodFunc func = cached_lookup(clay_Nil, selector);
-            if (func) {
-                return func(clay_Nil, argc, argv);
+            ClayMethod *m = cached_lookup_method(clay_Nil, selector);
+            if (m) {
+                return invoke_method(m, clay_Nil, argc, argv);
             }
         }
         char buf[128];
@@ -76,9 +98,9 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     /* Handle boolean singletons and regular objects */
     ClayObject *obj = CLAY_OBJ(receiver);
 
-    ClayMethodFunc func = cached_lookup(obj, selector);
-    if (func) {
-        return func(obj, argc, argv);
+    ClayMethod *m = cached_lookup_method(obj, selector);
+    if (m) {
+        return invoke_method(m, obj, argc, argv);
     }
 
     /* Slot access fallback: if a slot exists with this name, return its value */
@@ -87,7 +109,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     }
 
     /* Try doesNotUnderstand */
-    ClayMethodFunc dnu = clay_lookup_method(obj, "doesNotUnderstand");
+    ClayMethod *dnu = lookup_method_full(obj, "doesNotUnderstand");
     if (dnu) {
         ClayObject *sel_str = clay_string_new(selector);
         ClayObject *args_arr = clay_array_new();
@@ -95,7 +117,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             clay_array_append(args_arr, argv[i]);
         }
         ClayValue dnu_argv[2] = { CLAY_VAL(sel_str), CLAY_VAL(args_arr) };
-        ClayValue result = dnu(obj, 2, dnu_argv);
+        ClayValue result = invoke_method(dnu, obj, 2, dnu_argv);
         clay_release(sel_str);
         clay_release(args_arr);
         return result;
@@ -112,10 +134,10 @@ ClayValue clay_send_super(ClayValue receiver, ClayObject *defining_obj,
     /* Start method lookup from the parent of the defining prototype */
     ClayObject *start = defining_obj ? defining_obj->parent : NULL;
     if (start) {
-        ClayMethodFunc func = clay_lookup_method(start, selector);
-        if (func) {
+        ClayMethod *m = lookup_method_full(start, selector);
+        if (m) {
             ClayObject *self = CLAY_OBJ(receiver);
-            return func(self, argc, argv);
+            return invoke_method(m, self, argc, argv);
         }
     }
     char buf[128];

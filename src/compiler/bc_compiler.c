@@ -124,9 +124,11 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     return retval;
 }
 
-/* --- Method trampolines ---
- * Methods need unique ClayMethodFunc pointers. We generate a fixed pool
- * of trampoline functions, each with a unique index.
+/* --- Method dispatch via context ---
+ * Instead of generating unique trampoline functions per method, we use a
+ * single dispatch function. The per-method data (chunk_id, param_count,
+ * defining_obj) is stored as a heap-allocated MethodSlot passed via the
+ * ClayMethod context pointer (set by dispatch.c before calling).
  */
 
 typedef struct {
@@ -135,13 +137,30 @@ typedef struct {
     ClayObject *defining_obj; /* prototype where this method was defined */
 } MethodSlot;
 
-static MethodSlot g_method_slots[BC_MAX_METHOD_SLOTS];
+/* Dynamic array of method slots (heap-allocated, grows as needed) */
+static MethodSlot **g_method_slots = NULL;
 static int g_method_slot_count = 0;
+static int g_method_slot_capacity = 0;
 
-static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, ClayValue *argv) {
-    if (!g_bc || !g_vm || slot_index < 0 || slot_index >= g_method_slot_count) return CLAY_NIL;
+static int alloc_method_slot(void) {
+    if (g_method_slot_count >= g_method_slot_capacity) {
+        int new_cap = g_method_slot_capacity == 0 ? 64 : g_method_slot_capacity * 2;
+        g_method_slots = (MethodSlot **)realloc(g_method_slots, sizeof(MethodSlot *) * (size_t)new_cap);
+        g_method_slot_capacity = new_cap;
+    }
+    MethodSlot *ms = (MethodSlot *)malloc(sizeof(MethodSlot));
+    ms->chunk_id = -1;
+    ms->param_count = 0;
+    ms->defining_obj = NULL;
+    g_method_slots[g_method_slot_count] = ms;
+    return g_method_slot_count++;
+}
 
-    MethodSlot *ms = &g_method_slots[slot_index];
+/* Single dispatch function for all BC-compiled methods.
+ * Reads the MethodSlot from clay_method_context (set by dispatch.c). */
+static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv) {
+    MethodSlot *ms = (MethodSlot *)clay_method_context;
+    if (!g_bc || !g_vm || !ms) return CLAY_NIL;
     if (ms->chunk_id < 0 || ms->chunk_id >= g_bc->chunk_count) return CLAY_NIL;
 
     BcChunk *chunk = g_bc->chunks[ms->chunk_id];
@@ -240,144 +259,6 @@ static ClayValue bc_method_dispatch(int slot_index, ClayObject *self, int argc, 
 
     return retval;
 }
-
-/* Generate unique trampoline functions via macro */
-#define METHOD_TRAMP(N) \
-    static ClayValue bc_mtramp_##N(ClayObject *s, int ac, ClayValue *av) { \
-        return bc_method_dispatch(N, s, ac, av); \
-    }
-
-METHOD_TRAMP(0)  METHOD_TRAMP(1)  METHOD_TRAMP(2)  METHOD_TRAMP(3)
-METHOD_TRAMP(4)  METHOD_TRAMP(5)  METHOD_TRAMP(6)  METHOD_TRAMP(7)
-METHOD_TRAMP(8)  METHOD_TRAMP(9)  METHOD_TRAMP(10) METHOD_TRAMP(11)
-METHOD_TRAMP(12) METHOD_TRAMP(13) METHOD_TRAMP(14) METHOD_TRAMP(15)
-METHOD_TRAMP(16) METHOD_TRAMP(17) METHOD_TRAMP(18) METHOD_TRAMP(19)
-METHOD_TRAMP(20) METHOD_TRAMP(21) METHOD_TRAMP(22) METHOD_TRAMP(23)
-METHOD_TRAMP(24) METHOD_TRAMP(25) METHOD_TRAMP(26) METHOD_TRAMP(27)
-METHOD_TRAMP(28) METHOD_TRAMP(29) METHOD_TRAMP(30) METHOD_TRAMP(31)
-METHOD_TRAMP(32) METHOD_TRAMP(33) METHOD_TRAMP(34) METHOD_TRAMP(35)
-METHOD_TRAMP(36) METHOD_TRAMP(37) METHOD_TRAMP(38) METHOD_TRAMP(39)
-METHOD_TRAMP(40) METHOD_TRAMP(41) METHOD_TRAMP(42) METHOD_TRAMP(43)
-METHOD_TRAMP(44) METHOD_TRAMP(45) METHOD_TRAMP(46) METHOD_TRAMP(47)
-METHOD_TRAMP(48) METHOD_TRAMP(49) METHOD_TRAMP(50) METHOD_TRAMP(51)
-METHOD_TRAMP(52) METHOD_TRAMP(53) METHOD_TRAMP(54) METHOD_TRAMP(55)
-METHOD_TRAMP(56) METHOD_TRAMP(57) METHOD_TRAMP(58) METHOD_TRAMP(59)
-METHOD_TRAMP(60) METHOD_TRAMP(61) METHOD_TRAMP(62) METHOD_TRAMP(63)
-METHOD_TRAMP(64)  METHOD_TRAMP(65)  METHOD_TRAMP(66)  METHOD_TRAMP(67)
-METHOD_TRAMP(68)  METHOD_TRAMP(69)  METHOD_TRAMP(70)  METHOD_TRAMP(71)
-METHOD_TRAMP(72)  METHOD_TRAMP(73)  METHOD_TRAMP(74)  METHOD_TRAMP(75)
-METHOD_TRAMP(76)  METHOD_TRAMP(77)  METHOD_TRAMP(78)  METHOD_TRAMP(79)
-METHOD_TRAMP(80)  METHOD_TRAMP(81)  METHOD_TRAMP(82)  METHOD_TRAMP(83)
-METHOD_TRAMP(84)  METHOD_TRAMP(85)  METHOD_TRAMP(86)  METHOD_TRAMP(87)
-METHOD_TRAMP(88)  METHOD_TRAMP(89)  METHOD_TRAMP(90)  METHOD_TRAMP(91)
-METHOD_TRAMP(92)  METHOD_TRAMP(93)  METHOD_TRAMP(94)  METHOD_TRAMP(95)
-METHOD_TRAMP(96)  METHOD_TRAMP(97)  METHOD_TRAMP(98)  METHOD_TRAMP(99)
-METHOD_TRAMP(100) METHOD_TRAMP(101) METHOD_TRAMP(102) METHOD_TRAMP(103)
-METHOD_TRAMP(104) METHOD_TRAMP(105) METHOD_TRAMP(106) METHOD_TRAMP(107)
-METHOD_TRAMP(108) METHOD_TRAMP(109) METHOD_TRAMP(110) METHOD_TRAMP(111)
-METHOD_TRAMP(112) METHOD_TRAMP(113) METHOD_TRAMP(114) METHOD_TRAMP(115)
-METHOD_TRAMP(116) METHOD_TRAMP(117) METHOD_TRAMP(118) METHOD_TRAMP(119)
-METHOD_TRAMP(120) METHOD_TRAMP(121) METHOD_TRAMP(122) METHOD_TRAMP(123)
-METHOD_TRAMP(124) METHOD_TRAMP(125) METHOD_TRAMP(126) METHOD_TRAMP(127)
-METHOD_TRAMP(128) METHOD_TRAMP(129) METHOD_TRAMP(130) METHOD_TRAMP(131)
-METHOD_TRAMP(132) METHOD_TRAMP(133) METHOD_TRAMP(134) METHOD_TRAMP(135)
-METHOD_TRAMP(136) METHOD_TRAMP(137) METHOD_TRAMP(138) METHOD_TRAMP(139)
-METHOD_TRAMP(140) METHOD_TRAMP(141) METHOD_TRAMP(142) METHOD_TRAMP(143)
-METHOD_TRAMP(144) METHOD_TRAMP(145) METHOD_TRAMP(146) METHOD_TRAMP(147)
-METHOD_TRAMP(148) METHOD_TRAMP(149) METHOD_TRAMP(150) METHOD_TRAMP(151)
-METHOD_TRAMP(152) METHOD_TRAMP(153) METHOD_TRAMP(154) METHOD_TRAMP(155)
-METHOD_TRAMP(156) METHOD_TRAMP(157) METHOD_TRAMP(158) METHOD_TRAMP(159)
-METHOD_TRAMP(160) METHOD_TRAMP(161) METHOD_TRAMP(162) METHOD_TRAMP(163)
-METHOD_TRAMP(164) METHOD_TRAMP(165) METHOD_TRAMP(166) METHOD_TRAMP(167)
-METHOD_TRAMP(168) METHOD_TRAMP(169) METHOD_TRAMP(170) METHOD_TRAMP(171)
-METHOD_TRAMP(172) METHOD_TRAMP(173) METHOD_TRAMP(174) METHOD_TRAMP(175)
-METHOD_TRAMP(176) METHOD_TRAMP(177) METHOD_TRAMP(178) METHOD_TRAMP(179)
-METHOD_TRAMP(180) METHOD_TRAMP(181) METHOD_TRAMP(182) METHOD_TRAMP(183)
-METHOD_TRAMP(184) METHOD_TRAMP(185) METHOD_TRAMP(186) METHOD_TRAMP(187)
-METHOD_TRAMP(188) METHOD_TRAMP(189) METHOD_TRAMP(190) METHOD_TRAMP(191)
-METHOD_TRAMP(192) METHOD_TRAMP(193) METHOD_TRAMP(194) METHOD_TRAMP(195)
-METHOD_TRAMP(196) METHOD_TRAMP(197) METHOD_TRAMP(198) METHOD_TRAMP(199)
-METHOD_TRAMP(200) METHOD_TRAMP(201) METHOD_TRAMP(202) METHOD_TRAMP(203)
-METHOD_TRAMP(204) METHOD_TRAMP(205) METHOD_TRAMP(206) METHOD_TRAMP(207)
-METHOD_TRAMP(208) METHOD_TRAMP(209) METHOD_TRAMP(210) METHOD_TRAMP(211)
-METHOD_TRAMP(212) METHOD_TRAMP(213) METHOD_TRAMP(214) METHOD_TRAMP(215)
-METHOD_TRAMP(216) METHOD_TRAMP(217) METHOD_TRAMP(218) METHOD_TRAMP(219)
-METHOD_TRAMP(220) METHOD_TRAMP(221) METHOD_TRAMP(222) METHOD_TRAMP(223)
-METHOD_TRAMP(224) METHOD_TRAMP(225) METHOD_TRAMP(226) METHOD_TRAMP(227)
-METHOD_TRAMP(228) METHOD_TRAMP(229) METHOD_TRAMP(230) METHOD_TRAMP(231)
-METHOD_TRAMP(232) METHOD_TRAMP(233) METHOD_TRAMP(234) METHOD_TRAMP(235)
-METHOD_TRAMP(236) METHOD_TRAMP(237) METHOD_TRAMP(238) METHOD_TRAMP(239)
-METHOD_TRAMP(240) METHOD_TRAMP(241) METHOD_TRAMP(242) METHOD_TRAMP(243)
-METHOD_TRAMP(244) METHOD_TRAMP(245) METHOD_TRAMP(246) METHOD_TRAMP(247)
-METHOD_TRAMP(248) METHOD_TRAMP(249) METHOD_TRAMP(250) METHOD_TRAMP(251)
-METHOD_TRAMP(252) METHOD_TRAMP(253) METHOD_TRAMP(254) METHOD_TRAMP(255)
-
-static ClayMethodFunc g_method_trampoline_table[] = {
-    bc_mtramp_0,  bc_mtramp_1,  bc_mtramp_2,  bc_mtramp_3,
-    bc_mtramp_4,  bc_mtramp_5,  bc_mtramp_6,  bc_mtramp_7,
-    bc_mtramp_8,  bc_mtramp_9,  bc_mtramp_10, bc_mtramp_11,
-    bc_mtramp_12, bc_mtramp_13, bc_mtramp_14, bc_mtramp_15,
-    bc_mtramp_16, bc_mtramp_17, bc_mtramp_18, bc_mtramp_19,
-    bc_mtramp_20, bc_mtramp_21, bc_mtramp_22, bc_mtramp_23,
-    bc_mtramp_24, bc_mtramp_25, bc_mtramp_26, bc_mtramp_27,
-    bc_mtramp_28, bc_mtramp_29, bc_mtramp_30, bc_mtramp_31,
-    bc_mtramp_32, bc_mtramp_33, bc_mtramp_34, bc_mtramp_35,
-    bc_mtramp_36, bc_mtramp_37, bc_mtramp_38, bc_mtramp_39,
-    bc_mtramp_40, bc_mtramp_41, bc_mtramp_42, bc_mtramp_43,
-    bc_mtramp_44, bc_mtramp_45, bc_mtramp_46, bc_mtramp_47,
-    bc_mtramp_48, bc_mtramp_49, bc_mtramp_50, bc_mtramp_51,
-    bc_mtramp_52, bc_mtramp_53, bc_mtramp_54, bc_mtramp_55,
-    bc_mtramp_56, bc_mtramp_57, bc_mtramp_58, bc_mtramp_59,
-    bc_mtramp_60, bc_mtramp_61, bc_mtramp_62, bc_mtramp_63,
-    bc_mtramp_64,  bc_mtramp_65,  bc_mtramp_66,  bc_mtramp_67,
-    bc_mtramp_68,  bc_mtramp_69,  bc_mtramp_70,  bc_mtramp_71,
-    bc_mtramp_72,  bc_mtramp_73,  bc_mtramp_74,  bc_mtramp_75,
-    bc_mtramp_76,  bc_mtramp_77,  bc_mtramp_78,  bc_mtramp_79,
-    bc_mtramp_80,  bc_mtramp_81,  bc_mtramp_82,  bc_mtramp_83,
-    bc_mtramp_84,  bc_mtramp_85,  bc_mtramp_86,  bc_mtramp_87,
-    bc_mtramp_88,  bc_mtramp_89,  bc_mtramp_90,  bc_mtramp_91,
-    bc_mtramp_92,  bc_mtramp_93,  bc_mtramp_94,  bc_mtramp_95,
-    bc_mtramp_96,  bc_mtramp_97,  bc_mtramp_98,  bc_mtramp_99,
-    bc_mtramp_100, bc_mtramp_101, bc_mtramp_102, bc_mtramp_103,
-    bc_mtramp_104, bc_mtramp_105, bc_mtramp_106, bc_mtramp_107,
-    bc_mtramp_108, bc_mtramp_109, bc_mtramp_110, bc_mtramp_111,
-    bc_mtramp_112, bc_mtramp_113, bc_mtramp_114, bc_mtramp_115,
-    bc_mtramp_116, bc_mtramp_117, bc_mtramp_118, bc_mtramp_119,
-    bc_mtramp_120, bc_mtramp_121, bc_mtramp_122, bc_mtramp_123,
-    bc_mtramp_124, bc_mtramp_125, bc_mtramp_126, bc_mtramp_127,
-    bc_mtramp_128, bc_mtramp_129, bc_mtramp_130, bc_mtramp_131,
-    bc_mtramp_132, bc_mtramp_133, bc_mtramp_134, bc_mtramp_135,
-    bc_mtramp_136, bc_mtramp_137, bc_mtramp_138, bc_mtramp_139,
-    bc_mtramp_140, bc_mtramp_141, bc_mtramp_142, bc_mtramp_143,
-    bc_mtramp_144, bc_mtramp_145, bc_mtramp_146, bc_mtramp_147,
-    bc_mtramp_148, bc_mtramp_149, bc_mtramp_150, bc_mtramp_151,
-    bc_mtramp_152, bc_mtramp_153, bc_mtramp_154, bc_mtramp_155,
-    bc_mtramp_156, bc_mtramp_157, bc_mtramp_158, bc_mtramp_159,
-    bc_mtramp_160, bc_mtramp_161, bc_mtramp_162, bc_mtramp_163,
-    bc_mtramp_164, bc_mtramp_165, bc_mtramp_166, bc_mtramp_167,
-    bc_mtramp_168, bc_mtramp_169, bc_mtramp_170, bc_mtramp_171,
-    bc_mtramp_172, bc_mtramp_173, bc_mtramp_174, bc_mtramp_175,
-    bc_mtramp_176, bc_mtramp_177, bc_mtramp_178, bc_mtramp_179,
-    bc_mtramp_180, bc_mtramp_181, bc_mtramp_182, bc_mtramp_183,
-    bc_mtramp_184, bc_mtramp_185, bc_mtramp_186, bc_mtramp_187,
-    bc_mtramp_188, bc_mtramp_189, bc_mtramp_190, bc_mtramp_191,
-    bc_mtramp_192, bc_mtramp_193, bc_mtramp_194, bc_mtramp_195,
-    bc_mtramp_196, bc_mtramp_197, bc_mtramp_198, bc_mtramp_199,
-    bc_mtramp_200, bc_mtramp_201, bc_mtramp_202, bc_mtramp_203,
-    bc_mtramp_204, bc_mtramp_205, bc_mtramp_206, bc_mtramp_207,
-    bc_mtramp_208, bc_mtramp_209, bc_mtramp_210, bc_mtramp_211,
-    bc_mtramp_212, bc_mtramp_213, bc_mtramp_214, bc_mtramp_215,
-    bc_mtramp_216, bc_mtramp_217, bc_mtramp_218, bc_mtramp_219,
-    bc_mtramp_220, bc_mtramp_221, bc_mtramp_222, bc_mtramp_223,
-    bc_mtramp_224, bc_mtramp_225, bc_mtramp_226, bc_mtramp_227,
-    bc_mtramp_228, bc_mtramp_229, bc_mtramp_230, bc_mtramp_231,
-    bc_mtramp_232, bc_mtramp_233, bc_mtramp_234, bc_mtramp_235,
-    bc_mtramp_236, bc_mtramp_237, bc_mtramp_238, bc_mtramp_239,
-    bc_mtramp_240, bc_mtramp_241, bc_mtramp_242, bc_mtramp_243,
-    bc_mtramp_244, bc_mtramp_245, bc_mtramp_246, bc_mtramp_247,
-    bc_mtramp_248, bc_mtramp_249, bc_mtramp_250, bc_mtramp_251,
-    bc_mtramp_252, bc_mtramp_253, bc_mtramp_254, bc_mtramp_255,
-};
 
 /* --- Bytecode emission helpers --- */
 
@@ -774,12 +655,13 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
     const char *name = clay_string_data((ClayObject *)name_val.as.obj);
     ClayObject *obj = (ClayObject *)obj_val.as.obj;
 
-    if (slot_idx >= 0 && slot_idx < BC_MAX_METHOD_SLOTS) {
-        g_method_slots[slot_idx].defining_obj = obj;
-        clay_set_method(obj, name, g_method_trampoline_table[slot_idx]);
+    if (slot_idx >= 0 && slot_idx < g_method_slot_count) {
+        MethodSlot *ms = g_method_slots[slot_idx];
+        ms->defining_obj = obj;
+        clay_set_method_ctx(obj, name, bc_method_dispatch, ms);
     } else {
-        fprintf(stderr, "clay: method trampoline limit exceeded (%d/%d)\n",
-                slot_idx, BC_MAX_METHOD_SLOTS);
+        fprintf(stderr, "clay: invalid method slot index (%d/%d)\n",
+                slot_idx, g_method_slot_count);
     }
 
     clayvm_vm_push(vm, obj_val);
@@ -1690,17 +1572,14 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     int chunk_id = bc_compile_chunk(bc,
                         &member->as.method_def.body,
                         &member->as.method_def.params, NULL, 1);
-                    if (chunk_id < 0 || g_method_slot_count >= BC_MAX_METHOD_SLOTS) {
-                        if (g_method_slot_count >= BC_MAX_METHOD_SLOTS) {
-                            fprintf(stderr, "clay: too many methods (%d max)\n", BC_MAX_METHOD_SLOTS);
-                        }
+                    if (chunk_id < 0) {
                         continue;
                     }
 
-                    /* Register in method slot table */
-                    int slot_idx = g_method_slot_count++;
-                    g_method_slots[slot_idx].chunk_id = chunk_id;
-                    g_method_slots[slot_idx].param_count = member->as.method_def.params.count;
+                    /* Register in method slot table (dynamic, no limit) */
+                    int slot_idx = alloc_method_slot();
+                    g_method_slots[slot_idx]->chunk_id = chunk_id;
+                    g_method_slots[slot_idx]->param_count = member->as.method_def.params.count;
 
                     /* Emit: DUP obj, push name, push slot_idx, call set_method */
                     emit_op(bc, CLAYVM_OP_DUP);
