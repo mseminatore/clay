@@ -1,6 +1,8 @@
 # Clay
 
-Clay is a prototype-based, pure object-oriented programming language that compiles to human-readable C. Everything is an object. Objects communicate via message passing. New objects are created by cloning existing ones and adding or modifying slots and methods.
+Clay is a prototype-based, pure object-oriented programming language. Everything is an object. Objects communicate via message passing. New objects are created by cloning existing ones and adding or modifying slots and methods.
+
+Clay programs run instantly via an embedded bytecode VM, or can be compiled to human-readable C for native binaries.
 
 ## Building
 
@@ -106,12 +108,15 @@ The classic REPL (`clay --repl`) accumulates source and recompiles to C on each 
 ### Examples
 
 ```sh
-# Compile and run
+# Run directly (bytecode VM, default)
 clay hello.clay
+
+# Compile to C and build a native binary
+clay -c hello.clay
 ./hello
 
 # Inspect the generated C
-clay -c hello.clay
+clay -c -o hello.c hello.clay
 cat hello.c
 
 # Dump the AST
@@ -177,6 +182,33 @@ p toString() println()   // (3, 4)
 ```
 
 Inside methods, bare identifiers are looked up as slots on `self`. Parameters shadow slot names.
+
+### Super
+
+Use `super` to call the parent prototype's version of a method:
+
+```clay
+Animal = Object clone {
+    speak() { "..." }
+}
+
+Dog = Animal clone {
+    speak() { super speak() + " Woof!" }
+}
+
+Dog speak() println()   // ... Woof!
+```
+
+Super works correctly through multi-level chains:
+
+```clay
+A = Object clone { greet() { "A" } }
+B = A clone { greet() { super greet() + "B" } }
+C = B clone { greet() { super greet() + "C" } }
+C greet() println()   // ABC
+```
+
+`super` dispatches from the prototype where the method was *defined*, not from `self`, so it is safe with deeply cloned instances.
 
 ### Slot access
 
@@ -336,6 +368,16 @@ arr join(", ")                // "1, 2, 3"
 arr contains(2)               // true
 arr indexOf(2)                // 1
 arr removeAt(0)               // removes first element
+arr flatten                   // flattens nested arrays
+arr sum                       // sum of numeric elements
+arr min                       // minimum value
+arr max                       // maximum value
+arr avg                       // average value
+arr unique                    // unique elements
+
+// Equality (element-wise comparison)
+[1, 2, 3] == [1, 2, 3]       // true
+[1, 2] != [1, 3]             // true
 ```
 
 ### Numbers
@@ -404,6 +446,11 @@ d each({ |key, value|
 d keys() println()          // [name]
 d values() println()        // [Clay]
 d toString() println()      // {name: Clay}
+
+// Equality (key-value comparison)
+d1 = Dict clone(); d1 set("a", 1)
+d2 = Dict clone(); d2 set("a", 1)
+d1 == d2                    // true
 ```
 
 ### Error handling
@@ -442,21 +489,85 @@ Proxy = Object clone {
 }
 ```
 
+### Reflection
+
+```clay
+Dog = Object clone { _name = "Dog" }
+Poodle = Dog clone {}
+
+Poodle parent == Dog          // true (walk the prototype chain)
+Poodle hasSlot("_name")       // true
+Poodle hasMethod("clone")     // true (inherited from Object)
+Poodle methods()              // array of method names
+Poodle slots()                // array of slot names
+Poodle type()                 // "Dog" (from _name slot)
+```
+
+### System
+
+The `System` object provides OS-level operations:
+
+```clay
+System platform()             // "windows", "macos", or "linux"
+System env("PATH")            // environment variable (nil if unset)
+System args()                 // command-line arguments as array
+System clock()                // monotonic clock in seconds (float)
+System exit(0)                // exit process with code
+
+// Memory diagnostics
+System allocCount()           // total objects allocated
+System deallocCount()         // total objects freed
+```
+
+### FFI (Foreign Function Interface)
+
+Load and call functions from shared libraries (`.dll`, `.so`, `.dylib`). Plugin functions must match the Clay method signature: `ClayValue fn(ClayObject *self, int argc, ClayValue *argv)`.
+
+```clay
+lib = FFI load("./my_plugin.dll")  // or .so / .dylib
+result = lib call("my_function", arg1, arg2)
+lib close()
+```
+
+### File operations
+
+```clay
+// Read/write
+content = File read("data.txt")
+lines = File readLines("data.txt")
+File write("out.txt", "hello")
+File append("out.txt", "\nworld")
+
+// Query
+File exists("data.txt")              // true/false
+File size("data.txt")                // size in bytes
+File isFile("data.txt")              // true
+File isDir("src")                    // true
+
+// Modify
+File rename("old.txt", "new.txt")
+File delete("temp.txt")
+File mkdir("output")
+File listDir("src")                  // array of filenames
+```
+
 ## Core Objects
 
 | Prototype | Methods |
 |-----------|---------|
-| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `doesNotUnderstand(name, args)` |
+| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `hasMethod(name)`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `print()`, `println()`, `toString()` |
-| Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `toString()` |
+| Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
 | Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
 | Error | `message()`, `type()`, `toString()` |
-| Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `toString()` |
+| Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
 | Console | `readLine()`, `prompt(msg)` |
-| File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)` |
+| File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` |
+| System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
+| FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 
 ## Generated C
 
@@ -488,9 +599,11 @@ The generated C includes `#line` directives mapping back to the `.clay` source, 
                                                                    Clay Runtime (bridged)
 ```
 
-**Compile mode** (`clay file.clay`): generates human-readable C with `#line` directives, invokes the system C compiler, and links the Clay runtime as a static library.
+**VM mode** (`clay file.clay`): compiles to bytecode and executes instantly in the embedded bytecode VM. The VM bridges to the same Clay runtime via native functions, so all core objects and methods work identically.
 
-**VM REPL mode** (`clay` or `clay --vm-repl`): compiles expressions to bytecode and executes them instantly in an embedded bytecode VM. The VM bridges to the same Clay runtime via native functions, so all core objects and methods work identically.
+**C compile mode** (`clay -c file.clay`): generates human-readable C with `#line` directives, invokes the system C compiler, and links the Clay runtime as a static library.
+
+**VM REPL mode** (`clay` or `clay --vm-repl`): interactive REPL that compiles expressions to bytecode and evaluates them instantly.
 
 ## Bricks (Package Manager)
 
@@ -533,6 +646,27 @@ import("utils.clay")  // regular file import (unchanged)
 
 Brick resolution: reads `bricks/<name>/brick.json` to find the `main` entry point. Falls back to `bricks/<name>/src/main.clay` if no manifest exists.
 
+### Monorepo bricks
+
+A single Git repository can contain multiple bricks (a "monorepo"). Import sub-bricks using slash-separated paths:
+
+```clay
+import("clay-stdlib/clay-collections")   // sub-brick inside clay-stdlib
+import("clay-stdlib/clay-json")          // another sub-brick
+```
+
+In `brick.json`, declare monorepo dependencies with `#sub-brick` syntax:
+
+```json
+{
+  "deps": {
+    "clay-stdlib/clay-collections": "github.com/mseminatore/clay-stdlib#clay-collections"
+  }
+}
+```
+
+Sub-bricks resolve to `bricks/<repo>/<sub-brick>/brick.json`.
+
 ### Publishing a brick
 
 Any Git repository with a `brick.json` is a valid brick. To publish:
@@ -561,6 +695,7 @@ Clay ships with several bricks in `examples/bricks/`:
 
 | Brick | Description |
 |-------|-------------|
+| **clay-stdlib** | Standard library monorepo: bundles all bricks below plus `Assert`, `Time`, and `MathUtil` utilities |
 | **clay-test** | Testing framework with `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
 | **clay-collections** | Set, Stack, Queue, Range data structures |
 | **clay-functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
@@ -572,17 +707,23 @@ Clay ships with several bricks in `examples/bricks/`:
 | **clay-log** | `Log` structured logging: `debug`/`info`/`warn`/`error` levels with timestamps, prefixes, and level filtering |
 | **clay-iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
 
-To use a bundled brick, copy it into your project's `bricks/` directory:
+Install the standard library (includes all bricks):
 
 ```sh
-mkdir -p bricks
-cp -r path/to/clay/examples/bricks/clay-test bricks/
+clay bricks add github.com/mseminatore/clay-stdlib
 ```
 
-Then import by name:
+Then import individual sub-bricks:
 
 ```clay
-import("clay-test")
+import("clay-stdlib/clay-collections")
+import("clay-stdlib/clay-json")
+```
+
+Or import everything:
+
+```clay
+import("clay-stdlib")
 ```
 
 ## Dependencies
