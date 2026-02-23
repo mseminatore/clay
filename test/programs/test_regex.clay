@@ -1,0 +1,75 @@
+// test_regex.clay -- Test Regex prototype and String regex methods
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Regex match - basic
+assert value(Regex match("hello world", "\\w+") == "hello", "match word")
+assert value(Regex match("abc123", "\\d+") == "123", "match digits")
+assert value(Regex match("hello", "\\d+") == nil, "no match returns nil")
+
+// Regex match - character classes
+assert value(Regex match("abc123", "[a-z]+") == "abc", "match lowercase")
+assert value(Regex match("ABC123", "[A-Z]+") == "ABC", "match uppercase")
+assert value(Regex match("hello world", "[a-z ]+") == "hello world", "match with space in class")
+
+// Regex match - dot
+assert value(Regex match("abc", "a.c") == "abc", "dot matches any char")
+
+// Regex match - anchors
+assert value(Regex match("hello", "^hello$") == "hello", "anchored match")
+assert value(Regex match("hello world", "^hello$") == nil, "anchored no match")
+
+// Regex match - quantifiers
+assert value(Regex match("aabbb", "a+b+") == "aabbb", "plus quantifier")
+assert value(Regex match("ac", "ab?c") == "ac", "question quantifier (0)")
+assert value(Regex match("abc", "ab?c") == "abc", "question quantifier (1)")
+assert value(Regex match("ab", "a.*b") == "ab", "star quantifier")
+
+// Regex match - alternation
+assert value(Regex match("cat", "cat|dog") == "cat", "alternation first")
+assert value(Regex match("dog", "cat|dog") == "dog", "alternation second")
+
+// Regex match - shorthand classes
+assert value(Regex match("abc 123", "\\s") == " ", "whitespace shorthand")
+
+// Regex test
+assert value(Regex test("abc123", "\\d+") == true, "test true")
+assert value(Regex test("abcdef", "\\d+") == false, "test false")
+assert value(Regex test("hello", "^hello$") == true, "test anchored true")
+assert value(Regex test("hello world", "^hello$") == false, "test anchored false")
+
+// Regex replace
+assert value(Regex replace("foo123bar", "\\d+", "X") == "fooXbar", "replace digits")
+assert value(Regex replace("a1b2c3", "\\d", "X") == "aXbXcX", "replace all digits")
+assert value(Regex replace("hello", "\\d+", "X") == "hello", "replace no match")
+
+// Regex find
+r = Regex find("a1 b2 c3", "\\d+")
+assert value(r size() == 3, "find count")
+assert value(r at(0) == "1", "find first")
+assert value(r at(1) == "2", "find second")
+assert value(r at(2) == "3", "find third")
+
+r2 = Regex find("hello", "\\d+")
+assert value(r2 size() == 0, "find no matches")
+
+// String match method
+assert value("hello world" match("\\w+") == "hello", "string match")
+assert value("abc123" match("\\d+") == "123", "string match digits")
+assert value("hello" match("\\d+") == nil, "string match nil")
+
+// String test method
+assert value("abc123" test("\\d+") == true, "string test true")
+assert value("abcdef" test("\\d+") == false, "string test false")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

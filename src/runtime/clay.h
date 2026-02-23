@@ -181,6 +181,10 @@ extern ClayObject *clay_System;
 extern ClayObject *clay_FFI;
 extern ClayObject *clay_Date;
 extern ClayObject *clay_Http;
+extern ClayObject *clay_Regex;
+
+/* Regex search — public API for String convenience methods */
+int clay_regex_search(const char *pat, const char *text, int *match_start, int *match_len);
 
 void clay_bootstrap(void);
 void clay_shutdown(void);

@@ -289,6 +289,27 @@ static ClayValue string_reverse(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+/* String match(pattern) — returns first regex match or nil */
+static ClayValue string_match(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    ClayObject *pat_obj = CLAY_OBJ(argv[0]);
+    if (pat_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
+    int start, len;
+    if (clay_regex_search(pat_obj->as.string.data, self->as.string.data, &start, &len)) {
+        return CLAY_VAL(clay_string_new_len(self->as.string.data + start, (size_t)len));
+    }
+    return CLAY_NIL;
+}
+
+/* String test(pattern) — returns true if regex matches */
+static ClayValue string_test(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    ClayObject *pat_obj = CLAY_OBJ(argv[0]);
+    if (pat_obj->type != CLAY_TYPE_STRING) return CLAY_FALSE;
+    int start, len;
+    return CLAY_BOOL(clay_regex_search(pat_obj->as.string.data, self->as.string.data, &start, &len));
+}
+
 void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "println", string_println);
     clay_set_method(proto, "print", string_print);
@@ -310,4 +331,6 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "startsWith", string_startsWith);
     clay_set_method(proto, "endsWith", string_endsWith);
     clay_set_method(proto, "reverse", string_reverse);
+    clay_set_method(proto, "match", string_match);
+    clay_set_method(proto, "test", string_test);
 }

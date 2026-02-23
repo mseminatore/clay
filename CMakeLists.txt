@@ -47,6 +47,7 @@ set(RUNTIME_SOURCES
     src/runtime/ffi.c
     src/runtime/date.c
     src/runtime/http.c
+    src/runtime/regex.c
     src/runtime/bootstrap.c
     src/runtime/intern.c
 )
@@ -141,3 +142,4 @@ add_test(NAME clay_test_file_ops COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DI
 add_test(NAME clay_test_system COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_system.clay)
 add_test(NAME clay_test_date COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_date.clay)
 add_test(NAME clay_test_http COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_http.clay)
+add_test(NAME clay_test_regex COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_regex.clay)

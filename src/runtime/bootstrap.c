@@ -27,6 +27,7 @@ ClayObject *clay_System  = NULL;
 ClayObject *clay_FFI     = NULL;
 ClayObject *clay_Date    = NULL;
 ClayObject *clay_Http    = NULL;
+ClayObject *clay_Regex   = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -39,6 +40,7 @@ extern void clay_math_init(ClayObject *proto);
 extern void clay_file_init(ClayObject *proto);
 extern void clay_date_init_methods(ClayObject *proto);
 extern void clay_http_init(ClayObject *proto);
+extern void clay_regex_init_methods(ClayObject *proto);
 
 /* Object base methods */
 
@@ -564,6 +566,13 @@ void clay_bootstrap(void) {
     clay_Http->refcount = 1000000;
     clay_set_slot(clay_Http, "_name", CLAY_VAL(clay_string_new("Http")));
     clay_http_init(clay_Http);
+
+    /* Regex prototype */
+    clay_Regex = clay_object_new();
+    clay_Regex->parent = clay_Object;
+    clay_Regex->refcount = 1000000;
+    clay_set_slot(clay_Regex, "_name", CLAY_VAL(clay_string_new("Regex")));
+    clay_regex_init_methods(clay_Regex);
 }
 
 void clay_shutdown(void) {

@@ -592,13 +592,35 @@ resp body() println()
 
 > **Note:** On Windows, Http uses WinHTTP and supports HTTPS natively. On Unix/macOS, HTTPS requires OpenSSL (`brew install openssl` on macOS, typically pre-installed on Linux). Build with `cmake` and it will auto-detect OpenSSL. Without OpenSSL, only HTTP is supported.
 
+### Regular expressions
+
+```clay
+// Match first occurrence
+Regex match("hello world", "\\w+")           // "hello"
+
+// Test if pattern matches
+Regex test("abc123", "\\d+")                 // true
+
+// Replace all matches
+Regex replace("a1b2c3", "\\d", "X")          // "aXbXcX"
+
+// Find all matches
+Regex find("a1 b2 c3", "\\d+")              // ["1", "2", "3"]
+
+// String convenience methods
+"hello world" match("\\w+")                  // "hello"
+"abc123" test("[0-9]+")                      // true
+```
+
+Supports ERE (Extended Regular Expressions): `.`, `^`, `$`, `*`, `+`, `?`, `[...]`, `[^...]`, `\d`, `\w`, `\s`, `(...)`, `|`, `\\`.
+
 ## Core Objects
 
 | Prototype | Methods |
 |-----------|---------|
 | Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `hasMethod(name)`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
-| String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `print()`, `println()`, `toString()` |
+| String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
 | Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
@@ -611,6 +633,7 @@ resp body() println()
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `status()`, `body()` |
+| Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 
 ## Generated C
 
