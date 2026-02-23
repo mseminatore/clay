@@ -2,6 +2,18 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Run: Current .clay File",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/Debug/clay.exe",
+            "args": ["${file}"],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake: Build All"
+        },
+        {
             "name": "Debug: Test Runner",
             "type": "cppvsdbg",
             "request": "launch",
@@ -25,18 +37,7 @@
             "preLaunchTask": "CMake: Build All"
         },
         {
-            "name": "Debug: Compile Current .clay File",
-            "type": "cppvsdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/Debug/clay.exe",
-            "args": ["${file}"],
-            "stopAtEntry": false,
-            "cwd": "${fileDirname}",
-            "environment": [],
-            "preLaunchTask": "CMake: Build All"
-        },
-        {
-            "name": "Debug: Run Compiled .clay Program",
+            "name": "Debug: Compiled .clay Program",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
@@ -44,7 +45,7 @@
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
-            "preLaunchTask": "Compile Current .clay File"
+            "preLaunchTask": "Compile Current .clay to Native"
         },
         {
             "name": "Debug: Classic REPL",

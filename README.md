@@ -758,9 +758,10 @@ Then restart VS Code. See [`editors/vscode/clay-lang/README.md`](editors/vscode/
 |---------|-----|
 | Build all | `Ctrl+Shift+B` (default build task) |
 | Run tests | `Ctrl+Shift+P` → "Run Test Task" |
+| **Run current .clay file** | Launch: "Run: Current .clay File" |
 | Debug test runner | Launch: "Debug: Test Runner" |
 | Debug VM REPL | Launch: "Debug: VM REPL" |
-| Debug compiled .clay | Launch: "Debug: Run Compiled .clay Program" |
-| Compile current .clay | Task: "Compile Current .clay File" |
+| Compile to native + debug | Launch: "Debug: Compiled .clay Program" |
+| Compile to C only | Task: "Compile .clay to C Only" |
 
 In compiled mode, `#line` directives map generated C back to `.clay` source lines, so the Visual Studio debugger steps through Clay code directly.

@@ -32,10 +32,32 @@
             "dependsOn": "CMake: Build All"
         },
         {
-            "label": "Compile Current .clay File",
+            "label": "Run Current .clay File",
             "type": "shell",
             "command": "${workspaceFolder}/build/Debug/clay.exe",
             "args": ["${file}"],
+            "group": "build",
+            "problemMatcher": {
+                "owner": "clay",
+                "fileLocation": ["relative", "${fileDirname}"],
+                "pattern": {
+                    "regexp": "^(.+?):(\\d+):(\\d+): error: (.+)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "message": 4
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "focus": true
+            }
+        },
+        {
+            "label": "Compile Current .clay to Native",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/Debug/clay.exe",
+            "args": ["-c", "${file}"],
             "group": "build",
             "problemMatcher": {
                 "owner": "clay",
@@ -53,7 +75,7 @@
             "label": "Compile .clay to C Only",
             "type": "shell",
             "command": "${workspaceFolder}/build/Debug/clay.exe",
-            "args": ["-c", "${file}"],
+            "args": ["-c", "-o", "${fileDirname}/${fileBasenameNoExtension}.c", "${file}"],
             "group": "build",
             "problemMatcher": []
         },
