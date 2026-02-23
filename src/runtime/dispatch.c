@@ -82,7 +82,20 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
             ClayValue result = invoke_method(m, wrapper, argc, argv);
-            clay_release(wrapper);
+            /* If method returned self (the wrapper), return the original integer */
+            if (result == CLAY_VAL(wrapper)) {
+                clay_release(wrapper);
+                return receiver;
+            }
+            /* Retain result before releasing wrapper (result may reference wrapper) */
+            if (!CLAY_IS_NIL(result) && !CLAY_IS_INT(result) &&
+                result != CLAY_TRUE && result != CLAY_FALSE) {
+                clay_retain(CLAY_OBJ(result));
+                clay_release(wrapper);
+                clay_release(CLAY_OBJ(result));
+            } else {
+                clay_release(wrapper);
+            }
             return result;
         }
         char buf[128];

@@ -703,7 +703,12 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
             result = clay_invoke(ic->method, wrapper, msg_argc, args);
-            clay_release(wrapper);
+            if (result == CLAY_VAL(wrapper)) {
+                clay_release(wrapper);
+                result = receiver;
+            } else {
+                clay_release(wrapper);
+            }
         } else {
             result = clay_invoke(ic->method, target_obj, msg_argc, args);
         }
