@@ -1,5 +1,5 @@
 // Test clay-json brick
-import("../../examples/bricks/clay-json/src/main.clay")
+import("clay-stdlib/clay-json")
 
 "=== stringify number ===" println()
 Json stringify(42) println()

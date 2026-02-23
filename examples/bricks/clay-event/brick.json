@@ -1,7 +1,0 @@
-{
-    "name": "clay-event",
-    "version": "0.1.0",
-    "description": "Event emitter pattern for Clay",
-    "main": "src/main.clay",
-    "deps": {}
-}

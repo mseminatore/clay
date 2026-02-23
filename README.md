@@ -691,12 +691,17 @@ The `bricks/` directory should be gitignored — it's recreated by `clay bricks 
 
 ### Available bricks
 
-Clay ships with several bricks in `examples/bricks/`:
+The standard library and testing framework are available as separate repos:
 
-| Brick | Description |
-|-------|-------------|
-| **clay-stdlib** | Standard library monorepo: bundles all bricks below plus `Assert`, `Time`, and `MathUtil` utilities |
-| **clay-test** | Testing framework with `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
+| Brick | Description | Repo |
+|-------|-------------|------|
+| **[clay-stdlib](https://github.com/mseminatore/clay-stdlib)** | Standard library monorepo with `Assert`, `Time`, `MathUtil`, and all bricks below | `github.com/mseminatore/clay-stdlib` |
+| **[clay-test](https://github.com/mseminatore/clay-test)** | Testing framework: `describe`/`it` blocks, colored output, assertions | `github.com/mseminatore/clay-test` |
+
+**clay-stdlib** contains these sub-bricks:
+
+| Sub-brick | Description |
+|-----------|-------------|
 | **clay-collections** | Set, Stack, Queue, Range data structures |
 | **clay-functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
 | **clay-format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
@@ -707,7 +712,7 @@ Clay ships with several bricks in `examples/bricks/`:
 | **clay-log** | `Log` structured logging: `debug`/`info`/`warn`/`error` levels with timestamps, prefixes, and level filtering |
 | **clay-iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
 
-Install the standard library (includes all bricks):
+Install the standard library (includes all sub-bricks):
 
 ```sh
 clay bricks add github.com/mseminatore/clay-stdlib

@@ -1,5 +1,5 @@
 // Test clay-format brick
-import("../../examples/bricks/clay-format/src/main.clay")
+import("clay-stdlib/clay-format")
 
 "=== padLeft ===" println()
 ("[" + Fmt padLeft("hi", 10) + "]") println()

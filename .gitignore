@@ -14,7 +14,7 @@ so*.txt
 vm_quick.*
 
 # Installed brick dependencies (created by `bricks install`)
-**/bricks/bricks/
+bricks/
 
 # Generated C from Clay compiler
 test/programs/*.c

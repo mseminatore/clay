@@ -1,5 +1,5 @@
 // Full collections test
-import("../../examples/bricks/clay-collections/src/main.clay")
+import("clay-stdlib/clay-collections")
 
 "=== Set ===" println()
 s = Set new()

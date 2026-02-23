@@ -1,7 +1,0 @@
-{
-    "name": "clay-functional",
-    "version": "0.1.0",
-    "description": "Functional programming utilities for Clay",
-    "main": "src/main.clay",
-    "deps": {}
-}

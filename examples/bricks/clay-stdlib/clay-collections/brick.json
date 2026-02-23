@@ -1,7 +1,0 @@
-{
-    "name": "clay-collections",
-    "version": "0.1.0",
-    "description": "Data structures for Clay: Set, Stack, Queue, Range",
-    "main": "src/main.clay",
-    "deps": {}
-}

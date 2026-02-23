@@ -1,5 +1,5 @@
 // Test clay-event brick
-import("../../examples/bricks/clay-event/src/main.clay")
+import("clay-stdlib/clay-event")
 
 "=== basic on/emit ===" println()
 e = Emitter new()
