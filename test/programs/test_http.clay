@@ -1,0 +1,39 @@
+// test_http.clay -- Test Http prototype (no network required)
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue({
+        passed = passed + 1
+    })
+    (cond == false) ifTrue({
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    })
+}
+
+// Test 1: Http exists
+assert value(Http != nil, "Http should not be nil")
+
+// Test 2: Http has get method
+assert value(Http hasMethod("get"), "Http should have get method")
+
+// Test 3: Http has post method
+assert value(Http hasMethod("post"), "Http should have post method")
+
+// Test 4: Http has status method
+assert value(Http hasMethod("status"), "Http should have status method")
+
+// Test 5: Http has body method
+assert value(Http hasMethod("body"), "Http should have body method")
+
+// Test 6: Http type
+assert value(Http type() == "Http", "Http type should be Http")
+
+// Test 7: Make a real HTTP GET request (requires network)
+resp = Http get("http://example.com")
+assert value(resp status() == 200, "GET example.com status should be 200")
+assert value(resp body() length() > 0, "GET example.com body should not be empty")
+assert value(resp body() contains("Example Domain"), "body should contain 'Example Domain'")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()

@@ -26,6 +26,7 @@ ClayObject *clay_File    = NULL;
 ClayObject *clay_System  = NULL;
 ClayObject *clay_FFI     = NULL;
 ClayObject *clay_Date    = NULL;
+ClayObject *clay_Http    = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -37,6 +38,7 @@ extern void clay_dict_init_methods(ClayObject *proto);
 extern void clay_math_init(ClayObject *proto);
 extern void clay_file_init(ClayObject *proto);
 extern void clay_date_init_methods(ClayObject *proto);
+extern void clay_http_init(ClayObject *proto);
 
 /* Object base methods */
 
@@ -555,6 +557,13 @@ void clay_bootstrap(void) {
     clay_Date->refcount = 1000000;
     clay_set_slot(clay_Date, "_name", CLAY_VAL(clay_string_new("Date")));
     clay_date_init_methods(clay_Date);
+
+    /* Http prototype */
+    clay_Http = clay_object_new();
+    clay_Http->parent = clay_Object;
+    clay_Http->refcount = 1000000;
+    clay_set_slot(clay_Http, "_name", CLAY_VAL(clay_string_new("Http")));
+    clay_http_init(clay_Http);
 }
 
 void clay_shutdown(void) {

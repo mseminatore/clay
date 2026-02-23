@@ -180,6 +180,7 @@ extern ClayObject *clay_File;
 extern ClayObject *clay_System;
 extern ClayObject *clay_FFI;
 extern ClayObject *clay_Date;
+extern ClayObject *clay_Http;
 
 void clay_bootstrap(void);
 void clay_shutdown(void);

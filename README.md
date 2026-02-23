@@ -573,6 +573,22 @@ d format("%A, %B %d, %Y") println()  // "Sunday, February 23, 2026"
 d format("%H:%M") println()          // "14:30"
 ```
 
+### HTTP client
+
+```clay
+// GET request
+resp = Http get("http://example.com")
+resp status() println()              // 200
+resp body() println()                // HTML content
+
+// POST request
+resp = Http post("http://api.example.com/data", "hello")
+resp status() println()
+resp body() println()
+```
+
+> **Note:** On Windows, Http uses WinHTTP and supports HTTPS. On Unix/macOS, Http uses POSIX sockets and supports HTTP only (no TLS).
+
 ## Core Objects
 
 | Prototype | Methods |
@@ -591,6 +607,7 @@ d format("%H:%M") println()          // "14:30"
 | System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
+| Http | `get(url)`, `post(url, body)`, `status()`, `body()` |
 
 ## Generated C
 

@@ -6,11 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef _MSC_VER
-#define _CRT_SECURE_NO_WARNINGS
-#pragma warning(disable:4996)
-#endif
-
 /* Helper: extract struct tm from a Date object's _timestamp slot */
 static struct tm date_to_tm(ClayObject *self) {
     ClayValue ts_val = clay_get_slot(self, "_timestamp");

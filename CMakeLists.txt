@@ -38,6 +38,7 @@ set(RUNTIME_SOURCES
     src/runtime/file.c
     src/runtime/ffi.c
     src/runtime/date.c
+    src/runtime/http.c
     src/runtime/bootstrap.c
     src/runtime/intern.c
 )
@@ -45,6 +46,9 @@ set(RUNTIME_SOURCES
 add_library(clay_runtime STATIC ${RUNTIME_SOURCES})
 target_include_directories(clay_runtime PUBLIC src/runtime)
 target_link_libraries(clay_runtime PUBLIC ht)
+if(WIN32)
+    target_link_libraries(clay_runtime PUBLIC winhttp)
+endif()
 if(UNIX)
     target_link_libraries(clay_runtime PUBLIC m dl)
 endif()
@@ -123,3 +127,4 @@ add_test(NAME clay_test_memory COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME clay_test_file_ops COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_file_ops.clay)
 add_test(NAME clay_test_system COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_system.clay)
 add_test(NAME clay_test_date COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_date.clay)
+add_test(NAME clay_test_http COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_http.clay)
