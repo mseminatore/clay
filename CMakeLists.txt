@@ -21,6 +21,9 @@ if(UNIX)
     # Build linenoise for REPL line editing (Unix only)
     add_library(linenoise STATIC deps/linenoise/linenoise.c)
     target_include_directories(linenoise PUBLIC deps/linenoise)
+    # linenoise uses strcasecmp (XSI extension) — needs _DEFAULT_SOURCE on Linux
+    # or broader POSIX/XOPEN visibility
+    target_compile_definitions(linenoise PRIVATE _DEFAULT_SOURCE _XOPEN_SOURCE=700)
 
     # Optional OpenSSL for HTTPS support
     find_package(OpenSSL QUIET)
