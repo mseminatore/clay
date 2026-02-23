@@ -8,6 +8,11 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Suppress typedef redefinition warning (generated VM code uses C11 pattern)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|AppleClang")
+    add_compile_options(-Wno-typedef-redefinition)
+endif()
+
 # Link math library on Unix (via clay_runtime, which needs it)
 if(UNIX)
     # Ensure POSIX functions like strdup are declared with -std=c99

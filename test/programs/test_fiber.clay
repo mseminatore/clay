@@ -139,4 +139,23 @@ assert value(method_fiber resume() == 0, "method yield 0")
 assert value(method_fiber resume() == 10, "method yield 10")
 assert value(method_fiber resume() == 20, "method yield 20")
 
+// Test 13: Nested fibers — fiber A resumes fiber B from inside A
+inner = Fiber new({
+    Fiber yield(100)
+    Fiber yield(200)
+    300
+})
+outer = Fiber new({
+    x = inner resume()
+    Fiber yield(x)
+    y = inner resume()
+    Fiber yield(y)
+    inner resume()
+})
+assert value(outer resume() == 100, "nested: outer yields inner's 100")
+assert value(outer resume() == 200, "nested: outer yields inner's 200")
+assert value(outer resume() == 300, "nested: outer yields inner's 300")
+assert value(outer isDone() == true, "nested: outer done")
+assert value(inner isDone() == true, "nested: inner done")
+
 (passed toString() + " passed, " + failed toString() + " failed") println()

@@ -25,7 +25,13 @@ static int clay_is_singleton(ClayObject *obj) {
            obj == clay_Error ||
            obj == clay_Math ||
            obj == clay_Console ||
-           obj == clay_File;
+           obj == clay_File ||
+           obj == clay_System ||
+           obj == clay_FFI ||
+           obj == clay_Date ||
+           obj == clay_Http ||
+           obj == clay_Regex ||
+           obj == clay_Fiber;
 }
 
 ClayObject *clay_retain(ClayObject *obj) {
@@ -38,6 +44,17 @@ ClayObject *clay_retain(ClayObject *obj) {
 static void clay_dealloc(ClayObject *obj) {
     if (!obj || clay_is_singleton(obj)) return;
     clay_dealloc_count++;
+
+    /* Free fiber context before slots are released (ctx is stored in _ctx slot) */
+    if (obj->slots) {
+        ht_value_t ctx_val = ht_find(obj->slots, (ht_key_t)"_ctx");
+        if (ctx_val) {
+            ClayValue cv = (ClayValue)(uintptr_t)ctx_val;
+            if (CLAY_IS_INT(cv)) {
+                clay_fiber_context_free((intptr_t)clay_to_int(cv));
+            }
+        }
+    }
 
     /* Release parent */
     if (obj->parent) {

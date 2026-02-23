@@ -384,6 +384,24 @@ void clay_fiber_init_methods(ClayObject *proto) {
     clay_set_method(proto, "yield", fiber_yield);
 }
 
+/* Free a FiberContext and all its resources (called from memory.c on dealloc) */
+void clay_fiber_context_free(intptr_t ctx_ptr) {
+    if (!ctx_ptr) return;
+    FiberContext *ctx = (FiberContext *)ctx_ptr;
+    if (ctx->block) {
+        clay_release(ctx->block);
+        ctx->block = NULL;
+    }
+#ifdef _WIN32
+    if (ctx->os_fiber) { DeleteFiber(ctx->os_fiber); ctx->os_fiber = NULL; }
+#else
+    free(ctx->c_stack); ctx->c_stack = NULL;
+#endif
+    free(ctx->vm_stack);  ctx->vm_stack = NULL;
+    free(ctx->vm_frames); ctx->vm_frames = NULL;
+    free(ctx);
+}
+
 /* --- Method dispatch via context ---
  * Instead of generating unique trampoline functions per method, we use a
  * single dispatch function. The per-method data (chunk_id, param_count,
