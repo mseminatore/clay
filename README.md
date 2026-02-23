@@ -691,17 +691,17 @@ The `bricks/` directory should be gitignored — it's recreated by `clay bricks 
 
 ### Available bricks
 
-The standard library and testing framework are available as separate repos:
+The standard library is available at:
 
 | Brick | Description | Repo |
 |-------|-------------|------|
 | **[clay-stdlib](https://github.com/mseminatore/clay-stdlib)** | Standard library monorepo with `Assert`, `Time`, `MathUtil`, and all bricks below | `github.com/mseminatore/clay-stdlib` |
-| **[clay-test](https://github.com/mseminatore/clay-test)** | Testing framework: `describe`/`it` blocks, colored output, assertions | `github.com/mseminatore/clay-test` |
 
 **clay-stdlib** contains these sub-bricks:
 
 | Sub-brick | Description |
 |-----------|-------------|
+| **clay-test** | Testing framework: `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
 | **clay-collections** | Set, Stack, Queue, Range data structures |
 | **clay-functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
 | **clay-format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
