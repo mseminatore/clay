@@ -1,0 +1,26 @@
+//
+// Date and time demo
+//
+
+// Current date and time
+d = Date now()
+d toString() println
+
+// Access individual components
+("Year:    " + (d year())) println
+("Month:   " + (d month())) println
+("Day:     " + (d day())) println
+("Hour:    " + (d hour())) println
+("Minute:  " + (d minute())) println
+("Second:  " + (d second())) println
+("Weekday: " + (d weekday())) println
+
+// Unix timestamp
+("Timestamp: " + (d timestamp())) println
+
+// Create from a known timestamp (Nov 14 2023 22:13:20 UTC)
+epoch = Date fromTimestamp(1700000000)
+("From epoch: " + (epoch toString())) println
+
+// Formatting
+("Formatted: " + (d format("%Y-%m-%d"))) println

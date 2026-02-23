@@ -1,0 +1,20 @@
+//
+// HTTP client demo
+//
+// Note: This makes real network requests.
+// Run with: clay http_demo.clay
+//
+
+// Simple GET request
+"Fetching http://example.com ..." println
+resp = Http get("http://example.com")
+("Status: " + (resp status())) println
+("Body length: " + (resp body() length())) println
+"First 100 chars:" println
+resp body() slice(0, 100) println
+
+// POST request
+"" println
+"Posting to httpbin..." println
+post_resp = Http post("http://httpbin.org/post", "hello from Clay!")
+("POST status: " + (post_resp status())) println

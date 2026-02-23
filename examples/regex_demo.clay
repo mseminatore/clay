@@ -1,0 +1,22 @@
+//
+// Regular expressions demo
+//
+
+// Match — find the first match
+result = Regex match("hello world", "\\w+")
+("First word: " + result) println
+
+// Test — check if a pattern matches
+hasDigits = Regex test("abc123", "\\d+")
+("Has digits: " + hasDigits) println
+
+noDigits = Regex test("abcdef", "\\d+")
+("No digits: " + noDigits) println
+
+// Replace — substitute matches
+cleaned = Regex replace("a1b2c3", "\\d", "X")
+("Replaced: " + cleaned) println
+
+// Find all — return all matches as an array
+matches = Regex find("a1 b22 c333", "\\d+")
+("All numbers: " + (matches toString())) println

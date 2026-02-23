@@ -1,0 +1,51 @@
+//
+// Fibers (coroutines) demo
+//
+
+// Basic generator — yields values one at a time
+f = Fiber new({
+    Fiber yield(1)
+    Fiber yield(2)
+    3
+})
+
+"Generator:" println
+f resume() println   // => 1
+f resume() println   // => 2
+f resume() println   // => 3
+
+// Yield from inside a loop
+counter = Fiber new({
+    i = 0
+    { i < 5 } whileTrue({
+        Fiber yield(i)
+        i = i + 1
+    })
+})
+
+"Counter:" println
+{ counter isDone() == false } whileTrue({
+    v = counter resume()
+    v println
+})
+
+// Yield from array iteration
+items = Fiber new({
+    Array new() append(10) append(20) append(30) each({ |x| Fiber yield(x) })
+})
+
+"Array items:" println
+{ items isDone() == false } whileTrue({
+    v = items resume()
+    v println
+})
+
+// Two interleaved fibers
+a = Fiber new({ Fiber yield("a1"); "a2" })
+b = Fiber new({ Fiber yield("b1"); "b2" })
+
+"Interleaved:" println
+a resume() println   // => a1
+b resume() println   // => b1
+a resume() println   // => a2
+b resume() println   // => b2
