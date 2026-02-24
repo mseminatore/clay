@@ -4,14 +4,14 @@ Test = Object clone {
     _p = 0
     _f = 0
     eq(a, b) {
-        (a == b) ifTrue({ self _p = self _p + 1 })
-        (!(a == b)) ifTrue({ self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() })
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() }
         self
     }
     done() {
         total = self _p + self _f
         (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
-        (self _f > 0) ifTrue({ raise("test failures") })
+        (self _f > 0) ifTrue { raise("test failures") }
         self
     }
 }
@@ -47,7 +47,7 @@ Test eq(Adder add(5, 3), 8)
 
 // Block returning assignment used in control flow
 // Note: ifTrue returns a CondResult wrapper, not the raw value
-val = (true) ifTrue({ x = "yes" }) ifFalse({ "no" })
+val = (true) ifTrue { x = "yes" } ifFalse { "no" }
 Test eq(val, "yes")
 
 // Nested: method with block whose last stmt is assignment

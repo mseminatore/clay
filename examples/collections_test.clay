@@ -27,9 +27,9 @@ q enqueue("b")
 ("dequeue: " + q dequeue) println()
 
 "=== Range ===" println()
-Range new(1, 5) each({ |i| (i toString() + " ") print() })
+Range new(1, 5) each { |i| (i toString() + " ") print() }
 "" println()
-Range new(1, 5) map({ |i| i * i }) toString() println()
+Range new(1, 5) map { |i| i * i } toString() println()
 ("contains 3: " + Range new(1, 5) contains(3) toString()) println()
 ("size: " + Range new(1, 5) size toString()) println()
 

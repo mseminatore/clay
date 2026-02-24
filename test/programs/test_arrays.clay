@@ -5,24 +5,24 @@ Test = Object clone {
     _f = 0
 
     eq(a, b) {
-        (a == b) ifTrue({ self _p = self _p + 1 })
-        (!(a == b)) ifTrue({
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue {
             self _f = self _f + 1
             ("FAIL: " + a toString() + " != " + b toString()) println()
-        })
+        }
         self
     }
 
     ok(v) {
-        (v == true) ifTrue({ self _p = self _p + 1 })
-        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: not true" println() })
+        (v == true) ifTrue { self _p = self _p + 1 }
+        (!(v == true)) ifTrue { self _f = self _f + 1; "FAIL: not true" println() }
         self
     }
 
     done() {
         total = self _p + self _f
         (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
-        (self _f > 0) ifTrue({ raise("test failures") })
+        (self _f > 0) ifTrue { raise("test failures") }
         self
     }
 }
@@ -47,20 +47,20 @@ Test eq(b at(2), 3)
 
 // Map
 c = [1, 2, 3]
-doubled = c map({ |x| x * 2 })
+doubled = c map { |x| x * 2 }
 Test eq(doubled at(0), 2)
 Test eq(doubled at(1), 4)
 Test eq(doubled at(2), 6)
 
 // Filter
 d = [1, 2, 3, 4, 5, 6]
-evens = d filter({ |x| x % 2 == 0 })
+evens = d filter { |x| x % 2 == 0 }
 Test eq(evens size(), 3)
 Test eq(evens first(), 2)
 
 // Each
 sum = 0
-[1, 2, 3] each({ |x| sum = sum + x })
+[1, 2, 3] each { |x| sum = sum + x }
 Test eq(sum, 6)
 
 Test done()

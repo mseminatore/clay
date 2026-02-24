@@ -2,9 +2,9 @@
 
 // Fibonacci using blocks
 fib = { |n|
-  (n < 2) ifTrue({
+  (n < 2) ifTrue {
     n
-  })
+  }
 }
 
 // Simple block test
@@ -16,10 +16,10 @@ doubler value(5) println()
 // Array iteration with block
 arr = [10, 20, 30]
 "Array elements:" println()
-arr each({ |item| item println() })
+arr each { |item| item println() }
 
 // Boolean control flow with blocks
 "Testing booleans:" println()
-(1 == 1) ifTrue({ "1 == 1 is true" println() })
-(1 == 2) ifTrue({ "1 == 2 is true (BUG!)" println() })
-(1 == 2) ifFalse({ "1 == 2 is false" println() })
+(1 == 1) ifTrue { "1 == 1 is true" println() }
+(1 == 2) ifTrue { "1 == 2 is true (BUG!)" println() }
+(1 == 2) ifFalse { "1 == 2 is false" println() }

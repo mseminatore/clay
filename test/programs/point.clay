@@ -22,8 +22,8 @@ result = 3 + 4
 result println()
 
 // Test comparison
-(10 > 5) ifTrue({ "10 > 5 is true" println() })
-(10 < 5) ifTrue({ "10 < 5 is true (BUG!)" println() })
+(10 > 5) ifTrue { "10 > 5 is true" println() }
+(10 < 5) ifTrue { "10 < 5 is true (BUG!)" println() }
 
 // Array test
 arr = [1, 2, 3]

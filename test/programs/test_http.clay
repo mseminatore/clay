@@ -3,13 +3,13 @@ passed = 0
 failed = 0
 
 assert = { |cond, msg|
-    cond ifTrue({
+    cond ifTrue {
         passed = passed + 1
-    })
-    (cond == false) ifTrue({
+    }
+    (cond == false) ifTrue {
         ("FAIL: " + msg) println()
         failed = failed + 1
-    })
+    }
 }
 
 // Test 1: Http exists

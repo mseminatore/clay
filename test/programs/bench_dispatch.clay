@@ -16,10 +16,10 @@ Child = Mid clone {
 
 obj = Child clone()
 i = 0
-{ i < 200000 } whileTrue({
+{ i < 200000 } whileTrue {
     obj greet()
     i = i + 1
-})
+}
 ("Deep chain: " + i) println()
 
 // Benchmark 2: Object method dispatch (slots + methods)
@@ -36,20 +36,20 @@ Counter = Object clone {
 
 c = Counter clone()
 i = 0
-{ i < 200000 } whileTrue({
+{ i < 200000 } whileTrue {
     c inc()
     i = i + 1
-})
+}
 ("Counter: " + c get()) println()
 
 // Benchmark 3: Mixed sends (inherited + local methods)
 i = 0
-{ i < 100000 } whileTrue({
+{ i < 100000 } whileTrue {
     obj greet()
     obj extra()
     obj other()
     c inc()
     i = i + 1
-})
+}
 ("Mixed: " + i) println()
 ("Counter: " + c get()) println()

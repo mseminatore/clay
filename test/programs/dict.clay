@@ -29,9 +29,9 @@ d keys() println()
 d values() println()
 
 // each
-d each({ |key, value|
+d each { |key, value|
   "${key} => ${value toString()}" println()
-})
+}
 
 // toString
 d toString() println()

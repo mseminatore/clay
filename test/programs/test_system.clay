@@ -3,22 +3,22 @@ passed = 0
 failed = 0
 
 assert = { |cond, msg|
-    cond ifTrue({
+    cond ifTrue {
         passed = passed + 1
-    })
-    (cond == false) ifTrue({
+    }
+    (cond == false) ifTrue {
         ("FAIL: " + msg) println()
         failed = failed + 1
-    })
+    }
 }
 
 // Test 1: platform returns a known string
 p = System platform()
-valid = (p == "windows") ifTrue({ true }) ifFalse({
-    (p == "macos") ifTrue({ true }) ifFalse({
-        (p == "linux") ifTrue({ true }) ifFalse({ false })
-    })
-})
+valid = (p == "windows") ifTrue { true } ifFalse {
+    (p == "macos") ifTrue { true } ifFalse {
+        (p == "linux") ifTrue { true } ifFalse { false }
+    }
+}
 assert value(valid, "platform should be windows, macos, or linux")
 
 // Test 2: env returns nil for non-existent var
@@ -37,10 +37,10 @@ t1 = System clock()
 // Do some work
 x = 0
 i = 0
-{ (i < 10000) } whileTrue({
+{ (i < 10000) } whileTrue {
     x = x + i
     i = i + 1
-})
+}
 t2 = System clock()
 assert value(t2 >= t1, "clock should not go backwards")
 

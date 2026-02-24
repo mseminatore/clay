@@ -1,40 +1,40 @@
 // Test error handling: try/catch/raise
 
 // Test 1: Catch a raised string error
-result = try({
+result = try {
   raise("something went wrong")
   "should not reach here"
-}) catch({ |e|
+} catch { |e|
   e message()
-})
+}
 result println()
 
 // Test 2: Catch division by zero
-result2 = try({
+result2 = try {
   10 / 0
-}) catch({ |e|
+} catch { |e|
   "caught: " + e message()
-})
+}
 result2 println()
 
 // Test 3: Try block succeeds (no error)
-result3 = try({
+result3 = try {
   42
-}) catch({ |e|
+} catch { |e|
   0
-})
+}
 result3 println()
 
 // Test 4: Nested try/catch
-result4 = try({
-  try({
+result4 = try {
+  try {
     raise("inner error")
-  }) catch({ |e|
+  } catch { |e|
     "inner caught"
-  })
-}) catch({ |e|
+  }
+} catch { |e|
   "outer caught"
-})
+}
 result4 println()
 
 // Test 5: Custom doesNotUnderstand
@@ -48,9 +48,9 @@ p = Proxy clone()
 p banana() println()
 
 // Test 6: Catch method-not-found
-result6 = try({
+result6 = try {
   42 banana()
-}) catch({ |e|
+} catch { |e|
   "caught: " + e type()
-})
+}
 result6 println()
