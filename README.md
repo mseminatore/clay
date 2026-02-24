@@ -51,12 +51,12 @@ Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)
 >>> doubler = { |x| x * 2 }
 >>> doubler value(5)
 => 10
->>> [1, 2, 3] each({ |n| n println() })
+>>> [1, 2, 3] each { |n| n println() }
 1
 2
 3
 => [1, 2, 3]
->>> (10 > 5) ifTrue({ "yes" }) ifFalse({ "no" })
+>>> (10 > 5) ifTrue { "yes" } ifFalse { "no" }
 => yes
 >>> Point = Object clone {
 ...   x = 0
@@ -143,7 +143,7 @@ Messages use IO-style syntax: `receiver message(args)`. Parentheses are optional
 "hello" println()        // parens also work
 "hello" length()         // returns 5
 arr at(0)                // message with one arg
-arr each({ |x| x println() })  // message with block arg
+arr each { |x| x println() }  // message with trailing block
 ```
 
 ### Binary operators
@@ -273,11 +273,11 @@ greet value()
 Booleans are objects. Control flow is message passing with blocks:
 
 ```clay
-(x > 0) ifTrue({ "positive" println() })
-(x > 0) ifFalse({ "non-positive" println() })
+(x > 0) ifTrue { "positive" println() }
+(x > 0) ifFalse { "non-positive" println() }
 
 // Chaining ifTrue/ifFalse
-(x > 0) ifTrue({ "positive" }) ifFalse({ "non-positive" })
+(x > 0) ifTrue { "positive" } ifFalse { "non-positive" }
 ```
 
 Blocks capture variables from their enclosing scope (closures):
@@ -338,10 +338,10 @@ Blocks support `whileTrue` and `whileFalse` for looping:
 
 ```clay
 i = 0
-{ i < 10 } whileTrue({
+{ i < 10 } whileTrue {
   i println()
   i = i + 1
-})
+}
 ```
 
 ### Arrays
@@ -353,13 +353,13 @@ arr append(4)
 arr size()                    // 4
 arr first                     // 1
 arr last                      // 3
-arr each({ |item| item println() })
+arr each { |item| item println() }
 
-// Functional methods
-arr map({ |x| x * 2 })       // [2, 4, 6]
-arr filter({ |x| x > 1 })    // [2, 3]
-arr reduce(0, { |acc, x| acc + x })  // 6
-arr find({ |x| x > 2 })      // 3
+// Functional methods (trailing block syntax)
+arr map { |x| x * 2 }            // [2, 4, 6]
+arr filter { |x| x > 1 }         // [2, 3]
+arr reduce(0) { |acc, x| acc + x }  // 6
+arr find { |x| x > 2 }           // 3
 
 // Utility methods
 arr reverse                   // [3, 2, 1]
@@ -397,7 +397,7 @@ Integers are tagged values (fast, no allocation). Floats are heap-allocated obje
 3.14 + 2                      // 5.14 (mixed → float)
 3.14 toInt                    // 3 (truncation)
 (-5) abs()                    // 5
-5 times({ |i| i println() })  // prints 0..4
+5 times { |i| i println() }  // prints 0..4
 ```
 
 ### Strings
@@ -450,9 +450,9 @@ d size() println()          // 2
 d remove("version")
 
 // Iteration
-d each({ |key, value|
+d each { |key, value|
   "${key}: ${value toString()}" println()
-})
+}
 
 // Inspect
 d keys() println()          // [name]
@@ -476,32 +476,32 @@ Clay provides `try`/`catch`/`finally` blocks and `raise` for error handling:
 
 ```clay
 // Catch errors
-result = try({
+result = try {
   10 / 0
-}) catch({ |e|
+} catch { |e|
   "Caught: " + e message()
-})
+}
 
 // Raise custom errors
 raise("something went wrong")
 
 // Errors have message() and type() methods
-try({
+try {
   nil banana()
-}) catch({ |e|
+} catch { |e|
   e type() println()    // "NilError"
   e message() println() // "message 'banana' sent to nil"
-})
+}
 
 // Finally runs whether try succeeds or fails
-try({
+try {
   f = File open("data.txt")
   // ... use file ...
-}) catch({ |e|
+} catch { |e|
   "Error: " + e message()
-}) finally({
+} finally {
   f close()             // always runs
-})
+}
 ```
 
 Error types include `DivisionByZero`, `MethodNotFound`, `NilError`, `TypeError`, and `RuntimeError` (for user-raised strings).
@@ -657,27 +657,27 @@ f resume()     // 3 (final value)
 f isDone()     // true
 
 // Generator pattern — yield from inside loops
-counter = Fiber new({
+counter = Fiber new {
     i = 0
-    { i < 5 } whileTrue({
+    { i < 5 } whileTrue {
         Fiber yield(i)
         i = i + 1
-    })
-})
+    }
+}
 counter resume()   // 0
 counter resume()   // 1
 counter resume()   // 2
 
 // Yield from array iteration
-items = Fiber new({
-    Array new() append(10) append(20) append(30) each({ |x| Fiber yield(x) })
-})
+items = Fiber new {
+    [10, 20, 30] each { |x| Fiber yield(x) }
+}
 items resume()     // 10
 items resume()     // 20
 
 // Two independent fibers
-a = Fiber new({ Fiber yield(10); 20 })
-b = Fiber new({ Fiber yield(30); 40 })
+a = Fiber new { Fiber yield(10); 20 }
+b = Fiber new { Fiber yield(30); 40 }
 a resume()     // 10
 b resume()     // 30
 a resume()     // 20
@@ -692,8 +692,8 @@ b resume()     // 40
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
-| Block | `value(args...)`, `whileTrue(block)`, `whileFalse(block)` |
-| Boolean | `ifTrue(block)`, `ifFalse(block)`, `not()`, `toString()` |
+| Block | `value(args...)`, `whileTrue { block }`, `whileFalse { block }` |
+| Boolean | `ifTrue { block }`, `ifFalse { block }`, `not()`, `toString()` |
 | Error | `message()`, `type()`, `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |

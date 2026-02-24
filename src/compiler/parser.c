@@ -336,15 +336,24 @@ static AstNode *parse_primary(Parser *p) {
     /* try/catch expression */
     if (match(p, TOK_TRY)) {
         int line = p->previous.line;
-        expect(p, TOK_LPAREN, "Expected '(' after try");
-        AstNode *try_block = parse_block(p);
-        expect(p, TOK_RPAREN, "Expected ')' after try block");
+        AstNode *try_block;
+        if (check(p, TOK_LBRACE)) {
+            try_block = parse_block(p);
+        } else {
+            expect(p, TOK_LPAREN, "Expected '{' or '(' after try");
+            try_block = parse_block(p);
+            expect(p, TOK_RPAREN, "Expected ')' after try block");
+        }
         skip_newlines(p);
         AstNode *catch_block = NULL;
         if (match(p, TOK_CATCH)) {
-            expect(p, TOK_LPAREN, "Expected '(' after catch");
-            catch_block = parse_block(p);
-            expect(p, TOK_RPAREN, "Expected ')' after catch block");
+            if (check(p, TOK_LBRACE)) {
+                catch_block = parse_block(p);
+            } else {
+                expect(p, TOK_LPAREN, "Expected '{' or '(' after catch");
+                catch_block = parse_block(p);
+                expect(p, TOK_RPAREN, "Expected ')' after catch block");
+            }
         }
         /* Peek for finally — save full parser state, skip newlines, check for TOK_FINALLY */
         AstNode *finally_block = NULL;
@@ -354,9 +363,13 @@ static AstNode *parse_primary(Parser *p) {
             Lexer saved_lexer = p->lexer;
             skip_newlines(p);
             if (match(p, TOK_FINALLY)) {
-                expect(p, TOK_LPAREN, "Expected '(' after finally");
-                finally_block = parse_block(p);
-                expect(p, TOK_RPAREN, "Expected ')' after finally block");
+                if (check(p, TOK_LBRACE)) {
+                    finally_block = parse_block(p);
+                } else {
+                    expect(p, TOK_LPAREN, "Expected '{' or '(' after finally");
+                    finally_block = parse_block(p);
+                    expect(p, TOK_RPAREN, "Expected ')' after finally block");
+                }
             } else {
                 /* No finally — restore full parser state */
                 p->current = saved_current;
@@ -626,6 +639,20 @@ static AstNode *parse_postfix(Parser *p) {
                     }
                 }
                 expect(p, TOK_RPAREN, "Expected ')'");
+                /* Trailing block after ident(args...): e.g. reduce(0) { |a,x| a + x } */
+                if (check(p, TOK_LBRACE)) {
+                    nodelist_push(&send->as.send.args, parse_block(p));
+                }
+                expr = send;
+            } else if (check(p, TOK_LBRACE)) {
+                /* Trailing block: ident { ... } → ident with block as single arg */
+                AstNode *send = ast_new(NODE_SEND, send_line);
+                send->as.send.receiver = expr;
+                send->as.send.message = msg_name;
+                send->as.send.is_super = next_is_super;
+                next_is_super = 0;
+                nodelist_init(&send->as.send.args);
+                nodelist_push(&send->as.send.args, parse_block(p));
                 expr = send;
             } else {
                 /* Unary message (no args) */

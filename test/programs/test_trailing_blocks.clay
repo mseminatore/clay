@@ -1,0 +1,100 @@
+// test_trailing_blocks.clay — Test trailing block syntax (no parens)
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        })
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: not true" println() })
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+}
+
+// --- Trailing block: each ---
+sum = 0
+[1, 2, 3] each { |x| sum = sum + x }
+Test eq(sum, 6)
+
+// --- Trailing block: map ---
+doubled = [1, 2, 3] map { |x| x * 2 }
+Test eq(doubled at(0), 2)
+Test eq(doubled at(2), 6)
+
+// --- Trailing block: filter ---
+evens = [1, 2, 3, 4] filter { |x| x % 2 == 0 }
+Test eq(evens size(), 2)
+
+// --- Trailing block: find ---
+found = [10, 20, 30] find { |x| x > 15 }
+Test eq(found, 20)
+
+// --- Trailing block: times ---
+count = 0
+5 times { |i| count = count + 1 }
+Test eq(count, 5)
+
+// --- Trailing block: ifTrue / ifFalse ---
+result = nil
+(3 > 1) ifTrue { result = "yes" }
+Test eq(result, "yes")
+
+result2 = nil
+(3 < 1) ifFalse { result2 = "no" }
+Test eq(result2, "no")
+
+// --- Trailing block: whileTrue ---
+i = 0
+{ i < 5 } whileTrue { i = i + 1 }
+Test eq(i, 5)
+
+// --- Trailing block: reduce(init) { block } ---
+total = [1, 2, 3, 4] reduce(0) { |acc, x| acc + x }
+Test eq(total, 10)
+
+// --- Dict each with trailing block ---
+d = Dict new()
+d set("a", 1)
+d set("b", 2)
+keys = Array new()
+d each { |k, v| keys push(k) }
+Test eq(keys size(), 2)
+
+// --- try/catch/finally bare block syntax ---
+r = try { 10 / 0 } catch { |e| "caught" }
+Test eq(r, "caught")
+
+r2 = try { 42 } catch { |e| 0 }
+Test eq(r2, 42)
+
+f = 0
+try { 99 } finally { f = 1 }
+Test eq(f, 1)
+
+f2 = 0
+try { raise("err") } catch { |e| "ok" } finally { f2 = 2 }
+Test eq(f2, 2)
+
+// --- Old paren syntax still works ---
+r3 = try({ 100 }) catch({ |e| 0 })
+Test eq(r3, 100)
+
+[1, 2, 3] each({ |x| x })
+
+Test done()
