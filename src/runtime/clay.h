@@ -189,6 +189,7 @@ extern ClayObject *clay_Date;
 extern ClayObject *clay_Http;
 extern ClayObject *clay_Regex;
 extern ClayObject *clay_Fiber;
+extern ClayObject *clay_Db;
 
 /* Fiber context cleanup (called from memory.c when fiber objects are freed) */
 void clay_fiber_context_free(intptr_t ctx_ptr);

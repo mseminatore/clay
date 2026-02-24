@@ -443,6 +443,23 @@ static void parse_http_request(char *buf, size_t len,
 }
 
 /* Platform-specific server implementation */
+
+static const char *http_status_text(int code) {
+    switch (code) {
+        case 200: return "OK";
+        case 201: return "Created";
+        case 204: return "No Content";
+        case 301: return "Moved Permanently";
+        case 302: return "Found";
+        case 304: return "Not Modified";
+        case 400: return "Bad Request";
+        case 404: return "Not Found";
+        case 405: return "Method Not Allowed";
+        case 500: return "Internal Server Error";
+        default:  return "OK";
+    }
+}
+
 #ifdef _WIN32
 
 /* Winsock2 declarations — minimal, avoiding winsock2.h include */
@@ -538,6 +555,7 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         const char *resp_body = "";
         int resp_status = 200;
         const char *content_type = "text/plain";
+        const char *location = NULL;
         if (resp != CLAY_NIL && !CLAY_IS_INT(resp)) {
             ClayValue sv = clay_get_slot(CLAY_OBJ(resp), "_status");
             if (CLAY_IS_INT(sv)) resp_status = (int)clay_to_int(sv);
@@ -545,18 +563,26 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
             if (bv != CLAY_NIL && !CLAY_IS_INT(bv)) resp_body = clay_string_data(CLAY_OBJ(bv));
             ClayValue ct = clay_get_slot(CLAY_OBJ(resp), "_content_type");
             if (ct != CLAY_NIL && !CLAY_IS_INT(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
+            ClayValue loc = clay_get_slot(CLAY_OBJ(resp), "_location");
+            if (loc != CLAY_NIL && !CLAY_IS_INT(loc)) location = clay_string_data(CLAY_OBJ(loc));
         }
 
         char http_header[512];
-        snprintf(http_header, sizeof(http_header),
-            "HTTP/1.1 %d OK\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: close\r\n\r\n",
-            resp_status, content_type, strlen(resp_body));
+        if (location) {
+            snprintf(http_header, sizeof(http_header),
+                "HTTP/1.1 %d %s\r\nLocation: %s\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                resp_status, http_status_text(resp_status), location);
+        } else {
+            snprintf(http_header, sizeof(http_header),
+                "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n"
+                "Content-Length: %zu\r\nConnection: close\r\n\r\n",
+                resp_status, http_status_text(resp_status), content_type, strlen(resp_body));
+        }
 
         send(client_fd, http_header, (int)strlen(http_header), 0);
-        send(client_fd, resp_body, (int)strlen(resp_body), 0);
+        if (!location)
+            send(client_fd, resp_body, (int)strlen(resp_body), 0);
         shutdown(client_fd, SD_SEND);
         closesocket(client_fd);
 
@@ -636,6 +662,7 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         const char *resp_body = "";
         int resp_status = 200;
         const char *content_type = "text/plain";
+        const char *location = NULL;
         if (resp != CLAY_NIL && !CLAY_IS_INT(resp)) {
             ClayValue sv = clay_get_slot(CLAY_OBJ(resp), "_status");
             if (CLAY_IS_INT(sv)) resp_status = (int)clay_to_int(sv);
@@ -643,18 +670,26 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
             if (bv != CLAY_NIL && !CLAY_IS_INT(bv)) resp_body = clay_string_data(CLAY_OBJ(bv));
             ClayValue ct = clay_get_slot(CLAY_OBJ(resp), "_content_type");
             if (ct != CLAY_NIL && !CLAY_IS_INT(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
+            ClayValue loc = clay_get_slot(CLAY_OBJ(resp), "_location");
+            if (loc != CLAY_NIL && !CLAY_IS_INT(loc)) location = clay_string_data(CLAY_OBJ(loc));
         }
 
         char http_header[512];
-        snprintf(http_header, sizeof(http_header),
-            "HTTP/1.1 %d OK\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: close\r\n\r\n",
-            resp_status, content_type, strlen(resp_body));
+        if (location) {
+            snprintf(http_header, sizeof(http_header),
+                "HTTP/1.1 %d %s\r\nLocation: %s\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                resp_status, http_status_text(resp_status), location);
+        } else {
+            snprintf(http_header, sizeof(http_header),
+                "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n"
+                "Content-Length: %zu\r\nConnection: close\r\n\r\n",
+                resp_status, http_status_text(resp_status), content_type, strlen(resp_body));
+        }
 
         send(client_fd, http_header, strlen(http_header), 0);
-        send(client_fd, resp_body, strlen(resp_body), 0);
+        if (!location)
+            send(client_fd, resp_body, strlen(resp_body), 0);
         close(client_fd);
 
         clay_release(CLAY_OBJ(req));
@@ -666,6 +701,58 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 #endif /* _WIN32 server */
+
+/* Http parseForm(str) — parse URL-encoded form data into a Dict */
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+    return -1;
+}
+
+static char *url_decode(const char *src, size_t len) {
+    char *out = (char *)malloc(len + 1);
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '+') {
+            out[j++] = ' ';
+        } else if (src[i] == '%' && i + 2 < len) {
+            int h = hex_digit(src[i+1]), l = hex_digit(src[i+2]);
+            if (h >= 0 && l >= 0) { out[j++] = (char)(h * 16 + l); i += 2; }
+            else out[j++] = src[i];
+        } else {
+            out[j++] = src[i];
+        }
+    }
+    out[j] = '\0';
+    return out;
+}
+
+static ClayValue http_parse_form(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || argv[0] == CLAY_NIL) {
+        return CLAY_VAL(clay_dict_new());
+    }
+    const char *data = clay_string_data(CLAY_OBJ(argv[0]));
+    size_t data_len = strlen(data);
+    ClayObject *dict = clay_dict_new();
+
+    const char *p = data;
+    while (p < data + data_len) {
+        const char *amp = strchr(p, '&');
+        size_t pair_len = amp ? (size_t)(amp - p) : (size_t)(data + data_len - p);
+        const char *eq = memchr(p, '=', pair_len);
+        if (eq) {
+            char *key = url_decode(p, (size_t)(eq - p));
+            char *val = url_decode(eq + 1, pair_len - (size_t)(eq - p) - 1);
+            clay_dict_set(dict, key, CLAY_VAL(clay_string_new(val)));
+            free(key);
+            free(val);
+        }
+        p += pair_len + 1;
+    }
+    return CLAY_VAL(dict);
+}
 
 /* Register Http methods */
 void clay_http_init(ClayObject *http) {
@@ -679,4 +766,5 @@ void clay_http_init(ClayObject *http) {
     clay_set_method(http, "method", req_method);
     clay_set_method(http, "path", req_path);
     clay_set_method(http, "query", req_query);
+    clay_set_method(http, "parseForm", http_parse_form);
 }

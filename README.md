@@ -715,6 +715,35 @@ a resume()     // 20
 b resume()     // 40
 ```
 
+### Database (SQLite)
+
+```clay
+// Open (or create) a database
+db = Db open("app.db")
+
+// Create a table
+db exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
+
+// Insert data
+db exec("INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')")
+db exec("INSERT INTO users (name, email) VALUES ('Bob', 'bob@example.com')")
+
+// Query — returns an Array of Dicts
+rows = db query("SELECT id, name, email FROM users")
+rows each { |row|
+    (row get("name") + ": " + row get("email")) println
+}
+// Alice: alice@example.com
+// Bob: bob@example.com
+
+// Last insert ID
+db exec("INSERT INTO users (name, email) VALUES ('Carol', 'carol@example.com')")
+db lastInsertId()   // 3
+
+// Close when done
+db close()
+```
+
 ## Core Objects
 
 | Prototype | Methods |
@@ -733,9 +762,10 @@ b resume()     // 40
 | System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
-| Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `status()`, `body()`, `method()`, `path()`, `query()` |
+| Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
+| Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `lastInsertId()` |
 
 ## Generated C
 

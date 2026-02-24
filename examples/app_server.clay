@@ -1,20 +1,163 @@
 import("clay-stdlib/clay-http-server")
 import("clay-stdlib/clay-template")
 
-// create the server and define routes
+// -- Database setup --
+db = Db open("todos.db")
+db exec("CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER DEFAULT 0)")
+
+// -- Layout template --
+layout = "<!DOCTYPE html>" +
+    "<html><head><meta charset='utf-8'>" +
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>" +
+    "<title>{{page_title}} - Clay Todo App</title>" +
+    "<link rel='stylesheet' href='https://www.w3schools.com/w3css/4/w3.css'>" +
+    "<link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css'>" +
+    "</head><body>" +
+    "<div class='w3-bar w3-dark-grey'>" +
+    "<a href='/' class='w3-bar-item w3-button'><i class='fa fa-home'></i> Home</a>" +
+    "<a href='/todos' class='w3-bar-item w3-button'><i class='fa fa-list'></i> Todos</a>" +
+    "<a href='/todos/new' class='w3-bar-item w3-button'><i class='fa fa-plus'></i> Add Todo</a>" +
+    "</div>" +
+    "<div class='w3-container' style='max-width:800px;margin:auto;padding-top:20px'>" +
+    "{{content}}" +
+    "</div></body></html>"
+
+// -- Helper to render a page --
+renderPage = { |title, content|
+    d = Dict clone
+    d set("page_title", title)
+    d set("content", content)
+    Template render(layout, d)
+}
+
+// -- Server setup --
 server = HttpServer new(8080)
 
+// Home page
 server get("/", { |req|
-    server html(200, Template render("<h1>Hello Clay!</h1>", nil))
+    content = "<h1><i class='fa fa-cube'></i> Clay Todo App</h1>" +
+        "<p class='w3-large'>A simple todo list built with " +
+        "<strong>Clay</strong>, demonstrating:</p>" +
+        "<ul class='w3-ul w3-border w3-card-4' style='max-width:500px'>" +
+        "<li><i class='fa fa-route'></i> URL routing (GET/POST)</li>" +
+        "<li><i class='fa fa-file-code'></i> Template rendering</li>" +
+        "<li><i class='fa fa-database'></i> SQLite persistence</li>" +
+        "<li><i class='fa fa-arrows-rotate'></i> POST-Redirect-GET pattern</li>" +
+        "<li><i class='fa fa-palette'></i> W3.CSS + Font Awesome styling</li>" +
+        "</ul>" +
+        "<br><a href='/todos' class='w3-button w3-blue w3-round-large'>" +
+        "<i class='fa fa-arrow-right'></i> View Todos</a>"
+    server html(200, renderPage value("Home", content))
 })
 
-server get("/api/greet", { |req|
-    server json(200, "{\"message\": \"hello\"}")
+// Todo list
+server get("/todos", { |req|
+    todos = db query("SELECT id, title, done FROM todos ORDER BY id")
+
+    content = "<h2><i class='fa fa-list-check'></i> Todo List</h2>"
+
+    (todos size() == 0) ifTrue {
+        content = content +
+            "<p class='w3-panel w3-pale-yellow w3-border w3-border-yellow'>" +
+            "<i class='fa fa-info-circle'></i> No todos yet. " +
+            "<a href='/todos/new'>Add one!</a></p>"
+    }
+
+    (todos size() > 0) ifTrue {
+        content = content + "<ul class='w3-ul w3-border w3-card-4'>"
+        todos each { |todo|
+            id = todo get("id") toString()
+            title = todo get("title")
+            done = todo get("done")
+
+            (done == 1) ifTrue {
+                style = "text-decoration:line-through;color:#999"
+                icon = "fa-square-check"
+            } ifFalse {
+                style = ""
+                icon = "fa-square"
+            }
+
+            content = content +
+                "<li class='w3-display-container' style='" + style + "'>" +
+                "<form method='POST' action='/todos/toggle' style='display:inline'>" +
+                "<input type='hidden' name='id' value='" + id + "'>" +
+                "<button type='submit' class='w3-button w3-small' style='border:none;background:none'>" +
+                "<i class='fa-regular " + icon + " w3-text-blue'></i></button></form> " +
+                title +
+                "<form method='POST' action='/todos/delete' style='display:inline'>" +
+                "<input type='hidden' name='id' value='" + id + "'>" +
+                "<button type='submit' class='w3-button w3-display-right w3-text-red' style='border:none;background:none'>" +
+                "<i class='fa fa-trash'></i></button></form></li>"
+        }
+        content = content + "</ul>"
+    }
+
+    content = content +
+        "<br><a href='/todos/new' class='w3-button w3-green w3-round-large'>" +
+        "<i class='fa fa-plus'></i> Add Todo</a>"
+
+    server html(200, renderPage value("Todos", content))
 })
 
-server post("/api/data", { |req|
-    body = req body()
-    server text(201, "Received: " + body)
+// Add todo form
+server get("/todos/new", { |req|
+    content = "<h2><i class='fa fa-plus-circle'></i> Add Todo</h2>" +
+        "<form method='POST' action='/todos/add' class='w3-card-4 w3-padding' style='max-width:500px'>" +
+        "<label class='w3-text-grey'><b>What needs to be done?</b></label>" +
+        "<input type='text' name='title' class='w3-input w3-border w3-round' " +
+        "placeholder='Buy groceries...' required autofocus>" +
+        "<br><button type='submit' class='w3-button w3-blue w3-round-large'>" +
+        "<i class='fa fa-save'></i> Add Todo</button> " +
+        "<a href='/todos' class='w3-button w3-light-grey w3-round-large'>Cancel</a>" +
+        "</form>"
+    server html(200, renderPage value("Add Todo", content))
 })
 
+// POST: add todo
+server post("/todos/add", { |req|
+    form = server formData(req)
+    title = form get("title")
+    (title != nil) ifTrue {
+        db exec("INSERT INTO todos (title) VALUES ('" + title + "')")
+    }
+    server redirect("/todos")
+})
+
+// POST: delete todo
+server post("/todos/delete", { |req|
+    form = server formData(req)
+    id = form get("id")
+    (id != nil) ifTrue {
+        db exec("DELETE FROM todos WHERE id = " + id)
+    }
+    server redirect("/todos")
+})
+
+// POST: toggle done
+server post("/todos/toggle", { |req|
+    form = server formData(req)
+    id = form get("id")
+    (id != nil) ifTrue {
+        db exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = " + id)
+    }
+    server redirect("/todos")
+})
+
+// JSON API
+server get("/api/todos", { |req|
+    todos = db query("SELECT id, title, done FROM todos ORDER BY id")
+    // Build JSON manually
+    json = "["
+    todos each { |todo|
+        (json length() > 1) ifTrue { json = json + "," }
+        json = json + "{\"id\":" + todo get("id") toString() +
+            ",\"title\":\"" + todo get("title") +
+            "\",\"done\":" + todo get("done") toString() + "}"
+    }
+    json = json + "]"
+    server json(200, json)
+})
+
+"Starting Clay Todo App..." println
 server start()

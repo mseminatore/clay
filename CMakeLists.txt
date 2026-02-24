@@ -58,13 +58,21 @@ set(RUNTIME_SOURCES
     src/runtime/date.c
     src/runtime/http.c
     src/runtime/regex.c
+    src/runtime/db.c
     src/runtime/bootstrap.c
     src/runtime/intern.c
 )
 
+# SQLite amalgamation
+add_library(sqlite3 STATIC deps/sqlite/sqlite3.c)
+target_include_directories(sqlite3 PUBLIC deps/sqlite)
+if(MSVC)
+    target_compile_definitions(sqlite3 PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 add_library(clay_runtime STATIC ${RUNTIME_SOURCES})
-target_include_directories(clay_runtime PUBLIC src/runtime)
-target_link_libraries(clay_runtime PUBLIC ht)
+target_include_directories(clay_runtime PUBLIC src/runtime deps/sqlite)
+target_link_libraries(clay_runtime PUBLIC ht sqlite3)
 if(WIN32)
     target_link_libraries(clay_runtime PUBLIC winhttp ws2_32)
 endif()

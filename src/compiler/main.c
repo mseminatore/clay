@@ -240,7 +240,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
 static void clay_completion(const char *buf, linenoiseCompletions *lc) {
     static const char *builtins[] = {
         "Object", "Number", "String", "Array", "Dict", "File",
-        "System", "Date", "Http", "Regex", "Fiber", "FFI", "Math",
+        "System", "Date", "Http", "Regex", "Fiber", "Db", "FFI", "Math",
         "true", "false", "nil", "self", "super",
         "import", "clone", "println", "print",
         NULL

@@ -1146,6 +1146,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Http", clay_Http},
         {"Regex", clay_Regex},
         {"Fiber", clay_Fiber},
+        {"Db", clay_Db},
         {NULL, NULL}
     };
 
@@ -1197,6 +1198,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Http") == 0 ||
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
+           strcmp(name, "Db") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -1328,6 +1330,7 @@ static int bc_is_builtin_global(const char *name) {
            strcmp(name, "Http") == 0 ||
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
+           strcmp(name, "Db") == 0 ||
            strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
 }
