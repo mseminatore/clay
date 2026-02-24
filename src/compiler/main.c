@@ -640,8 +640,8 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
 
     BcCompiler bc;
     bc_compiler_init(&bc, &vm);
-
-    /* Set up stepping debugger */
+    bc.source_file = "<repl>";
+    clay_source_file = "<repl>";
     if (step_mode) {
         g_step.stepping = 1;
         g_step.last_line = 0;
@@ -846,6 +846,8 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 
     BcCompiler bc;
     bc_compiler_init(&bc, &vm);
+    bc.source_file = filename;
+    clay_source_file = filename;
 
     if (step_mode) {
         g_step.stepping = 1;
@@ -880,10 +882,17 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     if (caught != 0) {
         ClayValue err = clay_error_stack.current_error;
         if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+            ClayValue file = clay_send_val(err, "file", 0, NULL);
+            ClayValue line = clay_send_val(err, "line", 0, NULL);
             ClayValue msg = clay_send_val(err, "message", 0, NULL);
+            if (!CLAY_IS_NIL(file) && !CLAY_IS_NIL(line)) {
+                fprintf(stderr, "%s:%ld: ", clay_string_data(CLAY_OBJ(file)),
+                        (long)clay_to_int(line));
+            }
             fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
                     clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
             clay_release(CLAY_OBJ(msg));
+            if (!CLAY_IS_NIL(file)) clay_release(CLAY_OBJ(file));
         } else {
             fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
         }

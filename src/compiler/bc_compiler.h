@@ -80,6 +80,7 @@ typedef struct {
     /* Source line map: line_map[offset] = source line number */
     int line_map[BC_MAX_CODE];
     int current_line;
+    const char *source_file; /* filename for error messages */
 
     /* Local variable tracking for current compilation scope */
     BcLocal locals[BC_MAX_LOCALS];

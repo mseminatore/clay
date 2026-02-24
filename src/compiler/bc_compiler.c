@@ -635,6 +635,10 @@ static const char *opcode_to_selector(int opcode) {
  * Converts VM values to Clay values, dispatches via clay_send_val. */
 static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
                                clayvm_value_t b, int opcode) {
+    /* Update source line for error messages */
+    if (g_bc && vm->ip < (size_t)g_bc->len) {
+        clay_source_line = g_bc->line_map[vm->ip];
+    }
     ClayValue receiver = vm_to_clay(a);
     ClayValue arg = vm_to_clay(b);
     const char *sel = opcode_to_selector(opcode);
@@ -658,6 +662,11 @@ static InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
+
+    /* Update source line for error messages */
+    if (g_bc && vm->ip < (size_t)g_bc->len) {
+        clay_source_line = g_bc->line_map[vm->ip];
+    }
 
     /* Pop args in reverse: first popped = last arg */
     int msg_argc = argc - 2;
@@ -968,6 +977,10 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
 /* native_raise(value) — raise an exception via longjmp */
 static int native_raise_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
+    /* Update source line for error messages */
+    if (g_bc && vm->ip < (size_t)g_bc->len) {
+        clay_source_line = g_bc->line_map[vm->ip];
+    }
     ClayValue val = vm_to_clay(clayvm_vm_pop(vm));
     if (CLAY_IS_PTR(val) && !CLAY_IS_NIL(val) &&
         CLAY_OBJ(val)->type == CLAY_TYPE_STRING) {

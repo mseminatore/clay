@@ -247,6 +247,10 @@ extern ClayErrorStack clay_error_stack;
 /* Raise an error — longjmps to nearest try frame, or aborts */
 void clay_raise(ClayValue error);
 
+/* Source location tracking for error messages */
+extern int clay_source_line;
+extern const char *clay_source_file;
+
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 
