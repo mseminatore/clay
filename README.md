@@ -848,6 +848,9 @@ The standard library is available at:
 | **clay-match** | `Match` pattern matching: chainable `when`/`whenType`/`otherwise` with value and predicate matching |
 | **clay-log** | `Log` structured logging: `debug`/`info`/`warn`/`error` levels with timestamps, prefixes, and level filtering |
 | **clay-iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
+| **clay-path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
+| **clay-args** | `ArgParser` CLI parsing: `flag`, `option`, `parse`, `usage` |
+| **clay-template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
 
 Install the standard library (includes all sub-bricks):
 
