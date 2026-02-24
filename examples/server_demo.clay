@@ -17,12 +17,11 @@ Http serve(8080, { |req|
 
     (path == "/") ifTrue {
         counter = counter + 1
-        body = "<html><body>"
-        body = body + "<h1>Hello from Clay!</h1>"
-        body = body + "<p>You are visitor #" + counter toString() + "</p>"
-        body = body + "<p><a href='/about'>About</a> | <a href='/api/time'>API</a></p>"
-        body = body + "</body></html>"
-        Http response(200, body)
+        Http response(200, "<html><body>" +
+            "<h1>Hello from Clay!</h1>" +
+            "<p>You are visitor #" + counter toString() + "</p>" +
+            "<p><a href='/about'>About</a> | <a href='/api/time'>API</a></p>" +
+            "</body></html>")
     } ifFalse {
         (path == "/about") ifTrue {
             Http response(200, "<html><body><h1>About</h1><p>A Clay HTTP server.</p></body></html>")

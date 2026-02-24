@@ -711,6 +711,7 @@ static AstNode *parse_binary(Parser *p, int min_prec) {
         char *op = token_strdup(&p->previous);
         int line = p->previous.line;
 
+        skip_newlines(p); /* allow line continuation after operator */
         AstNode *right = parse_binary(p, op_prec + 1);
 
         AstNode *bin = ast_new(NODE_BINARY, line);
