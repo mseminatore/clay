@@ -30,6 +30,20 @@ renderPage = { |title, content|
     Template render(layout, d)
 }
 
+// -- Item templates --
+todoItem = "<li class='w3-display-container' style='{{style}}'>" +
+    "<form method='POST' action='/todos/toggle' style='display:inline'>" +
+    "<input type='hidden' name='id' value='{{id}}'>" +
+    "<button type='submit' class='w3-button w3-small' style='border:none;background:none'>" +
+    "<i class='fa-regular {{icon}} w3-text-blue'></i></button></form> " +
+    "{{title}}" +
+    "<form method='POST' action='/todos/delete' style='display:inline'>" +
+    "<input type='hidden' name='id' value='{{id}}'>" +
+    "<button type='submit' class='w3-button w3-display-right w3-text-red' style='border:none;background:none'>" +
+    "<i class='fa fa-trash'></i></button></form></li>"
+
+jsonItem = "{\"id\":{{id}},\"title\":\"{{title}}\",\"done\":{{done}}}"
+
 // -- Server setup --
 server = HttpServer new(8080)
 
@@ -64,33 +78,21 @@ server get("/todos", { |req|
     }
 
     (todos size() > 0) ifTrue {
-        content = content + "<ul class='w3-ul w3-border w3-card-4'>"
-        todos each { |todo|
-            id = todo get("id") toString()
-            title = todo get("title")
-            done = todo get("done")
-
-            (done == 1) ifTrue {
-                style = "text-decoration:line-through;color:#999"
-                icon = "fa-square-check"
+        items = todos map { |todo|
+            d = Dict clone
+            d set("id", todo get("id") toString())
+            d set("title", todo get("title"))
+            (todo get("done") == 1) ifTrue {
+                d set("style", "text-decoration:line-through;color:#999")
+                d set("icon", "fa-square-check")
             } ifFalse {
-                style = ""
-                icon = "fa-square"
+                d set("style", "")
+                d set("icon", "fa-square")
             }
-
-            content = content +
-                "<li class='w3-display-container' style='" + style + "'>" +
-                "<form method='POST' action='/todos/toggle' style='display:inline'>" +
-                "<input type='hidden' name='id' value='" + id + "'>" +
-                "<button type='submit' class='w3-button w3-small' style='border:none;background:none'>" +
-                "<i class='fa-regular " + icon + " w3-text-blue'></i></button></form> " +
-                title +
-                "<form method='POST' action='/todos/delete' style='display:inline'>" +
-                "<input type='hidden' name='id' value='" + id + "'>" +
-                "<button type='submit' class='w3-button w3-display-right w3-text-red' style='border:none;background:none'>" +
-                "<i class='fa fa-trash'></i></button></form></li>"
+            d
         }
-        content = content + "</ul>"
+        content = content + "<ul class='w3-ul w3-border w3-card-4'>" +
+            Template renderEach(todoItem, items) + "</ul>"
     }
 
     content = content +
@@ -147,16 +149,14 @@ server post("/todos/toggle", { |req|
 // JSON API
 server get("/api/todos", { |req|
     todos = db query("SELECT id, title, done FROM todos ORDER BY id")
-    // Build JSON manually
-    json = "["
-    todos each { |todo|
-        (json length() > 1) ifTrue { json = json + "," }
-        json = json + "{\"id\":" + todo get("id") toString() +
-            ",\"title\":\"" + todo get("title") +
-            "\",\"done\":" + todo get("done") toString() + "}"
+    items = todos map { |todo|
+        d = Dict clone
+        d set("id", todo get("id") toString())
+        d set("title", todo get("title"))
+        d set("done", todo get("done") toString())
+        d
     }
-    json = json + "]"
-    server json(200, json)
+    server json(200, "[" + Template renderEach(jsonItem, items, ",") + "]")
 })
 
 "Starting Clay Todo App..." println
