@@ -1,0 +1,36 @@
+//
+// HTTP Server Demo
+//
+// Run with:  clay server_demo.clay
+// Then visit: http://localhost:8080/
+//
+
+// Simple server using the low-level Http serve() API
+// For routing, use the clay-http-server brick instead.
+
+counter = 0
+
+Http serve(8080, { |req|
+    method = req method()
+    path = req path()
+    (method + " " + path) println()
+
+    (path == "/") ifTrue {
+        counter = counter + 1
+        Http response(200, "<html><body>" +
+            "<h1>Hello from Clay!</h1>" +
+            "<p>You are visitor #" + counter toString() + "</p>" +
+            "<p><a href='/about'>About</a> | <a href='/api/time'>API</a></p>" +
+            "</body></html>")
+    } ifFalse {
+        (path == "/about") ifTrue {
+            Http response(200, "<html><body><h1>About</h1><p>A Clay HTTP server.</p></body></html>")
+        } ifFalse {
+            (path == "/api/time") ifTrue {
+                Http jsonResponse(200, "{\"time\": \"" + Date now() toString() + "\"}")
+            } ifFalse {
+                Http response(404, "Not Found: " + path)
+            }
+        }
+    }
+})

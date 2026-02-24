@@ -619,6 +619,37 @@ resp body() println()
 
 > **Note:** On Windows, Http uses WinHTTP and supports HTTPS natively. On Unix/macOS, HTTPS requires OpenSSL (`brew install openssl` on macOS, typically pre-installed on Linux). Build with `cmake` and it will auto-detect OpenSSL. Without OpenSSL, only HTTP is supported.
 
+### HTTP server
+
+```clay
+// Simple server — handle all requests with a single block
+Http serve(8080, { |req|
+    method = req method()   // "GET", "POST", etc.
+    path = req path()       // "/api/data"
+    query = req query()     // "name=clay" (after ?)
+    body = req body()       // POST body
+
+    Http response(200, "Hello World")
+})
+
+// JSON response
+Http serve(8080, { |req|
+    Http jsonResponse(200, "{\"status\": \"ok\"}")
+})
+```
+
+For routing, use the `clay-http-server` brick:
+
+```clay
+import("clay-stdlib/clay-http-server")
+
+server = HttpServer new(8080)
+server get("/", { |req| server html(200, "<h1>Hello!</h1>") })
+server get("/api/time", { |req| server json(200, Date now() toString()) })
+server post("/api/echo", { |req| server text(200, req body()) })
+server start()
+```
+
 ### Regular expressions
 
 ```clay
@@ -702,7 +733,7 @@ b resume()     // 40
 | System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
-| Http | `get(url)`, `post(url, body)`, `status()`, `body()` |
+| Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `status()`, `body()`, `method()`, `path()`, `query()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
 
@@ -851,6 +882,7 @@ The standard library is available at:
 | **clay-path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
 | **clay-args** | `ArgParser` CLI parsing: `flag`, `option`, `parse`, `usage` |
 | **clay-template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
+| **clay-http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes, `text`/`html`/`json` response helpers |
 
 Install the standard library (includes all sub-bricks):
 
