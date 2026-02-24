@@ -374,6 +374,11 @@ arr min                       // minimum value
 arr max                       // maximum value
 arr avg                       // average value
 arr unique                    // unique elements
+arr pop()                     // remove + return last
+arr shift()                   // remove + return first
+arr slice(1, 3)               // sub-array [index 1..3)
+arr insert(1, "x")            // insert at index
+arr setAt(0, "y")             // set element at index
 
 // Equality (element-wise comparison)
 [1, 2, 3] == [1, 2, 3]       // true
@@ -391,6 +396,8 @@ Integers are tagged values (fast, no allocation). Floats are heap-allocated obje
 10 toFloat / 3                // 3.33333 (float division)
 3.14 + 2                      // 5.14 (mixed → float)
 3.14 toInt                    // 3 (truncation)
+(-5) abs()                    // 5
+5 times({ |i| i println() })  // prints 0..4
 ```
 
 ### Strings
@@ -414,6 +421,11 @@ s toInt                             // error (not a number)
 "hello" startsWith("he")            // true
 "hello" endsWith("lo")              // true
 "hello" reverse                     // "olleh"
+"hello" indexOf("ll")               // 2
+"abcabc" lastIndexOf("bc")          // 4
+"ab" repeat(3)                      // "ababab"
+"42" padLeft(5, "0")                // "00042"
+"hi" padRight(8)                    // "hi      "
 "line1\nline2" println              // prints two lines
 "col1\tcol2" println                // tab-separated
 ```
@@ -451,11 +463,16 @@ d toString() println()      // {name: Clay}
 d1 = Dict clone(); d1 set("a", 1)
 d2 = Dict clone(); d2 set("a", 1)
 d1 == d2                    // true
+
+// Merge, entries, clear
+d merge(other)              // merge other dict into d (mutates d)
+d entries()                 // [[key1, val1], [key2, val2], ...]
+d clear()                   // remove all entries
 ```
 
 ### Error handling
 
-Clay provides `try`/`catch` blocks and `raise` for error handling:
+Clay provides `try`/`catch`/`finally` blocks and `raise` for error handling:
 
 ```clay
 // Catch errors
@@ -474,6 +491,16 @@ try({
 }) catch({ |e|
   e type() println()    // "NilError"
   e message() println() // "message 'banana' sent to nil"
+})
+
+// Finally runs whether try succeeds or fails
+try({
+  f = File open("data.txt")
+  // ... use file ...
+}) catch({ |e|
+  "Error: " + e message()
+}) finally({
+  f close()             // always runs
 })
 ```
 
