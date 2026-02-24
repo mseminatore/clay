@@ -645,11 +645,11 @@ Supports ERE (Extended Regular Expressions): `.`, `^`, `$`, `*`, `+`, `?`, `[...
 
 ```clay
 // Create a fiber from a block
-f = Fiber new({
+f = Fiber new {
     Fiber yield(1)
     Fiber yield(2)
     3
-})
+}
 
 f resume()     // 1
 f resume()     // 2
