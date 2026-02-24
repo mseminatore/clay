@@ -380,7 +380,12 @@ static ClayValue http_response(ClayObject *self, int argc, ClayValue *argv) {
     int status_code = CLAY_IS_INT(argv[0]) ? (int)clay_to_int(argv[0]) : 200;
     const char *body = clay_string_data(CLAY_OBJ(argv[1]));
     size_t blen = strlen(body);
-    return make_response(status_code, body, blen);
+    ClayValue resp = make_response(status_code, body, blen);
+    /* Auto-detect HTML content */
+    if (blen > 0 && body[0] == '<')
+        clay_set_slot(CLAY_OBJ(resp), "_content_type",
+            CLAY_VAL(clay_string_new("text/html")));
+    return resp;
 }
 
 /* Http jsonResponse(status, body) — response with JSON content type */
