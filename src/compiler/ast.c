@@ -139,6 +139,7 @@ void ast_free(AstNode *node) {
         case NODE_TRY_CATCH:
             ast_free(node->as.try_catch.try_block);
             if (node->as.try_catch.catch_block) ast_free(node->as.try_catch.catch_block);
+            if (node->as.try_catch.finally_block) ast_free(node->as.try_catch.finally_block);
             break;
         case NODE_RAISE:
             ast_free(node->as.raise.expr);

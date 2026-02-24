@@ -178,3 +178,4 @@ add_test(NAME clay_test_date COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/t
 add_test(NAME clay_test_http COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_http.clay)
 add_test(NAME clay_test_regex COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_regex.clay)
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)
+add_test(NAME clay_test_new_methods COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_new_methods.clay)

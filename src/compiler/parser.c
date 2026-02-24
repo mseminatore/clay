@@ -346,9 +346,28 @@ static AstNode *parse_primary(Parser *p) {
             catch_block = parse_block(p);
             expect(p, TOK_RPAREN, "Expected ')' after catch block");
         }
+        /* Peek for finally — save full parser state, skip newlines, check for TOK_FINALLY */
+        AstNode *finally_block = NULL;
+        {
+            Token saved_current = p->current;
+            Token saved_previous = p->previous;
+            Lexer saved_lexer = p->lexer;
+            skip_newlines(p);
+            if (match(p, TOK_FINALLY)) {
+                expect(p, TOK_LPAREN, "Expected '(' after finally");
+                finally_block = parse_block(p);
+                expect(p, TOK_RPAREN, "Expected ')' after finally block");
+            } else {
+                /* No finally — restore full parser state */
+                p->current = saved_current;
+                p->previous = saved_previous;
+                p->lexer = saved_lexer;
+            }
+        }
         AstNode *node = ast_new(NODE_TRY_CATCH, line);
         node->as.try_catch.try_block = try_block;
         node->as.try_catch.catch_block = catch_block;
+        node->as.try_catch.finally_block = finally_block;
         return node;
     }
 

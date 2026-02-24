@@ -125,6 +125,7 @@ static TokenType check_keyword(const char *start, int length) {
     if (length == 6 && memcmp(start, "import", 6) == 0) return TOK_IMPORT;
     if (length == 3 && memcmp(start, "try", 3) == 0) return TOK_TRY;
     if (length == 5 && memcmp(start, "catch", 5) == 0) return TOK_CATCH;
+    if (length == 7 && memcmp(start, "finally", 7) == 0) return TOK_FINALLY;
     if (length == 5 && memcmp(start, "raise", 5) == 0) return TOK_RAISE;
     return TOK_IDENT;
 }
@@ -230,6 +231,7 @@ const char *token_type_name(TokenType type) {
         case TOK_IMPORT:     return "IMPORT";
         case TOK_TRY:        return "TRY";
         case TOK_CATCH:      return "CATCH";
+        case TOK_FINALLY:    return "FINALLY";
         case TOK_RAISE:      return "RAISE";
         case TOK_LPAREN:     return "(";
         case TOK_RPAREN:     return ")";

@@ -227,6 +227,55 @@ static ClayValue dict_neq(ClayObject *self, int argc, ClayValue *argv) {
     return dict_equals(self, argc, argv) == CLAY_TRUE ? CLAY_FALSE : CLAY_TRUE;
 }
 
+static ClayValue dict_merge(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_VAL(self);
+    ClayObject *other = CLAY_OBJ(argv[0]);
+    if (other->type != CLAY_TYPE_DICT) return CLAY_VAL(self);
+    size_t pos = 0;
+    ht_key_t key;
+    ht_value_t val;
+    while (ht_next(other->as.dict.map, &pos, &key, &val)) {
+        clay_dict_set(self, (const char *)key, (ClayValue)(uintptr_t)val);
+    }
+    return CLAY_VAL(self);
+}
+
+static ClayValue dict_entries(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayObject *arr = clay_array_new();
+    size_t pos = 0;
+    ht_key_t key;
+    ht_value_t val;
+    while (ht_next(self->as.dict.map, &pos, &key, &val)) {
+        ClayObject *pair = clay_array_new();
+        ClayObject *ks = clay_string_new((const char *)key);
+        clay_array_append(pair, CLAY_VAL(ks));
+        clay_release(ks);
+        clay_array_append(pair, (ClayValue)(uintptr_t)val);
+        clay_array_append(arr, CLAY_VAL(pair));
+        clay_release(pair);
+    }
+    return CLAY_VAL(arr);
+}
+
+static ClayValue dict_clear(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    /* Release all values */
+    size_t pos = 0;
+    ht_key_t key;
+    ht_value_t val;
+    while (ht_next(self->as.dict.map, &pos, &key, &val)) {
+        ClayValue cv = (ClayValue)(uintptr_t)val;
+        if (CLAY_IS_PTR(cv) && !CLAY_IS_NIL(cv) && cv != CLAY_TRUE && cv != CLAY_FALSE) {
+            clay_release(CLAY_OBJ(cv));
+        }
+        free((void *)key);
+    }
+    ht_free(self->as.dict.map);
+    self->as.dict.map = dict_ht_create();
+    return CLAY_VAL(self);
+}
+
 void clay_dict_init_methods(ClayObject *proto) {
     clay_set_method(proto, "set", dict_set);
     clay_set_method(proto, "get", dict_get);
@@ -239,4 +288,7 @@ void clay_dict_init_methods(ClayObject *proto) {
     clay_set_method(proto, "toString", dict_toString);
     clay_set_method(proto, "==", dict_equals);
     clay_set_method(proto, "!=", dict_neq);
+    clay_set_method(proto, "merge", dict_merge);
+    clay_set_method(proto, "entries", dict_entries);
+    clay_set_method(proto, "clear", dict_clear);
 }

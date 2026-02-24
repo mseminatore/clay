@@ -310,6 +310,87 @@ static ClayValue string_test(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_BOOL(clay_regex_search(pat_obj->as.string.data, self->as.string.data, &start, &len));
 }
 
+static ClayValue string_indexOf(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return clay_int(-1);
+    ClayObject *sub = CLAY_OBJ(argv[0]);
+    if (sub->type != CLAY_TYPE_STRING) return clay_int(-1);
+    const char *found = strstr(self->as.string.data, sub->as.string.data);
+    if (!found) return clay_int(-1);
+    return clay_int((intptr_t)(found - self->as.string.data));
+}
+
+static ClayValue string_lastIndexOf(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return clay_int(-1);
+    ClayObject *sub = CLAY_OBJ(argv[0]);
+    if (sub->type != CLAY_TYPE_STRING) return clay_int(-1);
+    if (sub->as.string.length == 0) return clay_int((intptr_t)self->as.string.length);
+    const char *last = NULL;
+    const char *p = self->as.string.data;
+    while ((p = strstr(p, sub->as.string.data)) != NULL) {
+        last = p;
+        p++;
+    }
+    if (!last) return clay_int(-1);
+    return clay_int((intptr_t)(last - self->as.string.data));
+}
+
+static ClayValue string_repeat(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(clay_string_new(""));
+    intptr_t n = clay_to_int(argv[0]);
+    if (n <= 0) return CLAY_VAL(clay_string_new(""));
+    size_t total = self->as.string.length * (size_t)n;
+    char *buf = (char *)malloc(total + 1);
+    char *p = buf;
+    for (intptr_t i = 0; i < n; i++) {
+        memcpy(p, self->as.string.data, self->as.string.length);
+        p += self->as.string.length;
+    }
+    buf[total] = '\0';
+    ClayObject *result = clay_string_new_len(buf, total);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
+static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(clay_retain(self));
+    intptr_t width = clay_to_int(argv[0]);
+    if ((size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
+    char pad = ' ';
+    if (argc > 1 && !CLAY_IS_INT(argv[1]) && !CLAY_IS_NIL(argv[1])) {
+        ClayObject *ps = CLAY_OBJ(argv[1]);
+        if (ps->type == CLAY_TYPE_STRING && ps->as.string.length > 0)
+            pad = ps->as.string.data[0];
+    }
+    size_t pad_count = (size_t)width - self->as.string.length;
+    char *buf = (char *)malloc((size_t)width + 1);
+    memset(buf, pad, pad_count);
+    memcpy(buf + pad_count, self->as.string.data, self->as.string.length);
+    buf[width] = '\0';
+    ClayObject *result = clay_string_new_len(buf, (size_t)width);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
+static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(clay_retain(self));
+    intptr_t width = clay_to_int(argv[0]);
+    if ((size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
+    char pad = ' ';
+    if (argc > 1 && !CLAY_IS_INT(argv[1]) && !CLAY_IS_NIL(argv[1])) {
+        ClayObject *ps = CLAY_OBJ(argv[1]);
+        if (ps->type == CLAY_TYPE_STRING && ps->as.string.length > 0)
+            pad = ps->as.string.data[0];
+    }
+    size_t pad_count = (size_t)width - self->as.string.length;
+    char *buf = (char *)malloc((size_t)width + 1);
+    memcpy(buf, self->as.string.data, self->as.string.length);
+    memset(buf + self->as.string.length, pad, pad_count);
+    buf[width] = '\0';
+    ClayObject *result = clay_string_new_len(buf, (size_t)width);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
 void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "println", string_println);
     clay_set_method(proto, "print", string_print);
@@ -333,4 +414,9 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "reverse", string_reverse);
     clay_set_method(proto, "match", string_match);
     clay_set_method(proto, "test", string_test);
+    clay_set_method(proto, "indexOf", string_indexOf);
+    clay_set_method(proto, "lastIndexOf", string_lastIndexOf);
+    clay_set_method(proto, "repeat", string_repeat);
+    clay_set_method(proto, "padLeft", string_padLeft);
+    clay_set_method(proto, "padRight", string_padRight);
 }

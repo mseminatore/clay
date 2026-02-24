@@ -1,0 +1,124 @@
+// test_new_methods.clay — Tests for new collection/number/string/dict methods
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue({ self _p = self _p + 1 })
+        (!(a == b)) ifTrue({
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        })
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue({ self _p = self _p + 1 })
+        (!(v == true)) ifTrue({ self _f = self _f + 1; "FAIL: not true" println() })
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue({ raise("test failures") })
+        self
+    }
+}
+
+// Number times
+sum = 0
+5 times({ |i| sum = sum + i })
+Test eq(sum, 10)
+
+count = 0
+0 times({ |i| count = count + 1 })
+Test eq(count, 0)
+
+// Number abs
+Test eq((-5) abs(), 5)
+Test eq(3 abs(), 3)
+Test eq(0 abs(), 0)
+
+// Array pop
+a = Array new()
+a push(10); a push(20); a push(30)
+Test eq(a pop(), 30)
+Test eq(a size(), 2)
+
+// Array shift
+a = Array new()
+a push(1); a push(2); a push(3)
+Test eq(a shift(), 1)
+Test eq(a size(), 2)
+Test eq(a at(0), 2)
+
+// Array slice
+a = Array new()
+a push(10); a push(20); a push(30); a push(40); a push(50)
+b = a slice(1, 4)
+Test eq(b size(), 3)
+Test eq(b at(0), 20)
+Test eq(b at(2), 40)
+
+// Array setAt
+a = Array new()
+a push(1); a push(2); a push(3)
+a setAt(1, 99)
+Test eq(a at(1), 99)
+
+// Array insert
+a = Array new()
+a push(1); a push(3)
+a insert(1, 2)
+Test eq(a size(), 3)
+Test eq(a at(1), 2)
+Test eq(a at(2), 3)
+
+// String indexOf
+Test eq("hello world" indexOf("world"), 6)
+Test eq("hello world" indexOf("xyz"), -1)
+Test eq("hello world" indexOf("hello"), 0)
+
+// String lastIndexOf
+Test eq("abcabc" lastIndexOf("bc"), 4)
+Test eq("abcabc" lastIndexOf("xyz"), -1)
+
+// String repeat
+Test eq("ab" repeat(3), "ababab")
+Test eq("x" repeat(0), "")
+Test eq("hi" repeat(1), "hi")
+
+// String padLeft / padRight
+Test eq("hi" padLeft(5), "   hi")
+Test eq("hi" padRight(5), "hi   ")
+Test eq("42" padLeft(5, "0"), "00042")
+
+// Dict merge
+d1 = Dict new()
+d1 set("a", 1)
+d1 set("b", 2)
+d2 = Dict new()
+d2 set("b", 99)
+d2 set("c", 3)
+d1 merge(d2)
+Test eq(d1 get("a"), 1)
+Test eq(d1 get("b"), 99)
+Test eq(d1 get("c"), 3)
+
+// Dict entries
+d = Dict new()
+d set("x", 10)
+d set("y", 20)
+entries = d entries()
+Test eq(entries size(), 2)
+
+// Dict clear
+d = Dict new()
+d set("a", 1)
+d set("b", 2)
+d clear()
+Test eq(d size(), 0)
+
+Test done()

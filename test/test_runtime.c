@@ -1344,6 +1344,181 @@ static void test_memory_leaks(void) {
     TEST(clay_dealloc_count > 0);
 }
 
+static void test_new_methods(void) {
+    SUITE("New Methods");
+
+    /* Number abs */
+    COMMENT("Number abs...");
+    ClayValue v = clay_send_val(clay_int(-5), "abs", 0, NULL);
+    TEST(clay_to_int(v) == 5);
+    v = clay_send_val(clay_int(3), "abs", 0, NULL);
+    TEST(clay_to_int(v) == 3);
+    v = clay_send_val(clay_int(0), "abs", 0, NULL);
+    TEST(clay_to_int(v) == 0);
+
+    /* Number times */
+    COMMENT("Number times...");
+    ClayObject *counter = clay_clone(clay_Object);
+    clay_set_slot(counter, "count", clay_int(0));
+    ClayObject *blk = clay_clone(clay_Object);
+    clay_set_method(blk, "value", (ClayMethodFunc)NULL);
+    /* Can't easily test times with a block in C without a real block.
+       Instead, test via the VM path with a .clay test. Just verify it's callable. */
+
+    /* Array pop */
+    COMMENT("Array pop...");
+    ClayObject *arr = clay_array_new();
+    clay_array_append(arr, clay_int(10));
+    clay_array_append(arr, clay_int(20));
+    clay_array_append(arr, clay_int(30));
+    v = clay_send(arr, "pop", 0, NULL);
+    TEST(clay_to_int(v) == 30);
+    TEST(clay_array_size(arr) == 2);
+    v = clay_send(arr, "pop", 0, NULL);
+    TEST(clay_to_int(v) == 20);
+    v = clay_send(arr, "pop", 0, NULL);
+    TEST(clay_to_int(v) == 10);
+    v = clay_send(arr, "pop", 0, NULL);
+    TEST(CLAY_IS_NIL(v));
+    clay_release(arr);
+
+    /* Array shift */
+    COMMENT("Array shift...");
+    arr = clay_array_new();
+    clay_array_append(arr, clay_int(1));
+    clay_array_append(arr, clay_int(2));
+    clay_array_append(arr, clay_int(3));
+    v = clay_send(arr, "shift", 0, NULL);
+    TEST(clay_to_int(v) == 1);
+    TEST(clay_array_size(arr) == 2);
+    TEST(clay_to_int(clay_array_at(arr, 0)) == 2);
+    clay_release(arr);
+
+    /* Array slice */
+    COMMENT("Array slice...");
+    arr = clay_array_new();
+    for (int i = 0; i < 5; i++) clay_array_append(arr, clay_int(i * 10));
+    ClayValue slice_args[2] = { clay_int(1), clay_int(4) };
+    v = clay_send(arr, "slice", 2, slice_args);
+    ClayObject *sliced = CLAY_OBJ(v);
+    TEST(clay_array_size(sliced) == 3);
+    TEST(clay_to_int(clay_array_at(sliced, 0)) == 10);
+    TEST(clay_to_int(clay_array_at(sliced, 1)) == 20);
+    TEST(clay_to_int(clay_array_at(sliced, 2)) == 30);
+    clay_release(sliced);
+    clay_release(arr);
+
+    /* Array setAt */
+    COMMENT("Array setAt...");
+    arr = clay_array_new();
+    clay_array_append(arr, clay_int(1));
+    clay_array_append(arr, clay_int(2));
+    clay_array_append(arr, clay_int(3));
+    ClayValue setAt_args[2] = { clay_int(1), clay_int(99) };
+    clay_send(arr, "setAt", 2, setAt_args);
+    TEST(clay_to_int(clay_array_at(arr, 1)) == 99);
+    clay_release(arr);
+
+    /* Array insert */
+    COMMENT("Array insert...");
+    arr = clay_array_new();
+    clay_array_append(arr, clay_int(1));
+    clay_array_append(arr, clay_int(3));
+    ClayValue insert_args[2] = { clay_int(1), clay_int(2) };
+    clay_send(arr, "insert", 2, insert_args);
+    TEST(clay_array_size(arr) == 3);
+    TEST(clay_to_int(clay_array_at(arr, 0)) == 1);
+    TEST(clay_to_int(clay_array_at(arr, 1)) == 2);
+    TEST(clay_to_int(clay_array_at(arr, 2)) == 3);
+    clay_release(arr);
+
+    /* String indexOf */
+    COMMENT("String indexOf...");
+    ClayObject *s = clay_string_new("hello world");
+    ClayValue sub_arg = CLAY_VAL(clay_string_new("world"));
+    v = clay_send(s, "indexOf", 1, &sub_arg);
+    TEST(clay_to_int(v) == 6);
+    clay_release(CLAY_OBJ(sub_arg));
+    sub_arg = CLAY_VAL(clay_string_new("xyz"));
+    v = clay_send(s, "indexOf", 1, &sub_arg);
+    TEST(clay_to_int(v) == -1);
+    clay_release(CLAY_OBJ(sub_arg));
+    clay_release(s);
+
+    /* String lastIndexOf */
+    COMMENT("String lastIndexOf...");
+    s = clay_string_new("abcabc");
+    sub_arg = CLAY_VAL(clay_string_new("bc"));
+    v = clay_send(s, "lastIndexOf", 1, &sub_arg);
+    TEST(clay_to_int(v) == 4);
+    clay_release(CLAY_OBJ(sub_arg));
+    clay_release(s);
+
+    /* String repeat */
+    COMMENT("String repeat...");
+    s = clay_string_new("ab");
+    ClayValue n_arg = clay_int(3);
+    v = clay_send(s, "repeat", 1, &n_arg);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(v)), "ababab") == 0);
+    clay_release(CLAY_OBJ(v));
+    clay_release(s);
+
+    /* String padLeft / padRight */
+    COMMENT("String padLeft/padRight...");
+    s = clay_string_new("hi");
+    n_arg = clay_int(5);
+    v = clay_send(s, "padLeft", 1, &n_arg);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(v)), "   hi") == 0);
+    clay_release(CLAY_OBJ(v));
+    v = clay_send(s, "padRight", 1, &n_arg);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(v)), "hi   ") == 0);
+    clay_release(CLAY_OBJ(v));
+    ClayValue pad_args[2] = { clay_int(6), CLAY_VAL(clay_string_new("0")) };
+    v = clay_send(s, "padLeft", 2, pad_args);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(v)), "0000hi") == 0);
+    clay_release(CLAY_OBJ(v));
+    clay_release(CLAY_OBJ(pad_args[1]));
+    clay_release(s);
+
+    /* Dict merge */
+    COMMENT("Dict merge...");
+    ClayObject *d1 = clay_dict_new();
+    clay_dict_set(d1, "a", clay_int(1));
+    clay_dict_set(d1, "b", clay_int(2));
+    ClayObject *d2 = clay_dict_new();
+    clay_dict_set(d2, "b", clay_int(99));
+    clay_dict_set(d2, "c", clay_int(3));
+    ClayValue merge_arg = CLAY_VAL(d2);
+    clay_send(d1, "merge", 1, &merge_arg);
+    TEST(clay_to_int(clay_dict_get(d1, "a")) == 1);
+    TEST(clay_to_int(clay_dict_get(d1, "b")) == 99);
+    TEST(clay_to_int(clay_dict_get(d1, "c")) == 3);
+    clay_release(d2);
+    clay_release(d1);
+
+    /* Dict entries */
+    COMMENT("Dict entries...");
+    d1 = clay_dict_new();
+    clay_dict_set(d1, "x", clay_int(10));
+    clay_dict_set(d1, "y", clay_int(20));
+    v = clay_send(d1, "entries", 0, NULL);
+    ClayObject *entries = CLAY_OBJ(v);
+    TEST(clay_array_size(entries) == 2);
+    clay_release(entries);
+    clay_release(d1);
+
+    /* Dict clear */
+    COMMENT("Dict clear...");
+    d1 = clay_dict_new();
+    clay_dict_set(d1, "a", clay_int(1));
+    clay_dict_set(d1, "b", clay_int(2));
+    clay_send(d1, "clear", 0, NULL);
+    TEST(clay_dict_size(d1) == 0);
+    clay_release(d1);
+
+    clay_release(counter);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -1378,6 +1553,7 @@ void test_main(int argc, char *argv[]) {
     test_method_cache();
     test_super_dispatch();
     test_memory_leaks();
+    test_new_methods();
     /* test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures(); */

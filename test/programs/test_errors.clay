@@ -69,4 +69,19 @@ Test eq(x, 1)
 try({ raise("err"); x = 99 }) catch({ |e| x = 3 })
 Test eq(x, 3)
 
+// Finally runs on success
+f = 0
+try({ 42 }) catch({ |e| 0 }) finally({ f = 1 })
+Test eq(f, 1)
+
+// Finally runs on error
+f = 0
+try({ raise("err") }) catch({ |e| 0 }) finally({ f = 2 })
+Test eq(f, 2)
+
+// Finally runs with try only (no catch)
+f = 0
+try({ 99 }) finally({ f = 3 })
+Test eq(f, 3)
+
 Test done()

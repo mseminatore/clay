@@ -393,6 +393,79 @@ static ClayValue array_unique(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+static ClayValue array_pop(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->as.array.size == 0) return CLAY_NIL;
+    ClayValue val = self->as.array.items[--self->as.array.size];
+    return val;
+}
+
+static ClayValue array_shift(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->as.array.size == 0) return CLAY_NIL;
+    ClayValue val = self->as.array.items[0];
+    memmove(&self->as.array.items[0], &self->as.array.items[1],
+            (self->as.array.size - 1) * sizeof(ClayValue));
+    self->as.array.size--;
+    return val;
+}
+
+static ClayValue array_slice(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_VAL(clay_array_new());
+    intptr_t start = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : 0;
+    intptr_t end = (argc > 1 && CLAY_IS_INT(argv[1])) ? clay_to_int(argv[1])
+                 : (intptr_t)self->as.array.size;
+    intptr_t len = (intptr_t)self->as.array.size;
+    if (start < 0) start = 0;
+    if (end > len) end = len;
+    if (start >= end) return CLAY_VAL(clay_array_new());
+    ClayObject *result = clay_array_new();
+    for (intptr_t i = start; i < end; i++) {
+        clay_array_append(result, self->as.array.items[i]);
+    }
+    return CLAY_VAL(result);
+}
+
+static ClayValue array_insert(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 2 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(self);
+    intptr_t idx = clay_to_int(argv[0]);
+    if (idx < 0) idx = 0;
+    if ((size_t)idx > self->as.array.size) idx = (intptr_t)self->as.array.size;
+    /* Ensure capacity */
+    if (self->as.array.size >= self->as.array.capacity) {
+        self->as.array.capacity *= 2;
+        self->as.array.items = (ClayValue *)realloc(self->as.array.items,
+            sizeof(ClayValue) * self->as.array.capacity);
+    }
+    /* Shift elements right */
+    memmove(&self->as.array.items[idx + 1], &self->as.array.items[idx],
+            (self->as.array.size - (size_t)idx) * sizeof(ClayValue));
+    ClayValue val = argv[1];
+    if (CLAY_IS_PTR(val) && !CLAY_IS_NIL(val) && val != CLAY_TRUE && val != CLAY_FALSE) {
+        clay_retain(CLAY_OBJ(val));
+    }
+    self->as.array.items[idx] = val;
+    self->as.array.size++;
+    return CLAY_VAL(self);
+}
+
+static ClayValue array_setAt(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 2 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(self);
+    intptr_t idx = clay_to_int(argv[0]);
+    if (idx < 0 || (size_t)idx >= self->as.array.size) return CLAY_VAL(self);
+    /* Release old value */
+    ClayValue old = self->as.array.items[idx];
+    if (CLAY_IS_PTR(old) && !CLAY_IS_NIL(old) && old != CLAY_TRUE && old != CLAY_FALSE) {
+        clay_release(CLAY_OBJ(old));
+    }
+    ClayValue val = argv[1];
+    if (CLAY_IS_PTR(val) && !CLAY_IS_NIL(val) && val != CLAY_TRUE && val != CLAY_FALSE) {
+        clay_retain(CLAY_OBJ(val));
+    }
+    self->as.array.items[idx] = val;
+    return CLAY_VAL(self);
+}
+
 void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "append", array_append);
     clay_set_method(proto, "push", array_append);
@@ -421,4 +494,9 @@ void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "max", array_max);
     clay_set_method(proto, "avg", array_avg);
     clay_set_method(proto, "unique", array_unique);
+    clay_set_method(proto, "pop", array_pop);
+    clay_set_method(proto, "shift", array_shift);
+    clay_set_method(proto, "slice", array_slice);
+    clay_set_method(proto, "insert", array_insert);
+    clay_set_method(proto, "setAt", array_setAt);
 }

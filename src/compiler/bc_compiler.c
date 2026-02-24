@@ -913,10 +913,12 @@ static int native_to_bool_fn(clayvm_vm_t *vm, int argc) {
 /* native_try_catch(try_block, catch_block) — setjmp-based exception handling */
 static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
+    clayvm_value_t finally_val = clayvm_vm_pop(vm);
     clayvm_value_t catch_val = clayvm_vm_pop(vm);
     clayvm_value_t try_val = clayvm_vm_pop(vm);
     ClayValue try_block = vm_to_clay(try_val);
     ClayValue catch_block = vm_to_clay(catch_val);
+    ClayValue finally_block = vm_to_clay(finally_val);
 
     /* Save VM state — longjmp from raise() bypasses trampoline restore */
     const uint8_t *saved_code = vm->code;
@@ -935,6 +937,9 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
         vm->sp = saved_sp;
         vm->running = saved_running;
         vm->frame_count = saved_frame_count;
+        if (!CLAY_IS_NIL(finally_block)) {
+            clay_send_val(finally_block, "value", 0, NULL);
+        }
         clayvm_vm_push(vm, clay_to_vm(result));
     } else {
         /* Error path — trampoline's restore was skipped by longjmp */
@@ -946,12 +951,16 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
         vm->frame_count = saved_frame_count;
 
         ClayValue error = clay_error_stack.current_error;
+        ClayValue result;
         if (!CLAY_IS_NIL(catch_block)) {
-            ClayValue result = clay_send_val(catch_block, "value", 1, &error);
-            clayvm_vm_push(vm, clay_to_vm(result));
+            result = clay_send_val(catch_block, "value", 1, &error);
         } else {
-            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+            result = CLAY_NIL;
         }
+        if (!CLAY_IS_NIL(finally_block)) {
+            clay_send_val(finally_block, "value", 0, NULL);
+        }
+        clayvm_vm_push(vm, clay_to_vm(result));
     }
     return 0;
 }
@@ -1109,7 +1118,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_cell_set = clayvm_native_register(&vm->natives, "cell_set", native_cell_set_fn, 2);
     bc->native_is_truthy = clayvm_native_register(&vm->natives, "is_truthy", native_is_truthy_fn, 1);
     bc->native_to_bool = clayvm_native_register(&vm->natives, "to_bool", native_to_bool_fn, 1);
-    bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 2);
+    bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 3);
     bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
 
     /* Pre-register Clay builtin prototypes as globals */
@@ -1419,6 +1428,8 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
             bc_scan_free_vars(node->as.try_catch.try_block, block_params, param_count, caps, bc);
             if (node->as.try_catch.catch_block)
                 bc_scan_free_vars(node->as.try_catch.catch_block, block_params, param_count, caps, bc);
+            if (node->as.try_catch.finally_block)
+                bc_scan_free_vars(node->as.try_catch.finally_block, block_params, param_count, caps, bc);
             break;
         case NODE_RAISE:
             bc_scan_free_vars(node->as.raise.expr, block_params, param_count, caps, bc);
@@ -1472,7 +1483,10 @@ static void bc_prescan_node(BcCompiler *bc, AstNode *node) {
             break;
         case NODE_TRY_CATCH:
             bc_prescan_node(bc, node->as.try_catch.try_block);
-            bc_prescan_node(bc, node->as.try_catch.catch_block);
+            if (node->as.try_catch.catch_block)
+                bc_prescan_node(bc, node->as.try_catch.catch_block);
+            if (node->as.try_catch.finally_block)
+                bc_prescan_node(bc, node->as.try_catch.finally_block);
             break;
         case NODE_SLOT_ASSIGN:
             bc_prescan_node(bc, node->as.slot_assign.receiver);
@@ -1994,9 +2008,16 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
                     (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
             }
+            /* Compile finally block (or push nil if absent) */
+            if (node->as.try_catch.finally_block) {
+                bc_emit_expr(bc, node->as.try_catch.finally_block);
+            } else {
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+                    (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            }
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
             emit_u16(bc, (uint16_t)bc->native_try_catch);
-            emit_byte(bc, 2);
+            emit_byte(bc, 3);
             break;
         }
 

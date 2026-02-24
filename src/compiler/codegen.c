@@ -809,6 +809,12 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
         catch_block = emit_expr(cg, node->as.try_catch.catch_block);
     }
 
+    /* Emit finally block if present */
+    char *finally_block = NULL;
+    if (node->as.try_catch.finally_block) {
+        finally_block = emit_expr(cg, node->as.try_catch.finally_block);
+    }
+
     /* Push error frame and test setjmp */
     emit_indent(cg);
     fprintf(cg->out, "if (clay_try_push() == 0) {\n");
@@ -843,6 +849,13 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
     cg->indent--;
     emit_indent(cg);
     fprintf(cg->out, "}\n");
+
+    /* Finally block — always executed */
+    if (finally_block) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_send_val(%s, \"value\", 0, NULL);\n", finally_block);
+        free(finally_block);
+    }
 
     free(try_block);
     if (catch_block) free(catch_block);

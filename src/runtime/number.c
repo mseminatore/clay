@@ -202,6 +202,27 @@ static ClayValue number_toInt(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int(self_int_value(self));
 }
 
+static ClayValue number_abs(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (self->type == CLAY_TYPE_FLOAT) {
+        float v = self->as.number_float.value;
+        return CLAY_VAL(clay_float_new(v < 0 ? -v : v));
+    }
+    intptr_t v = self_int_value(self);
+    return clay_int(v < 0 ? -v : v);
+}
+
+static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_NIL;
+    intptr_t n = self_int_value(self);
+    ClayValue result = CLAY_NIL;
+    for (intptr_t i = 0; i < n; i++) {
+        ClayValue arg = clay_int(i);
+        result = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+    }
+    return result;
+}
+
 void clay_number_init_methods(ClayObject *proto) {
     clay_set_method(proto, "+",  number_add);
     clay_set_method(proto, "-",  number_sub);
@@ -218,4 +239,6 @@ void clay_number_init_methods(ClayObject *proto) {
     clay_set_method(proto, "println",  number_println);
     clay_set_method(proto, "toFloat",  number_toFloat);
     clay_set_method(proto, "toInt",    number_toInt);
+    clay_set_method(proto, "abs",      number_abs);
+    clay_set_method(proto, "times",    number_times);
 }

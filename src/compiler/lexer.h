@@ -15,6 +15,7 @@ typedef enum {
     TOK_IMPORT,         /* import */
     TOK_TRY,            /* try */
     TOK_CATCH,          /* catch */
+    TOK_FINALLY,        /* finally */
     TOK_RAISE,          /* raise */
 
     /* Punctuation */

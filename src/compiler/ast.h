@@ -103,7 +103,8 @@ struct AstNode {
         /* NODE_TRY_CATCH */
         struct {
             AstNode *try_block;
-            AstNode *catch_block;  /* block with 1 param (error) */
+            AstNode *catch_block;   /* block with 1 param (error) */
+            AstNode *finally_block; /* optional finally block */
         } try_catch;
 
         /* NODE_RAISE */
