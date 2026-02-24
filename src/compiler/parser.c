@@ -871,25 +871,60 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
                    !strchr(import_path, '\\') &&
                    import_path[0] != '.';
     if (is_brick) {
-        /* Try bricks/<path>/brick.json for main entry point */
-        char manifest_path[BRICK_MAX_PATH];
-        snprintf(manifest_path, sizeof(manifest_path), "bricks/%s/brick.json", import_path);
-        BrickManifest bm;
-        if (brick_parse(manifest_path, &bm) == 0 && bm.main_file[0]) {
-            char brick_main[BRICK_MAX_PATH];
-            snprintf(brick_main, sizeof(brick_main), "bricks/%s/%s", import_path, bm.main_file);
-            struct stat st;
-            if (stat(brick_main, &st) == 0) {
-                resolved = strdup(brick_main);
+        /* Try bricks/<path>/brick.json relative to CWD first, then walk
+         * up parent directories to find a project root with bricks/. */
+        char try_dirs[8][BRICK_MAX_PATH];
+        int ndirs = 0;
+
+        /* CWD-relative: bricks, ../bricks, ../../bricks, ... */
+        snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "bricks");
+        snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "../bricks");
+        snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "../../bricks");
+
+        /* Also try relative to source file's directory */
+        if (parent->filename) {
+            char dir[BRICK_MAX_PATH];
+            strncpy(dir, parent->filename, sizeof(dir) - 1);
+            dir[sizeof(dir) - 1] = '\0';
+            char *sep = strrchr(dir, '/');
+            char *bsep = strrchr(dir, '\\');
+            if (bsep && (!sep || bsep > sep)) sep = bsep;
+            if (sep) {
+                *sep = '\0';
+                for (int up = 0; up < 3 && ndirs < 8; up++) {
+                    snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "%s/bricks", dir);
+                    sep = strrchr(dir, '/');
+                    bsep = strrchr(dir, '\\');
+                    if (bsep && (!sep || bsep > sep)) sep = bsep;
+                    if (sep) *sep = '\0';
+                    else break;
+                }
             }
         }
-        /* Fallback: bricks/<path>/src/main.clay */
-        if (!resolved) {
-            char fallback[BRICK_MAX_PATH];
-            snprintf(fallback, sizeof(fallback), "bricks/%s/src/main.clay", import_path);
-            struct stat st;
-            if (stat(fallback, &st) == 0) {
-                resolved = strdup(fallback);
+
+        for (int d = 0; d < ndirs && !resolved; d++) {
+            char manifest_path[BRICK_MAX_PATH];
+            snprintf(manifest_path, sizeof(manifest_path), "%s/%s/brick.json",
+                     try_dirs[d], import_path);
+            BrickManifest bm;
+            if (brick_parse(manifest_path, &bm) == 0 && bm.main_file[0]) {
+                char brick_main[BRICK_MAX_PATH];
+                snprintf(brick_main, sizeof(brick_main), "%s/%s/%s",
+                         try_dirs[d], import_path, bm.main_file);
+                struct stat st;
+                if (stat(brick_main, &st) == 0) {
+                    resolved = strdup(brick_main);
+                }
+            }
+            /* Fallback: bricks/<path>/src/main.clay */
+            if (!resolved) {
+                char fallback[BRICK_MAX_PATH];
+                snprintf(fallback, sizeof(fallback), "%s/%s/src/main.clay",
+                         try_dirs[d], import_path);
+                struct stat st;
+                if (stat(fallback, &st) == 0) {
+                    resolved = strdup(fallback);
+                }
             }
         }
     }

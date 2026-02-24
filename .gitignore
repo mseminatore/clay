@@ -76,3 +76,4 @@ dkms.conf
 *.dwo
 
 build_asan/
+deps/sqlite/

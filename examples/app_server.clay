@@ -1,0 +1,20 @@
+import("clay-stdlib/clay-http-server")
+import("clay-stdlib/clay-template")
+
+// create the server and define routes
+server = HttpServer new(8080)
+
+server get("/", { |req|
+    server html(200, Template render("<h1>Hello Clay!</h1>", nil))
+})
+
+server get("/api/greet", { |req|
+    server json(200, "{\"message\": \"hello\"}")
+})
+
+server post("/api/data", { |req|
+    body = req body()
+    server text(201, "Received: " + body)
+})
+
+server start()
