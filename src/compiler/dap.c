@@ -138,6 +138,11 @@ static void dap_send_output(const char *category, const char *text) {
     dap_send(ev);
 }
 
+/* Hook for clay_output_fn — routes program output through DAP output events */
+static void dap_output_hook(const char *text) {
+    dap_send_output("stdout", text);
+}
+
 static void dap_send_stopped(const char *reason, const char *description) {
     cJSON *ev = dap_event("stopped");
     cJSON *body = cJSON_AddObjectToObject(ev, "body");
@@ -772,6 +777,9 @@ int dap_run(const char *filename) {
     /* Install step callback for breakpoints and stepping */
     clayvm_vm_set_step_callback(&vm, dap_step_callback);
 
+    /* Route program output through DAP output events */
+    clay_output_fn = dap_output_hook;
+
     /* Parse */
     Parser parser;
     parser_init(&parser, source, filename);
@@ -916,6 +924,7 @@ int dap_run(const char *filename) {
     }
 
     /* Cleanup */
+    clay_output_fn = NULL;
     ast_free(program);
     free(source);
     clayvm_vm_free(&vm);

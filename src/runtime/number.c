@@ -184,10 +184,16 @@ static ClayValue number_toString(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue number_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
+    char buf[64];
     if (self->type == CLAY_TYPE_FLOAT) {
-        printf("%g\n", self->as.number_float.value);
+        snprintf(buf, sizeof(buf), "%g\n", self->as.number_float.value);
     } else {
-        printf("%ld\n", (long)self_int_value(self));
+        snprintf(buf, sizeof(buf), "%ld\n", (long)self_int_value(self));
+    }
+    if (clay_output_fn) {
+        clay_output_fn(buf);
+    } else {
+        fputs(buf, stdout);
     }
     return CLAY_VAL(self);
 }

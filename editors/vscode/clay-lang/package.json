@@ -41,6 +41,11 @@
         "path": "./snippets/clay.json"
       }
     ],
+    "breakpoints": [
+      {
+        "language": "clay"
+      }
+    ],
     "debuggers": [
       {
         "type": "clay",

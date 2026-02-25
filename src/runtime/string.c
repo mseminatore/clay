@@ -31,13 +31,23 @@ const char *clay_string_data(ClayObject *obj) {
 
 static ClayValue string_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    printf("%s\n", self->as.string.data);
+    if (clay_output_fn) {
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "%s\n", self->as.string.data);
+        clay_output_fn(buf);
+    } else {
+        printf("%s\n", self->as.string.data);
+    }
     return CLAY_VAL(self);
 }
 
 static ClayValue string_print(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    printf("%s", self->as.string.data);
+    if (clay_output_fn) {
+        clay_output_fn(self->as.string.data);
+    } else {
+        printf("%s", self->as.string.data);
+    }
     return CLAY_VAL(self);
 }
 

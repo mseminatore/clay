@@ -252,6 +252,10 @@ void clay_raise(ClayValue error);
 extern int clay_source_line;
 extern const char *clay_source_file;
 
+/* Output hook — when set, all println/print calls route through this
+ * instead of writing to stdout. Used by DAP to send output events. */
+extern void (*clay_output_fn)(const char *text);
+
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 

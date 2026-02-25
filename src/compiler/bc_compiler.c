@@ -799,18 +799,24 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     clayvm_value_t val = clayvm_vm_pop(vm);
     ClayValue cv = vm_to_clay(val);
+    char buf[256];
     if (CLAY_IS_INT(cv)) {
-        printf("%ld\n", (long)clay_to_int(cv));
+        snprintf(buf, sizeof(buf), "%ld\n", (long)clay_to_int(cv));
     } else if (CLAY_IS_NIL(cv)) {
-        printf("nil\n");
+        snprintf(buf, sizeof(buf), "nil\n");
     } else if (cv == CLAY_TRUE) {
-        printf("true\n");
+        snprintf(buf, sizeof(buf), "true\n");
     } else if (cv == CLAY_FALSE) {
-        printf("false\n");
+        snprintf(buf, sizeof(buf), "false\n");
     } else {
         ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
-        printf("%s\n", clay_string_data(CLAY_OBJ(sv)));
+        snprintf(buf, sizeof(buf), "%s\n", clay_string_data(CLAY_OBJ(sv)));
         clay_release(CLAY_OBJ(sv));
+    }
+    if (clay_output_fn) {
+        clay_output_fn(buf);
+    } else {
+        fputs(buf, stdout);
     }
     clayvm_vm_push(vm, CLAYVM_NIL_VAL);
     return 0;
