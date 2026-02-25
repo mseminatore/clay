@@ -327,7 +327,8 @@ static int run_repl(const char *argv0) {
         int first_line = 1;
 
         while (1) {
-            char *prompt = first_line ? "\033[36mclay>\033[0m " : "\033[36m  ...\033[0m ";
+            char *prompt = first_line ? "clay> " : "  ... ";
+            crossline_prompt_color_set(CROSSLINE_FGCOLOR_CYAN);
             char *line = crossline_readline(prompt, line_buf, sizeof(line_buf));
             if (!line) { printf("\n"); goto cleanup; }
 
@@ -630,9 +631,9 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     int continuation = 0;
 
     for (;;) {
-        char *prompt = continuation
-            ? (g_use_color ? "\033[36m...\033[0m " : "... ")
-            : (g_use_color ? "\033[36m>>>\033[0m " : ">>> ");
+        char *prompt = continuation ? "... " : ">>> ";
+        if (g_use_color)
+            crossline_prompt_color_set(CROSSLINE_FGCOLOR_CYAN);
         char *line = crossline_readline(prompt, line_buf, sizeof(line_buf));
         if (!line) break;  /* EOF / Ctrl-D */
 
