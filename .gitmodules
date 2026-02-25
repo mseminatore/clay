@@ -4,3 +4,6 @@
 [submodule "deps/testy"]
 	path = deps/testy
 	url = https://github.com/mseminatore/testy.git
+[submodule "bricks/clay-stdlib"]
+	path = bricks/clay-stdlib
+	url = https://github.com/mseminatore/clay-stdlib
