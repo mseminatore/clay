@@ -923,7 +923,7 @@ The standard library is available at:
 | **clay-template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
 | **clay-http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes with `:param` patterns, `text`/`html`/`json`/`redirect` response helpers |
 | **clay-router** | `Router` URL pattern matching: `add`/`match` with `:param` capture, multi-segment patterns |
-| **clay-orm** | `Model` ActiveRecord-style ORM: `define`/`create`/`find`/`all`/`where`/`count` over SQLite |
+| **clay-orm** | `Model` ActiveRecord-style ORM: `define`/`create`/`find`/`all`/`where`/`count`/`update`/`delete` over SQLite |
 
 Install the standard library (includes all sub-bricks):
 
@@ -946,10 +946,12 @@ import("clay-stdlib")
 
 ## Dependencies
 
-Included as git submodules under `deps/`:
+Included under `deps/`:
 
 - [mseminatore/hash](https://github.com/mseminatore/hash) — hash table for object slots and methods
 - [mseminatore/testy](https://github.com/mseminatore/testy) — test framework for runtime unit tests
+- [jcwangxp/Crossline](https://github.com/jcwangxp/Crossline) — cross-platform readline for the REPL (arrow keys, tab completion, history on all platforms)
+- [SQLite](https://sqlite.org/) — embedded SQL database engine for the `Db` prototype
 
 ## Editor Support
 
