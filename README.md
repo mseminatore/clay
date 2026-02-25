@@ -647,6 +647,15 @@ server = HttpServer new(8080)
 server get("/", { |req| server html(200, "<h1>Hello!</h1>") })
 server get("/api/time", { |req| server json(200, Date now() toString()) })
 server post("/api/echo", { |req| server text(200, req body()) })
+
+// URL params with :param patterns
+server get("/users/:id", { |req|
+    id = req params() get("id")
+    server json(200, "{\"user\": " + id + "}")
+})
+
+// Redirect helper
+server post("/login", { |req| server redirect("/dashboard") })
 server start()
 ```
 
@@ -762,7 +771,7 @@ db close()
 | System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
-| Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()` |
+| Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
 | Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `lastInsertId()` |
@@ -912,7 +921,9 @@ The standard library is available at:
 | **clay-path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
 | **clay-args** | `ArgParser` CLI parsing: `flag`, `option`, `parse`, `usage` |
 | **clay-template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
-| **clay-http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes, `text`/`html`/`json` response helpers |
+| **clay-http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes with `:param` patterns, `text`/`html`/`json`/`redirect` response helpers |
+| **clay-router** | `Router` URL pattern matching: `add`/`match` with `:param` capture, multi-segment patterns |
+| **clay-orm** | `Model` ActiveRecord-style ORM: `define`/`create`/`find`/`all`/`where`/`count` over SQLite |
 
 Install the standard library (includes all sub-bricks):
 

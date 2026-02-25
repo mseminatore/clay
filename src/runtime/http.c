@@ -372,6 +372,12 @@ static ClayValue req_query(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     return clay_get_slot(self, "_query");
 }
+static ClayValue req_params(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayValue v = clay_get_slot(self, "_params");
+    if (v == CLAY_NIL) return CLAY_VAL(clay_dict_new());
+    return v;
+}
 
 /* Http response(status, body) — create a response object */
 static ClayValue http_response(ClayObject *self, int argc, ClayValue *argv) {
@@ -766,5 +772,6 @@ void clay_http_init(ClayObject *http) {
     clay_set_method(http, "method", req_method);
     clay_set_method(http, "path", req_path);
     clay_set_method(http, "query", req_query);
+    clay_set_method(http, "params", req_params);
     clay_set_method(http, "parseForm", http_parse_form);
 }

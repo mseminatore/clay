@@ -13,13 +13,15 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|AppleClang")
     add_compile_options(-Wno-typedef-redefinition)
 endif()
 
+# Crossline for cross-platform REPL line editing
+add_library(crossline STATIC deps/crossline/crossline.c)
+target_include_directories(crossline PUBLIC deps/crossline)
+if(MSVC)
+    target_compile_definitions(crossline PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 # Link math library on Unix (via clay_runtime, which needs it)
 if(UNIX)
-    # Build linenoise for REPL line editing (Unix only)
-    # Built BEFORE the global _POSIX_C_SOURCE is applied to avoid strcasecmp issues
-    add_library(linenoise STATIC deps/linenoise/linenoise.c)
-    target_include_directories(linenoise PUBLIC deps/linenoise)
-
     # Optional OpenSSL for HTTPS support
     find_package(OpenSSL QUIET)
     if(OPENSSL_FOUND)
@@ -137,13 +139,11 @@ target_link_libraries(clay_compiler_lib clayvm clay_runtime)
 add_executable(clay_compiler
     src/compiler/main.c
 )
-target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime)
+target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime deps/crossline)
 target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(clay_compiler clay_compiler_lib)
+target_link_libraries(clay_compiler clay_compiler_lib crossline)
 if(UNIX)
-    target_compile_definitions(clay_compiler PRIVATE CLAY_HAS_LINENOISE _POSIX_C_SOURCE=200809L)
-    target_include_directories(clay_compiler PRIVATE deps/linenoise)
-    target_link_libraries(clay_compiler linenoise)
+    target_compile_definitions(clay_compiler PRIVATE _POSIX_C_SOURCE=200809L)
 endif()
 set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 

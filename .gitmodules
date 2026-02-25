@@ -4,6 +4,3 @@
 [submodule "deps/testy"]
 	path = deps/testy
 	url = https://github.com/mseminatore/testy.git
-[submodule "deps/linenoise"]
-	path = deps/linenoise
-	url = https://github.com/antirez/linenoise.git
