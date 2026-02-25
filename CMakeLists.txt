@@ -20,6 +20,13 @@ if(MSVC)
     target_compile_definitions(crossline PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# cJSON for DAP debug adapter protocol
+add_library(cjson STATIC deps/cjson/cJSON.c)
+target_include_directories(cjson PUBLIC deps/cjson)
+if(MSVC)
+    target_compile_definitions(cjson PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 # Link math library on Unix (via clay_runtime, which needs it)
 if(UNIX)
     # Optional OpenSSL for HTTPS support
@@ -115,6 +122,7 @@ set(COMPILER_LIB_SOURCES
     src/compiler/codegen.c
     src/compiler/bc_compiler.c
     src/compiler/bricks.c
+    src/compiler/dap.c
 )
 
 # Add assembly fiber context switching on Unix platforms
@@ -128,18 +136,18 @@ if(NOT WIN32)
 endif()
 
 add_library(clay_compiler_lib STATIC ${COMPILER_LIB_SOURCES})
-target_include_directories(clay_compiler_lib PUBLIC src/compiler src/vm/generated src/runtime)
+target_include_directories(clay_compiler_lib PUBLIC src/compiler src/vm/generated src/runtime deps/cjson)
 target_compile_definitions(clay_compiler_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
 if(UNIX)
     target_compile_definitions(clay_compiler_lib PRIVATE _POSIX_C_SOURCE=200809L)
 endif()
-target_link_libraries(clay_compiler_lib clayvm clay_runtime)
+target_link_libraries(clay_compiler_lib clayvm clay_runtime cjson)
 
 # Compiler binary
 add_executable(clay_compiler
     src/compiler/main.c
 )
-target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime deps/crossline)
+target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime deps/crossline deps/cjson)
 target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(clay_compiler clay_compiler_lib crossline)
 if(UNIX)

@@ -1,0 +1,865 @@
+/*
+ * dap.c — Debug Adapter Protocol handler for Clay
+ *
+ * Speaks DAP over stdin/stdout. VS Code launches:
+ *   clay --dap somefile.clay
+ *
+ * Uses the existing bytecode VM step_callback infrastructure
+ * for breakpoints and stepping.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+
+#ifdef _MSC_VER
+#define strdup _strdup
+#endif
+
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#endif
+
+#include "cJSON.h"
+#include "dap.h"
+#include "parser.h"
+#include "bc_compiler.h"
+#include "clay.h"
+#include "vm.h"
+#include "hash.h"
+
+/* Forward declarations for bc_compiler conversion helpers */
+ClayValue vm_to_clay(clayvm_value_t v);
+
+/* ------------------------------------------------------------------ */
+/*  DAP global state                                                   */
+/* ------------------------------------------------------------------ */
+
+static DapState g_dap;
+
+/* ------------------------------------------------------------------ */
+/*  DAP I/O — Content-Length framed JSON over stdin/stdout             */
+/* ------------------------------------------------------------------ */
+
+static void dap_send_raw(const char *json) {
+    size_t len = strlen(json);
+    fprintf(stdout, "Content-Length: %zu\r\n\r\n%s", len, json);
+    fflush(stdout);
+}
+
+static void dap_send(cJSON *msg) {
+    char *s = cJSON_PrintUnformatted(msg);
+    dap_send_raw(s);
+    free(s);
+    cJSON_Delete(msg);
+}
+
+/* Read one DAP message from stdin. Returns parsed JSON or NULL on EOF. */
+static cJSON *dap_read(void) {
+    /* Read Content-Length header */
+    char header[256];
+    int content_length = -1;
+
+    for (;;) {
+        if (!fgets(header, sizeof(header), stdin)) return NULL;
+        if (header[0] == '\r' || header[0] == '\n') break; /* empty line = end of headers */
+        if (strncmp(header, "Content-Length:", 15) == 0) {
+            content_length = atoi(header + 15);
+        }
+    }
+
+    if (content_length <= 0) return NULL;
+
+    char *body = (char *)malloc((size_t)content_length + 1);
+    size_t nread = fread(body, 1, (size_t)content_length, stdin);
+    body[nread] = '\0';
+
+    cJSON *msg = cJSON_Parse(body);
+    free(body);
+    return msg;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Response / event helpers                                           */
+/* ------------------------------------------------------------------ */
+
+static cJSON *dap_base_response(cJSON *request, int success) {
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "type", "response");
+    cJSON_AddNumberToObject(resp, "seq", ++g_dap.seq);
+    cJSON_AddNumberToObject(resp, "request_seq",
+        cJSON_GetObjectItem(request, "seq")->valueint);
+    cJSON_AddBoolToObject(resp, "success", success);
+    cJSON_AddStringToObject(resp, "command",
+        cJSON_GetObjectItem(request, "command")->valuestring);
+    return resp;
+}
+
+static cJSON *dap_event(const char *event_name) {
+    cJSON *ev = cJSON_CreateObject();
+    cJSON_AddStringToObject(ev, "type", "event");
+    cJSON_AddNumberToObject(ev, "seq", ++g_dap.seq);
+    cJSON_AddStringToObject(ev, "event", event_name);
+    return ev;
+}
+
+static void dap_send_event(const char *event_name) {
+    dap_send(dap_event(event_name));
+}
+
+static void dap_send_output(const char *category, const char *text) {
+    cJSON *ev = dap_event("output");
+    cJSON *body = cJSON_AddObjectToObject(ev, "body");
+    cJSON_AddStringToObject(body, "category", category);
+    cJSON_AddStringToObject(body, "output", text);
+    dap_send(ev);
+}
+
+static void dap_send_stopped(const char *reason, const char *description) {
+    cJSON *ev = dap_event("stopped");
+    cJSON *body = cJSON_AddObjectToObject(ev, "body");
+    cJSON_AddStringToObject(body, "reason", reason);
+    cJSON_AddNumberToObject(body, "threadId", 1);
+    if (description) {
+        cJSON_AddStringToObject(body, "description", description);
+        cJSON_AddStringToObject(body, "text", description);
+    }
+    dap_send(ev);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Source line extraction                                             */
+/* ------------------------------------------------------------------ */
+
+static char *dap_get_source_line(const char *src, int line_num) {
+    if (!src || line_num < 1) return NULL;
+    const char *p = src;
+    int cur = 1;
+    while (cur < line_num && *p) {
+        if (*p == '\n') cur++;
+        p++;
+    }
+    if (cur != line_num) return NULL;
+    const char *end = p;
+    while (*end && *end != '\n') end++;
+    size_t len = (size_t)(end - p);
+    char *result = (char *)malloc(len + 1);
+    memcpy(result, p, len);
+    result[len] = '\0';
+    return result;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Breakpoint management                                              */
+/* ------------------------------------------------------------------ */
+
+static int dap_has_breakpoint(int line) {
+    for (int s = 0; s < g_dap.source_count; s++) {
+        for (int i = 0; i < g_dap.sources[s].bp.count; i++) {
+            if (g_dap.sources[s].bp.lines[i] == line) return 1;
+        }
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Value formatting                                                   */
+/* ------------------------------------------------------------------ */
+
+static char *dap_format_clay_value(ClayValue cv) {
+    char buf[256];
+    if (CLAY_IS_NIL(cv)) {
+        return strdup("nil");
+    } else if (CLAY_IS_INT(cv)) {
+        snprintf(buf, sizeof(buf), "%ld", (long)clay_to_int(cv));
+        return strdup(buf);
+    } else if (cv == CLAY_TRUE) {
+        return strdup("true");
+    } else if (cv == CLAY_FALSE) {
+        return strdup("false");
+    } else {
+        ClayObject *obj = CLAY_OBJ(cv);
+        if (!obj) return strdup("nil");
+        /* Use type-specific formatting to avoid method dispatch issues */
+        switch (obj->type) {
+            case CLAY_TYPE_STRING:
+                return strdup(clay_string_data(obj));
+            case CLAY_TYPE_FLOAT: {
+                snprintf(buf, sizeof(buf), "%g", obj->as.number_float.value);
+                return strdup(buf);
+            }
+            case CLAY_TYPE_ARRAY:
+                snprintf(buf, sizeof(buf), "<Array length=%zu>", obj->as.array.size);
+                return strdup(buf);
+            case CLAY_TYPE_BLOCK:
+                return strdup("<Block>");
+            default: {
+                /* For generic objects, show type */
+                int slot_count = 0;
+                if (obj->slots && obj->slots->table)
+                    slot_count = (int)ht_size(obj->slots);
+                snprintf(buf, sizeof(buf), "<Object slots=%d>", slot_count);
+                return strdup(buf);
+            }
+        }
+    }
+}
+
+static const char *dap_type_name(ClayValue cv) {
+    if (CLAY_IS_NIL(cv)) return "nil";
+    if (CLAY_IS_INT(cv)) return "Number";
+    if (cv == CLAY_TRUE || cv == CLAY_FALSE) return "Boolean";
+    ClayObject *obj = CLAY_OBJ(cv);
+    if (!obj) return "nil";
+    if (obj->type == CLAY_TYPE_STRING) return "String";
+    if (obj->type == CLAY_TYPE_ARRAY) return "Array";
+    if (obj->type == CLAY_TYPE_BLOCK) return "Block";
+    if (obj->type == CLAY_TYPE_FLOAT) return "Float";
+    return "Object";
+}
+
+static char *dap_format_vm_value(clayvm_value_t v) {
+    ClayValue cv = vm_to_clay(v);
+    return dap_format_clay_value(cv);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step callback — fires at each VM instruction                       */
+/* ------------------------------------------------------------------ */
+
+static void dap_step_callback(void *vm_ptr, size_t ip) {
+    clayvm_vm_t *vm = (clayvm_vm_t *)vm_ptr;
+    (void)vm;
+
+    BcCompiler *bc = (BcCompiler *)g_dap.bc;
+    if (!bc || ip >= (size_t)bc->len) return;
+
+    int line = bc->line_map[ip];
+    if (line <= 0) return;
+
+    /* Check if we should stop */
+    int should_stop = 0;
+    const char *reason = NULL;
+
+    if (g_dap.step_mode == 1) {
+        /* Step Next — stop when line changes */
+        if (line != g_dap.step_line) {
+            should_stop = 1;
+            reason = "step";
+        }
+    } else if (g_dap.step_mode == 2) {
+        /* Step In — stop on any new line */
+        if (line != g_dap.step_line) {
+            should_stop = 1;
+            reason = "step";
+        }
+    } else if (g_dap.step_mode == 3) {
+        /* Step Out — stop when trace depth decreases */
+        if (clay_call_trace.depth < g_dap.step_depth && line != g_dap.step_line) {
+            should_stop = 1;
+            reason = "step";
+        }
+    } else if (g_dap.step_mode == 0) {
+        /* Running — check breakpoints */
+        if (dap_has_breakpoint(line)) {
+            should_stop = 1;
+            reason = "breakpoint";
+        }
+    }
+
+    if (!should_stop) return;
+
+    /* We're stopped — enter DAP message loop */
+    g_dap.stopped = 1;
+    g_dap.step_mode = 0;
+    dap_send_stopped(reason, NULL);
+
+    /* Process DAP requests while stopped */
+    while (g_dap.stopped && !g_dap.terminate) {
+        cJSON *msg = dap_read();
+        if (!msg) { g_dap.terminate = 1; break; }
+
+        const char *type = cJSON_GetObjectItem(msg, "type")->valuestring;
+        if (strcmp(type, "request") != 0) { cJSON_Delete(msg); continue; }
+
+        const char *command = cJSON_GetObjectItem(msg, "command")->valuestring;
+
+        if (strcmp(command, "continue") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+            cJSON_AddBoolToObject(body, "allThreadsContinued", 1);
+            dap_send(resp);
+            g_dap.stopped = 0;
+            g_dap.step_mode = 0;
+        } else if (strcmp(command, "next") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+            g_dap.stopped = 0;
+            g_dap.step_mode = 1;
+            g_dap.step_line = line;
+            g_dap.step_depth = clay_call_trace.depth;
+        } else if (strcmp(command, "stepIn") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+            g_dap.stopped = 0;
+            g_dap.step_mode = 2;
+            g_dap.step_line = line;
+        } else if (strcmp(command, "stepOut") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+            g_dap.stopped = 0;
+            g_dap.step_mode = 3;
+            g_dap.step_line = line;
+            g_dap.step_depth = clay_call_trace.depth;
+        } else if (strcmp(command, "threads") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+            cJSON *threads = cJSON_AddArrayToObject(body, "threads");
+            cJSON *t = cJSON_CreateObject();
+            cJSON_AddNumberToObject(t, "id", 1);
+            cJSON_AddStringToObject(t, "name", "main");
+            cJSON_AddItemToArray(threads, t);
+            dap_send(resp);
+        } else if (strcmp(command, "stackTrace") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+            cJSON *frames = cJSON_AddArrayToObject(body, "stackFrames");
+
+            /* Current location is frame 0 */
+            cJSON *f0 = cJSON_CreateObject();
+            cJSON_AddNumberToObject(f0, "id", 0);
+            cJSON_AddStringToObject(f0, "name", "<main>");
+            cJSON *src0 = cJSON_AddObjectToObject(f0, "source");
+            cJSON_AddStringToObject(src0, "name", g_dap.source_file ? g_dap.source_file : "<unknown>");
+            if (g_dap.source_file)
+                cJSON_AddStringToObject(src0, "path", g_dap.source_file);
+            cJSON_AddNumberToObject(f0, "line", line);
+            cJSON_AddNumberToObject(f0, "column", 1);
+            cJSON_AddItemToArray(frames, f0);
+
+            /* Walk call trace for remaining frames */
+            for (int i = clay_call_trace.depth - 1; i >= 0; i--) {
+                ClayTraceFrame *tf = &clay_call_trace.frames[i];
+                cJSON *fr = cJSON_CreateObject();
+                cJSON_AddNumberToObject(fr, "id", clay_call_trace.depth - i);
+                cJSON_AddStringToObject(fr, "name", tf->selector ? tf->selector : "<block>");
+                cJSON *src = cJSON_AddObjectToObject(fr, "source");
+                cJSON_AddStringToObject(src, "name", tf->file ? tf->file : "<unknown>");
+                if (tf->file) cJSON_AddStringToObject(src, "path", tf->file);
+                cJSON_AddNumberToObject(fr, "line", tf->line);
+                cJSON_AddNumberToObject(fr, "column", 1);
+                cJSON_AddItemToArray(frames, fr);
+            }
+
+            cJSON_AddNumberToObject(body, "totalFrames", clay_call_trace.depth + 1);
+            dap_send(resp);
+        } else if (strcmp(command, "scopes") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+            cJSON *scopes = cJSON_AddArrayToObject(body, "scopes");
+
+            cJSON *globals_scope = cJSON_CreateObject();
+            cJSON_AddStringToObject(globals_scope, "name", "Globals");
+            cJSON_AddNumberToObject(globals_scope, "variablesReference", 1);
+            cJSON_AddBoolToObject(globals_scope, "expensive", 0);
+            cJSON_AddItemToArray(scopes, globals_scope);
+
+            /* Add Locals scope if we have stack data */
+            clayvm_vm_t *dvm = (clayvm_vm_t *)g_dap.vm;
+            if (dvm && dvm->sp > 0) {
+                cJSON *locals_scope = cJSON_CreateObject();
+                cJSON_AddStringToObject(locals_scope, "name", "Locals");
+                cJSON_AddNumberToObject(locals_scope, "variablesReference", 2);
+                cJSON_AddBoolToObject(locals_scope, "expensive", 0);
+                cJSON_AddItemToArray(scopes, locals_scope);
+            }
+
+            dap_send(resp);
+        } else if (strcmp(command, "variables") == 0) {
+            cJSON *args = cJSON_GetObjectItem(msg, "arguments");
+            int varRef = cJSON_GetObjectItem(args, "variablesReference")->valueint;
+
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+            cJSON *variables = cJSON_AddArrayToObject(body, "variables");
+
+            clayvm_vm_t *dvm = (clayvm_vm_t *)g_dap.vm;
+
+            if (varRef == 1 && dvm && dvm->globals) {
+                /* Globals */
+                HashTable *globals = (HashTable *)dvm->globals;
+                if (globals->size > 0 && globals->table) {
+                    size_t ipos = 0;
+                    ht_key_t key;
+                    ht_value_t val;
+                    while (ht_next(globals, &ipos, &key, &val)) {
+                        const char *name = (const char *)key;
+                        clayvm_value_t *vp = (clayvm_value_t *)val;
+                        char *formatted = dap_format_vm_value(*vp);
+                        ClayValue cv = vm_to_clay(*vp);
+
+                        cJSON *v = cJSON_CreateObject();
+                        cJSON_AddStringToObject(v, "name", name);
+                        cJSON_AddStringToObject(v, "value", formatted);
+                        cJSON_AddStringToObject(v, "type", dap_type_name(cv));
+                        cJSON_AddNumberToObject(v, "variablesReference", 0);
+                        cJSON_AddItemToArray(variables, v);
+                        free(formatted);
+                    }
+                }
+            } else if (varRef == 2 && dvm) {
+                /* Locals — show top of stack */
+                int show = dvm->sp < 16 ? dvm->sp : 16;
+                for (int i = 0; i < show; i++) {
+                    clayvm_value_t sv = dvm->stack[i];
+                    char *formatted = dap_format_vm_value(sv);
+                    ClayValue cv = vm_to_clay(sv);
+                    char name_buf[32];
+                    snprintf(name_buf, sizeof(name_buf), "[%d]", i);
+
+                    cJSON *v = cJSON_CreateObject();
+                    cJSON_AddStringToObject(v, "name", name_buf);
+                    cJSON_AddStringToObject(v, "value", formatted);
+                    cJSON_AddStringToObject(v, "type", dap_type_name(cv));
+                    cJSON_AddNumberToObject(v, "variablesReference", 0);
+                    cJSON_AddItemToArray(variables, v);
+                    free(formatted);
+                }
+            }
+
+            dap_send(resp);
+        } else if (strcmp(command, "setBreakpoints") == 0) {
+            /* Handle setBreakpoints while stopped (e.g., user adds breakpoint during pause) */
+            cJSON *args = cJSON_GetObjectItem(msg, "arguments");
+            cJSON *source = cJSON_GetObjectItem(args, "source");
+            const char *path = NULL;
+            cJSON *pathItem = cJSON_GetObjectItem(source, "path");
+            if (pathItem) path = pathItem->valuestring;
+
+            /* Find or create source entry */
+            int si = -1;
+            for (int i = 0; i < g_dap.source_count; i++) {
+                if (g_dap.sources[i].file && path && strcmp(g_dap.sources[i].file, path) == 0) {
+                    si = i; break;
+                }
+            }
+            if (si < 0 && g_dap.source_count < DAP_MAX_SOURCES) {
+                si = g_dap.source_count++;
+                g_dap.sources[si].file = path ? strdup(path) : NULL;
+            }
+
+            /* Clear and set breakpoints */
+            cJSON *breakpoints = cJSON_GetObjectItem(args, "breakpoints");
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *rbody = cJSON_AddObjectToObject(resp, "body");
+            cJSON *rbps = cJSON_AddArrayToObject(rbody, "breakpoints");
+
+            if (si >= 0) {
+                g_dap.sources[si].bp.count = 0;
+                int count = cJSON_GetArraySize(breakpoints);
+                for (int i = 0; i < count && i < DAP_MAX_BREAKPOINTS; i++) {
+                    cJSON *bp = cJSON_GetArrayItem(breakpoints, i);
+                    int bpline = cJSON_GetObjectItem(bp, "line")->valueint;
+                    g_dap.sources[si].bp.lines[g_dap.sources[si].bp.count++] = bpline;
+
+                    cJSON *rbp = cJSON_CreateObject();
+                    cJSON_AddBoolToObject(rbp, "verified", 1);
+                    cJSON_AddNumberToObject(rbp, "line", bpline);
+                    cJSON_AddItemToArray(rbps, rbp);
+                }
+            }
+            dap_send(resp);
+        } else if (strcmp(command, "evaluate") == 0) {
+            /* Simple evaluate — just return "not supported" for now */
+            cJSON *resp = dap_base_response(msg, 1);
+            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+            cJSON_AddStringToObject(body, "result", "<evaluate not supported>");
+            cJSON_AddNumberToObject(body, "variablesReference", 0);
+            dap_send(resp);
+        } else if (strcmp(command, "disconnect") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+            g_dap.terminate = 1;
+            g_dap.stopped = 0;
+        } else {
+            /* Unknown command while stopped — respond with success */
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+        }
+
+        cJSON_Delete(msg);
+    }
+
+    /* If terminate requested, stop the VM */
+    if (g_dap.terminate) {
+        clayvm_vm_t *dvm = (clayvm_vm_t *)g_dap.vm;
+        if (dvm) dvm->running = 0;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  DAP println hook — redirect output to DAP output events           */
+/* ------------------------------------------------------------------ */
+
+/* Saved original stdout for DAP protocol messages */
+static FILE *dap_original_stdout = NULL;
+
+/* ------------------------------------------------------------------ */
+/*  Handle a single DAP request (during the initial handshake phase)  */
+/* ------------------------------------------------------------------ */
+
+static int dap_handle_request(cJSON *msg) {
+    const char *command = cJSON_GetObjectItem(msg, "command")->valuestring;
+
+    if (strcmp(command, "initialize") == 0) {
+        cJSON *resp = dap_base_response(msg, 1);
+        cJSON *body = cJSON_AddObjectToObject(resp, "body");
+        cJSON_AddBoolToObject(body, "supportsConfigurationDoneRequest", 1);
+        cJSON_AddBoolToObject(body, "supportsSingleThreadExecutionRequests", 1);
+        cJSON_AddBoolToObject(body, "supportsStepBack", 0);
+        cJSON_AddBoolToObject(body, "supportsSetVariable", 0);
+        cJSON_AddBoolToObject(body, "supportsRestartFrame", 0);
+        cJSON_AddBoolToObject(body, "supportsGotoTargetsRequest", 0);
+        cJSON_AddBoolToObject(body, "supportsExceptionInfoRequest", 0);
+        cJSON_AddBoolToObject(body, "supportsTerminateRequest", 1);
+        dap_send(resp);
+
+        /* Send initialized event */
+        dap_send_event("initialized");
+        return 0;
+    }
+
+    if (strcmp(command, "launch") == 0) {
+        /* Acknowledge launch — actual compilation/run happens after configurationDone */
+        cJSON *resp = dap_base_response(msg, 1);
+        dap_send(resp);
+        g_dap.launched = 1;
+        return 0;
+    }
+
+    if (strcmp(command, "setBreakpoints") == 0) {
+        cJSON *args = cJSON_GetObjectItem(msg, "arguments");
+        cJSON *source = cJSON_GetObjectItem(args, "source");
+        const char *path = NULL;
+        cJSON *pathItem = cJSON_GetObjectItem(source, "path");
+        if (pathItem) path = pathItem->valuestring;
+
+        /* Find or create source entry */
+        int si = -1;
+        for (int i = 0; i < g_dap.source_count; i++) {
+            if (g_dap.sources[i].file && path && strcmp(g_dap.sources[i].file, path) == 0) {
+                si = i; break;
+            }
+        }
+        if (si < 0 && g_dap.source_count < DAP_MAX_SOURCES) {
+            si = g_dap.source_count++;
+            g_dap.sources[si].file = path ? strdup(path) : NULL;
+        }
+
+        /* Clear and set breakpoints */
+        cJSON *breakpoints = cJSON_GetObjectItem(args, "breakpoints");
+        cJSON *resp = dap_base_response(msg, 1);
+        cJSON *body = cJSON_AddObjectToObject(resp, "body");
+        cJSON *rbps = cJSON_AddArrayToObject(body, "breakpoints");
+
+        if (si >= 0) {
+            g_dap.sources[si].bp.count = 0;
+            int count = cJSON_GetArraySize(breakpoints);
+            for (int i = 0; i < count && i < DAP_MAX_BREAKPOINTS; i++) {
+                cJSON *bp = cJSON_GetArrayItem(breakpoints, i);
+                int line = cJSON_GetObjectItem(bp, "line")->valueint;
+                g_dap.sources[si].bp.lines[g_dap.sources[si].bp.count++] = line;
+
+                cJSON *rbp = cJSON_CreateObject();
+                cJSON_AddBoolToObject(rbp, "verified", 1);
+                cJSON_AddNumberToObject(rbp, "line", line);
+                cJSON_AddItemToArray(rbps, rbp);
+            }
+        }
+
+        dap_send(resp);
+        return 0;
+    }
+
+    if (strcmp(command, "configurationDone") == 0) {
+        cJSON *resp = dap_base_response(msg, 1);
+        dap_send(resp);
+        g_dap.configured = 1;
+        return 1; /* signal to start execution */
+    }
+
+    if (strcmp(command, "threads") == 0) {
+        cJSON *resp = dap_base_response(msg, 1);
+        cJSON *body = cJSON_AddObjectToObject(resp, "body");
+        cJSON *threads = cJSON_AddArrayToObject(body, "threads");
+        cJSON *t = cJSON_CreateObject();
+        cJSON_AddNumberToObject(t, "id", 1);
+        cJSON_AddStringToObject(t, "name", "main");
+        cJSON_AddItemToArray(threads, t);
+        dap_send(resp);
+        return 0;
+    }
+
+    if (strcmp(command, "disconnect") == 0) {
+        cJSON *resp = dap_base_response(msg, 1);
+        dap_send(resp);
+        g_dap.terminate = 1;
+        return 1;
+    }
+
+    if (strcmp(command, "terminate") == 0) {
+        cJSON *resp = dap_base_response(msg, 1);
+        dap_send(resp);
+        g_dap.terminate = 1;
+        return 1;
+    }
+
+    /* Unknown command — respond OK */
+    cJSON *resp = dap_base_response(msg, 1);
+    dap_send(resp);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  File reading helper                                                */
+/* ------------------------------------------------------------------ */
+
+static char *dap_read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
+    char *buf = (char *)malloc((size_t)len + 1);
+    size_t nread = fread(buf, 1, (size_t)len, f);
+    buf[nread] = '\0';
+    fclose(f);
+    return buf;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main DAP entry point                                               */
+/* ------------------------------------------------------------------ */
+
+int dap_run(const char *filename) {
+    memset(&g_dap, 0, sizeof(g_dap));
+
+#ifdef _WIN32
+    /* Set stdin/stdout to binary mode for DAP protocol */
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
+    /* Phase 1: DAP handshake — process initialize, launch, setBreakpoints, configurationDone */
+    while (!g_dap.configured && !g_dap.terminate) {
+        cJSON *msg = dap_read();
+        if (!msg) { return 1; }
+
+        const char *type_str = NULL;
+        cJSON *type = cJSON_GetObjectItem(msg, "type");
+        if (type) type_str = type->valuestring;
+
+        if (type_str && strcmp(type_str, "request") == 0) {
+            int done = dap_handle_request(msg);
+            cJSON_Delete(msg);
+            if (done) break;
+        } else {
+            cJSON_Delete(msg);
+        }
+    }
+
+    if (g_dap.terminate) return 0;
+
+    /* Phase 2: Compile and run the Clay file */
+    char *source = dap_read_file(filename);
+    if (!source) {
+        dap_send_output("stderr", "clay: cannot open source file\n");
+        dap_send_event("terminated");
+        return 1;
+    }
+
+    g_dap.source = source;
+    g_dap.source_file = filename;
+
+    /* Bootstrap runtime */
+    clay_bootstrap();
+    clay_source_file = filename;
+
+    /* Set up VM */
+    clayvm_vm_t vm;
+    clayvm_vm_init(&vm);
+
+    BcCompiler bc;
+    bc_compiler_init(&bc, &vm);
+    bc.source_file = filename;
+
+    g_dap.bc = &bc;
+    g_dap.vm = &vm;
+
+    /* Install step callback for breakpoints and stepping */
+    clayvm_vm_set_step_callback(&vm, dap_step_callback);
+
+    /* Redirect program stdout to DAP output events */
+    /* We redirect stderr for the program but keep stdout for DAP protocol.
+     * The approach: since println goes to stdout, and DAP uses stdout too,
+     * we rely on the program using clay_send("println") which goes through
+     * the native_println_fn. The step_callback interception handles pausing.
+     * For output capture, we'd need to hook println — future enhancement.
+     */
+
+    /* Parse */
+    Parser parser;
+    parser_init(&parser, source, filename);
+    AstNode *program = parser_parse(&parser);
+
+    if (!program || parser.had_error) {
+        dap_send_output("stderr", "clay: compilation failed due to parse errors\n");
+        dap_send_event("terminated");
+        free(source);
+        return 1;
+    }
+
+    /* Compile to bytecode */
+    if (bc_compile(&bc, program) != 0) {
+        dap_send_output("stderr", "clay: bytecode compilation failed\n");
+        ast_free(program);
+        dap_send_event("terminated");
+        free(source);
+        return 1;
+    }
+
+    /* If breakpoints are set, stop at first breakpoint. If no breakpoints,
+     * we need stop at entry so the user can start stepping.
+     * DAP convention: stopOnEntry is optional. We'll check if any breakpoints
+     * are set — if none, we just run to completion. */
+
+    /* Run using step mode (instruction-by-instruction with callback) */
+    int exit_code = 0;
+    vm.sp = 0;
+
+    int caught = clay_try_push();
+    if (caught != 0) {
+        /* Exception occurred */
+        ClayValue err = clay_error_stack.current_error;
+        if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+            ClayValue msg_val = clay_send_val(err, "message", 0, NULL);
+            const char *msg_str = clay_string_data(CLAY_OBJ(msg_val));
+            char buf[512];
+            snprintf(buf, sizeof(buf), "Error: %s\n", msg_str);
+            dap_send_output("stderr", buf);
+
+            /* Send stopped event with exception reason */
+            dap_send_stopped("exception", msg_str);
+
+            /* Process requests while stopped on exception */
+            g_dap.stopped = 1;
+            while (g_dap.stopped && !g_dap.terminate) {
+                cJSON *req = dap_read();
+                if (!req) { g_dap.terminate = 1; break; }
+                const char *t = cJSON_GetObjectItem(req, "type")->valuestring;
+                if (strcmp(t, "request") == 0) {
+                    const char *cmd = cJSON_GetObjectItem(req, "command")->valuestring;
+                    if (strcmp(cmd, "continue") == 0 || strcmp(cmd, "disconnect") == 0) {
+                        cJSON *resp = dap_base_response(req, 1);
+                        dap_send(resp);
+                        g_dap.stopped = 0;
+                        if (strcmp(cmd, "disconnect") == 0) g_dap.terminate = 1;
+                    } else if (strcmp(cmd, "threads") == 0 || strcmp(cmd, "stackTrace") == 0 ||
+                               strcmp(cmd, "scopes") == 0 || strcmp(cmd, "variables") == 0) {
+                        /* Reuse the stopped-state handlers from step_callback */
+                        /* For simplicity, handle threads/stackTrace inline */
+                        if (strcmp(cmd, "threads") == 0) {
+                            cJSON *resp = dap_base_response(req, 1);
+                            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+                            cJSON *threads = cJSON_AddArrayToObject(body, "threads");
+                            cJSON *th = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(th, "id", 1);
+                            cJSON_AddStringToObject(th, "name", "main");
+                            cJSON_AddItemToArray(threads, th);
+                            dap_send(resp);
+                        } else if (strcmp(cmd, "stackTrace") == 0) {
+                            cJSON *resp = dap_base_response(req, 1);
+                            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+                            cJSON *frames = cJSON_AddArrayToObject(body, "stackFrames");
+                            for (int i = clay_call_trace.depth - 1; i >= 0; i--) {
+                                ClayTraceFrame *tf = &clay_call_trace.frames[i];
+                                cJSON *fr = cJSON_CreateObject();
+                                cJSON_AddNumberToObject(fr, "id", clay_call_trace.depth - i);
+                                cJSON_AddStringToObject(fr, "name", tf->selector ? tf->selector : "<block>");
+                                cJSON *src = cJSON_AddObjectToObject(fr, "source");
+                                cJSON_AddStringToObject(src, "name", tf->file ? tf->file : "<unknown>");
+                                if (tf->file) cJSON_AddStringToObject(src, "path", tf->file);
+                                cJSON_AddNumberToObject(fr, "line", tf->line);
+                                cJSON_AddNumberToObject(fr, "column", 1);
+                                cJSON_AddItemToArray(frames, fr);
+                            }
+                            cJSON_AddNumberToObject(body, "totalFrames", clay_call_trace.depth);
+                            dap_send(resp);
+                        } else {
+                            cJSON *resp = dap_base_response(req, 1);
+                            cJSON *body = cJSON_AddObjectToObject(resp, "body");
+                            if (strcmp(cmd, "scopes") == 0) {
+                                cJSON_AddArrayToObject(body, "scopes");
+                            } else {
+                                cJSON_AddArrayToObject(body, "variables");
+                            }
+                            dap_send(resp);
+                        }
+                    } else {
+                        cJSON *resp = dap_base_response(req, 1);
+                        dap_send(resp);
+                    }
+                }
+                cJSON_Delete(req);
+            }
+
+            clay_release(CLAY_OBJ(msg_val));
+        }
+        exit_code = 1;
+    } else {
+        /* Normal execution — step through bytecode */
+        vm.code = bc.code;
+        vm.code_len = bc.len;
+        vm.ip = 0;
+        vm.sp = 0;
+        vm.running = 1;
+
+        while (vm.running && vm.ip < vm.code_len && !g_dap.terminate) {
+            if (clayvm_vm_step(&vm) < 0) break;
+        }
+
+        clay_try_pop();
+    }
+
+    /* Send terminated event */
+    if (!g_dap.terminate) {
+        dap_send_event("terminated");
+
+        /* Wait for disconnect */
+        while (!g_dap.terminate) {
+            cJSON *msg = dap_read();
+            if (!msg) break;
+            const char *t = cJSON_GetObjectItem(msg, "type")->valuestring;
+            if (strcmp(t, "request") == 0) {
+                const char *cmd = cJSON_GetObjectItem(msg, "command")->valuestring;
+                cJSON *resp = dap_base_response(msg, 1);
+                dap_send(resp);
+                if (strcmp(cmd, "disconnect") == 0) g_dap.terminate = 1;
+            }
+            cJSON_Delete(msg);
+        }
+    }
+
+    /* Cleanup */
+    ast_free(program);
+    free(source);
+    clayvm_vm_free(&vm);
+
+    for (int i = 0; i < g_dap.source_count; i++) {
+        free(g_dap.sources[i].file);
+    }
+
+    return exit_code;
+}

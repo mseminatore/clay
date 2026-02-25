@@ -101,6 +101,28 @@ Stack (0):
 
 Step commands: `n` = next line, `c` = continue, `s` = show stack, `q` = quit.
 
+**VS Code Debugging** (`--dap`) provides a full Debug Adapter Protocol server for VS Code:
+
+- Set breakpoints by clicking in the gutter
+- Step through code line by line (Next, Step In, Step Out)
+- Inspect global variables in the Variables panel
+- View the call stack
+- Pause on exceptions
+
+To use: install the Clay extension from `editors/vscode/clay-lang/`, add a launch configuration:
+
+```json
+{
+  "type": "clay",
+  "request": "launch",
+  "name": "Debug Clay",
+  "program": "${file}",
+  "clayPath": "path/to/clay"
+}
+```
+
+Then press F5 to start debugging.
+
 ### Classic REPL
 
 The classic REPL (`clay --repl`) accumulates source and recompiles to C on each input. It supports the full language but is slower due to C compiler invocation on every line.
@@ -981,6 +1003,7 @@ Included under `deps/`:
 - [mseminatore/testy](https://github.com/mseminatore/testy) — test framework for runtime unit tests
 - [jcwangxp/Crossline](https://github.com/jcwangxp/Crossline) — cross-platform readline for the REPL (arrow keys, tab completion, history on all platforms)
 - [SQLite](https://sqlite.org/) — embedded SQL database engine for the `Db` prototype
+- [cJSON](https://github.com/DaveGamble/cJSON) — lightweight JSON parser for the DAP debug adapter
 
 ## Editor Support
 
@@ -1007,5 +1030,8 @@ Then restart VS Code. See [`editors/vscode/clay-lang/README.md`](editors/vscode/
 | Debug VM REPL | Launch: "Debug: VM REPL" |
 | Compile to native + debug | Launch: "Debug: Compiled .clay Program" |
 | Compile to C only | Task: "Compile .clay to C Only" |
+| **Debug Clay program** | Launch: "Debug Clay Program" (uses DAP) |
+
+The Clay extension includes a **Debug Adapter** that supports source-level debugging of `.clay` files. Set breakpoints, step through code, and inspect variables — all within VS Code. The adapter communicates with `clay --dap` over the Debug Adapter Protocol.
 
 In compiled mode, `#line` directives map generated C back to `.clay` source lines, so the Visual Studio debugger steps through Clay code directly.

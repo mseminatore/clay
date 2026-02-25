@@ -36,6 +36,7 @@ __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
 #include "bc_compiler.h"
 #include "bricks.h"
 #include "ast.h"
+#include "dap.h"
 
 #ifdef _MSC_VER
 #define strdup _strdup
@@ -866,6 +867,7 @@ int main(int argc, char *argv[]) {
     int trace_mode = 0;
     int step_mode = 0;
     int mem_stats = 0;
+    int dap_mode = 0;
 
     /* Handle bricks subcommand */
     if (argc >= 2 && strcmp(argv[1], "bricks") == 0) {
@@ -894,6 +896,8 @@ int main(int argc, char *argv[]) {
             step_mode = 1;
         } else if (strcmp(argv[i], "--mem-stats") == 0) {
             mem_stats = 1;
+        } else if (strcmp(argv[i], "--dap") == 0) {
+            dap_mode = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
@@ -905,6 +909,7 @@ int main(int argc, char *argv[]) {
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
             printf("  --trace       Bytecode tracing (VM REPL or file execution)\n");
             printf("  --step        Interactive stepping debugger (VM REPL or file execution)\n");
+            printf("  --dap         Run as Debug Adapter Protocol server (for VS Code)\n");
             printf("  --mem-stats   Show memory stats on REPL exit\n");
             printf("  -h, --help    Show this help message\n");
             printf("\nSubcommands:\n");
@@ -962,6 +967,15 @@ int main(int argc, char *argv[]) {
         ast_free(program);
         free(source);
         return 0;
+    }
+
+    /* DAP debug adapter mode */
+    if (dap_mode) {
+        if (!source_file) {
+            fprintf(stderr, "clay: --dap requires a source file\n");
+            return 1;
+        }
+        return dap_run(source_file);
     }
 
     /* Default: run in bytecode VM */

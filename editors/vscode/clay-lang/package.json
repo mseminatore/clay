@@ -1,15 +1,21 @@
 {
   "name": "clay-lang",
   "displayName": "Clay Language",
-  "description": "Syntax highlighting, snippets, and language support for the Clay programming language",
-  "version": "0.1.0",
+  "description": "Syntax highlighting, snippets, debugging, and language support for the Clay programming language",
+  "version": "0.2.0",
   "publisher": "clay-lang",
   "engines": {
     "vscode": "^1.75.0"
   },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onDebugResolve:clay",
+    "onLanguage:clay"
+  ],
   "categories": [
     "Programming Languages",
-    "Snippets"
+    "Snippets",
+    "Debuggers"
   ],
   "contributes": {
     "languages": [
@@ -37,6 +43,68 @@
         "language": "clay",
         "path": "./snippets/clay.json"
       }
+    ],
+    "debuggers": [
+      {
+        "type": "clay",
+        "label": "Clay Debug",
+        "program": "",
+        "runtime": "",
+        "languages": ["clay"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .clay file to debug",
+                "default": "${file}"
+              },
+              "clayPath": {
+                "type": "string",
+                "description": "Path to the clay executable",
+                "default": "clay"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Automatically stop on the first line",
+                "default": false
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "clay",
+            "request": "launch",
+            "name": "Debug Clay Program",
+            "program": "${file}",
+            "clayPath": "clay"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Clay: Launch",
+            "description": "Launch and debug a Clay program",
+            "body": {
+              "type": "clay",
+              "request": "launch",
+              "name": "Debug Clay Program",
+              "program": "^\"\\${file}\"",
+              "clayPath": "clay"
+            }
+          }
+        ]
+      }
     ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
   }
 }

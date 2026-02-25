@@ -3,6 +3,7 @@ clay
 
 # Directories
 build/
+node_modules/
 
 # Test output captures
 stdout_*.txt
