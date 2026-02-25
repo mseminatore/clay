@@ -255,6 +255,35 @@ extern const char *clay_source_file;
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 
+/* --- Call trace (shadow call stack for stack traces) --- */
+#define CLAY_MAX_TRACE_DEPTH 64
+
+typedef struct {
+    const char *file;
+    int line;
+    const char *selector;
+} ClayTraceFrame;
+
+typedef struct {
+    ClayTraceFrame frames[CLAY_MAX_TRACE_DEPTH];
+    int depth;
+} ClayCallTrace;
+
+extern ClayCallTrace clay_call_trace;
+
+static inline void clay_trace_push(const char *file, int line, const char *sel) {
+    if (clay_call_trace.depth < CLAY_MAX_TRACE_DEPTH) {
+        ClayTraceFrame *f = &clay_call_trace.frames[clay_call_trace.depth++];
+        f->file = file;
+        f->line = line;
+        f->selector = sel;
+    }
+}
+
+static inline void clay_trace_pop(void) {
+    if (clay_call_trace.depth > 0) clay_call_trace.depth--;
+}
+
 /* --- Cell (heap-allocated box for by-reference capture in C codegen) --- */
 typedef struct {
     int       refcount;

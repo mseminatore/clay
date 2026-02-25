@@ -1,0 +1,19 @@
+// Test stack trace capture
+boom = {
+  raise("deep error")
+}
+
+middle = {
+  boom value()
+}
+
+outer = {
+  middle value()
+}
+
+try {
+  outer value()
+} catch { |e|
+  e message() println
+  e stackTrace() println
+}

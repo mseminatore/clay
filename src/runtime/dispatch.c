@@ -74,6 +74,9 @@ ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv)
 }
 
 ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv) {
+    /* Push trace frame for stack traces */
+    clay_trace_push(clay_source_file, clay_source_line, selector);
+
     /* Handle tagged integer receivers — skip clone, lookup directly on Number */
     if (CLAY_IS_INT(receiver)) {
         ClayMethod *m = cached_lookup_method(clay_Number, selector);
@@ -85,6 +88,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             /* If method returned self (the wrapper), return the original integer */
             if (result == CLAY_VAL(wrapper)) {
                 clay_release(wrapper);
+                clay_trace_pop();
                 return receiver;
             }
             /* Retain result before releasing wrapper (result may reference wrapper) */
@@ -96,11 +100,13 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             } else {
                 clay_release(wrapper);
             }
+            clay_trace_pop();
             return result;
         }
         char buf[128];
         snprintf(buf, sizeof(buf), "integer does not understand '%s'", selector);
         clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
+        clay_trace_pop();
         return CLAY_NIL;
     }
 
@@ -109,12 +115,15 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         if (clay_Nil) {
             ClayMethod *m = cached_lookup_method(clay_Nil, selector);
             if (m) {
-                return invoke_method(m, clay_Nil, argc, argv);
+                ClayValue result = invoke_method(m, clay_Nil, argc, argv);
+                clay_trace_pop();
+                return result;
             }
         }
         char buf[128];
         snprintf(buf, sizeof(buf), "message '%s' sent to nil", selector);
         clay_raise(CLAY_VAL(clay_error_new(buf, "NilError")));
+        clay_trace_pop();
         return CLAY_NIL;
     }
 
@@ -123,11 +132,14 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
 
     ClayMethod *m = cached_lookup_method(obj, selector);
     if (m) {
-        return invoke_method(m, obj, argc, argv);
+        ClayValue result = invoke_method(m, obj, argc, argv);
+        clay_trace_pop();
+        return result;
     }
 
     /* Slot access fallback: if a slot exists with this name, return its value */
     if (argc == 0 && clay_has_slot(obj, selector)) {
+        clay_trace_pop();
         return clay_get_slot(obj, selector);
     }
 
@@ -143,28 +155,35 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         ClayValue result = invoke_method(dnu, obj, 2, dnu_argv);
         clay_release(sel_str);
         clay_release(args_arr);
+        clay_trace_pop();
         return result;
     }
 
     char buf[128];
     snprintf(buf, sizeof(buf), "object does not understand '%s'", selector);
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
+    clay_trace_pop();
     return CLAY_NIL;
 }
 
 ClayValue clay_send_super(ClayValue receiver, ClayObject *defining_obj,
                           const char *selector, int argc, ClayValue *argv) {
+    clay_trace_push(clay_source_file, clay_source_line, selector);
+
     /* Start method lookup from the parent of the defining prototype */
     ClayObject *start = defining_obj ? defining_obj->parent : NULL;
     if (start) {
         ClayMethod *m = lookup_method_full(start, selector);
         if (m) {
             ClayObject *self = CLAY_OBJ(receiver);
-            return invoke_method(m, self, argc, argv);
+            ClayValue result = invoke_method(m, self, argc, argv);
+            clay_trace_pop();
+            return result;
         }
     }
     char buf[128];
     snprintf(buf, sizeof(buf), "super does not understand '%s'", selector);
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
+    clay_trace_pop();
     return CLAY_NIL;
 }

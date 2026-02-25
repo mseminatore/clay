@@ -1,0 +1,22 @@
+// Test stack trace through method dispatch
+Animal = Object clone {
+  speak() { raise("cannot speak") }
+}
+
+Dog = Animal clone {
+  bark() { self speak() }
+}
+
+d = Dog clone()
+try {
+  d bark()
+} catch { |e|
+  "=== Error ===" println
+  e toString() println
+  "=== Stack Trace ===" println
+  e stackTrace() println
+}
+
+// Test unhandled error shows trace
+// (commented out — would exit process)
+// d bark()

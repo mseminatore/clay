@@ -24,6 +24,7 @@ typedef struct {
     char   *capture_names[16]; /* names of captured variables */
     int     capture_slots[16]; /* enclosing scope slot index for each capture */
     int     local_count;       /* total locals (params + temps) in this chunk */
+    int    *line_map;    /* source line map: line_map[offset] = source line */
 } BcChunk;
 
 /* Local variable tracking for compile-time scope resolution */

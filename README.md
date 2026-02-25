@@ -506,6 +506,27 @@ try {
 
 Error types include `DivisionByZero`, `MethodNotFound`, `NilError`, `TypeError`, and `RuntimeError` (for user-raised strings).
 
+### Stack traces
+
+Errors automatically capture a stack trace showing the call chain:
+
+```clay
+boom = { raise("deep error") }
+middle = { boom value() }
+
+try {
+  middle value()
+} catch { |e|
+  e stackTrace() println
+  // Output:
+  //   at example.clay:1 in value()
+  //   at example.clay:2 in value()
+  //   at example.clay:5 in value()
+}
+```
+
+`toString()` includes the trace, and unhandled errors print it to stderr.
+
 Objects can override `doesNotUnderstand` for proxy-style dispatch:
 
 ```clay
@@ -763,7 +784,7 @@ db close()
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue { block }`, `whileFalse { block }` |
 | Boolean | `ifTrue { block }`, `ifFalse { block }`, `not()`, `toString()` |
-| Error | `message()`, `type()`, `toString()` |
+| Error | `message()`, `type()`, `line()`, `file()`, `stackTrace()`, `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
 | Console | `readLine()`, `prompt(msg)` |

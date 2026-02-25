@@ -98,6 +98,11 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     /* Run the dispatch loop manually (can't use vm_run — it resets sp) */
     while (g_vm->running && g_vm->ip < g_vm->code_len) {
+        /* Update source line from chunk's line_map for error reporting */
+        if (chunk->line_map && g_vm->ip < chunk->len) {
+            clay_source_line = chunk->line_map[g_vm->ip];
+        }
+
         uint8_t opcode = g_vm->code[g_vm->ip++];
         if (opcode >= CLAYVM_OP_COUNT) {
             g_vm->running = 0;
@@ -635,8 +640,8 @@ static const char *opcode_to_selector(int opcode) {
  * Converts VM values to Clay values, dispatches via clay_send_val. */
 static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
                                clayvm_value_t b, int opcode) {
-    /* Update source line for error messages */
-    if (g_bc && vm->ip < (size_t)g_bc->len) {
+    /* Update source line for error messages (only for main code, not chunks) */
+    if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
     }
     ClayValue receiver = vm_to_clay(a);
@@ -663,8 +668,8 @@ static InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
 
-    /* Update source line for error messages */
-    if (g_bc && vm->ip < (size_t)g_bc->len) {
+    /* Update source line for error messages (only for main code, not chunks) */
+    if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
     }
 
@@ -977,8 +982,8 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
 /* native_raise(value) — raise an exception via longjmp */
 static int native_raise_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    /* Update source line for error messages */
-    if (g_bc && vm->ip < (size_t)g_bc->len) {
+    /* Update source line for error messages (only for main code, not chunks) */
+    if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
     }
     ClayValue val = vm_to_clay(clayvm_vm_pop(vm));
@@ -1647,10 +1652,12 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
 
     emit_op(bc, CLAYVM_OP_HALT);
 
-    /* Copy compiled bytecode to chunk */
+    /* Copy compiled bytecode and line map to chunk */
     chunk->len = bc->len;
     if (chunk->len > BC_CHUNK_CODE) chunk->len = BC_CHUNK_CODE;
     memcpy(chunk->code, bc->code, chunk->len);
+    chunk->line_map = (int *)malloc(chunk->len * sizeof(int));
+    memcpy(chunk->line_map, bc->line_map, chunk->len * sizeof(int));
 
     /* Restore outer code buffer and local state */
     bc->len = saved_len;
