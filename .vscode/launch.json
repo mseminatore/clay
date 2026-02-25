@@ -2,6 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+          "type": "clay",
+          "request": "launch",
+          "name": "Debug Clay",
+          "program": "${file}",
+          "clayPath": "C:/dev/objc/build/Debug/clay.exe"
+        },
+        {
             "name": "Run: Current .clay File",
             "type": "cppvsdbg",
             "request": "launch",

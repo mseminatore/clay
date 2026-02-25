@@ -13,6 +13,13 @@
 #include <string.h>
 #include <stdarg.h>
 
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#else
+#include <unistd.h>
+#endif
+
 #ifdef _MSC_VER
 #define strdup _strdup
 #endif
@@ -39,14 +46,18 @@ ClayValue vm_to_clay(clayvm_value_t v);
 
 static DapState g_dap;
 
+/* DAP protocol uses a saved copy of stdout; program output goes to stderr */
+static FILE *g_dap_out = NULL;
+
 /* ------------------------------------------------------------------ */
-/*  DAP I/O — Content-Length framed JSON over stdin/stdout             */
+/*  DAP I/O — Content-Length framed JSON over saved stdout             */
 /* ------------------------------------------------------------------ */
 
 static void dap_send_raw(const char *json) {
-    size_t len = strlen(json);
-    fprintf(stdout, "Content-Length: %zu\r\n\r\n%s", len, json);
-    fflush(stdout);
+    FILE *out = g_dap_out ? g_dap_out : stdout;
+    int len = (int)strlen(json);
+    fprintf(out, "Content-Length: %d\r\n\r\n%s", len, json);
+    fflush(out);
 }
 
 static void dap_send(cJSON *msg) {
@@ -58,13 +69,18 @@ static void dap_send(cJSON *msg) {
 
 /* Read one DAP message from stdin. Returns parsed JSON or NULL on EOF. */
 static cJSON *dap_read(void) {
-    /* Read Content-Length header */
+    /* Read Content-Length header line by line */
     char header[256];
     int content_length = -1;
 
     for (;;) {
         if (!fgets(header, sizeof(header), stdin)) return NULL;
-        if (header[0] == '\r' || header[0] == '\n') break; /* empty line = end of headers */
+        /* Strip trailing \r\n or \n */
+        size_t hlen = strlen(header);
+        while (hlen > 0 && (header[hlen-1] == '\r' || header[hlen-1] == '\n'))
+            header[--hlen] = '\0';
+        /* Empty line = end of headers */
+        if (hlen == 0) break;
         if (strncmp(header, "Content-Length:", 15) == 0) {
             content_length = atoi(header + 15);
         }
@@ -78,6 +94,11 @@ static cJSON *dap_read(void) {
 
     cJSON *msg = cJSON_Parse(body);
     free(body);
+    if (!msg) {
+        fprintf(stderr, "clay-dap: JSON parse failed (read %d of %d bytes)\n",
+            (int)nread, content_length);
+        fflush(stderr);
+    }
     return msg;
 }
 
@@ -262,10 +283,13 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             reason = "step";
         }
     } else if (g_dap.step_mode == 0) {
-        /* Running — check breakpoints */
-        if (dap_has_breakpoint(line)) {
+        /* Running — check breakpoints (skip if still on the line we continued from) */
+        if (line != g_dap.last_stopped_line && dap_has_breakpoint(line)) {
             should_stop = 1;
             reason = "breakpoint";
+        } else if (line != g_dap.last_stopped_line) {
+            /* Line changed — clear the skip guard */
+            g_dap.last_stopped_line = 0;
         }
     }
 
@@ -274,6 +298,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
     /* We're stopped — enter DAP message loop */
     g_dap.stopped = 1;
     g_dap.step_mode = 0;
+    g_dap.last_stopped_line = line;
     dap_send_stopped(reason, NULL);
 
     /* Process DAP requests while stopped */
@@ -525,8 +550,6 @@ static int dap_handle_request(cJSON *msg) {
         return 0;
     }
     const char *command = cmd_item->valuestring;
-    fprintf(stderr, "clay-dap: handling request '%s'\n", command);
-    fflush(stderr);
 
     if (strcmp(command, "initialize") == 0) {
         cJSON *resp = dap_base_response(msg, 1);
@@ -663,22 +686,45 @@ static char *dap_read_file(const char *path) {
 int dap_run(const char *filename) {
     memset(&g_dap, 0, sizeof(g_dap));
 
-    /* Log to stderr for diagnostics (VS Code shows this in debug console) */
+    /* Save stdout for DAP protocol, then redirect stdout to stderr
+     * so that program output (println) doesn't corrupt the DAP stream. */
+#ifdef _WIN32
+    int dap_fd = _dup(_fileno(stdout));
+    g_dap_out = _fdopen(dap_fd, "w");
+    /* Set DAP output to binary mode for exact protocol framing */
+    _setmode(dap_fd, _O_BINARY);
+    /* Set stdin to binary mode */
+    _setmode(_fileno(stdin), _O_BINARY);
+    /* Redirect stdout to stderr so println goes to debug console */
+    _dup2(_fileno(stderr), _fileno(stdout));
+#else
+    int dap_fd = dup(fileno(stdout));
+    g_dap_out = fdopen(dap_fd, "w");
+    /* Redirect stdout to stderr */
+    dup2(fileno(stderr), fileno(stdout));
+#endif
+
     fprintf(stderr, "clay-dap: starting for %s\n", filename);
     fflush(stderr);
 
-#ifdef _WIN32
-    /* Set stdin/stdout to binary mode for DAP protocol */
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
+    /* Verify the source file exists before entering the handshake */
+    {
+        FILE *test = fopen(filename, "r");
+        if (!test) {
+            fprintf(stderr, "clay-dap: cannot open source file: %s\n", filename);
+            fflush(stderr);
+            return 1;
+        }
+        fclose(test);
+        fprintf(stderr, "clay-dap: source file verified\n");
+        fflush(stderr);
+    }
 
     /* Phase 1: DAP handshake — process initialize, launch, setBreakpoints, configurationDone */
     while (!g_dap.configured && !g_dap.terminate) {
         cJSON *msg = dap_read();
         if (!msg) {
-            fprintf(stderr, "clay-dap: failed to read message (EOF or parse error)\n");
-            fflush(stderr);
+            fprintf(stderr, "clay-dap: failed to read message\n");
             return 1;
         }
 
@@ -726,14 +772,6 @@ int dap_run(const char *filename) {
     /* Install step callback for breakpoints and stepping */
     clayvm_vm_set_step_callback(&vm, dap_step_callback);
 
-    /* Redirect program stdout to DAP output events */
-    /* We redirect stderr for the program but keep stdout for DAP protocol.
-     * The approach: since println goes to stdout, and DAP uses stdout too,
-     * we rely on the program using clay_send("println") which goes through
-     * the native_println_fn. The step_callback interception handles pausing.
-     * For output capture, we'd need to hook println — future enhancement.
-     */
-
     /* Parse */
     Parser parser;
     parser_init(&parser, source, filename);
@@ -755,10 +793,6 @@ int dap_run(const char *filename) {
         return 1;
     }
 
-    /* If breakpoints are set, stop at first breakpoint. If no breakpoints,
-     * we need stop at entry so the user can start stepping.
-     * DAP convention: stopOnEntry is optional. We'll check if any breakpoints
-     * are set — if none, we just run to completion. */
 
     /* Run using step mode (instruction-by-instruction with callback) */
     int exit_code = 0;
@@ -889,6 +923,8 @@ int dap_run(const char *filename) {
     for (int i = 0; i < g_dap.source_count; i++) {
         free(g_dap.sources[i].file);
     }
+
+    if (g_dap_out) { fclose(g_dap_out); g_dap_out = NULL; }
 
     return exit_code;
 }

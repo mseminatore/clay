@@ -8,10 +8,7 @@
     "vscode": "^1.75.0"
   },
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onDebugResolve:clay",
-    "onLanguage:clay"
-  ],
+  "activationEvents": [],
   "categories": [
     "Programming Languages",
     "Snippets",
@@ -48,8 +45,6 @@
       {
         "type": "clay",
         "label": "Clay Debug",
-        "program": "",
-        "runtime": "",
         "languages": ["clay"],
         "configurationAttributes": {
           "launch": {

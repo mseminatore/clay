@@ -32,6 +32,7 @@ typedef struct {
     int step_mode;         /* 0=run, 1=next, 2=stepIn, 3=stepOut */
     int step_line;         /* line we stepped from (for "next") */
     int step_depth;        /* trace depth when step started */
+    int last_stopped_line; /* line where we last stopped (avoid re-triggering) */
     const char *source;    /* source text */
     const char *source_file;
     void *bc;              /* BcCompiler* */
