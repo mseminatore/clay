@@ -89,11 +89,11 @@ static cJSON *dap_base_response(cJSON *request, int success) {
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "type", "response");
     cJSON_AddNumberToObject(resp, "seq", ++g_dap.seq);
-    cJSON_AddNumberToObject(resp, "request_seq",
-        cJSON_GetObjectItem(request, "seq")->valueint);
+    cJSON *seq_item = cJSON_GetObjectItem(request, "seq");
+    cJSON_AddNumberToObject(resp, "request_seq", seq_item ? seq_item->valueint : 0);
     cJSON_AddBoolToObject(resp, "success", success);
-    cJSON_AddStringToObject(resp, "command",
-        cJSON_GetObjectItem(request, "command")->valuestring);
+    cJSON *cmd_item = cJSON_GetObjectItem(request, "command");
+    cJSON_AddStringToObject(resp, "command", cmd_item ? cmd_item->valuestring : "unknown");
     return resp;
 }
 
@@ -281,10 +281,15 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
         cJSON *msg = dap_read();
         if (!msg) { g_dap.terminate = 1; break; }
 
-        const char *type = cJSON_GetObjectItem(msg, "type")->valuestring;
-        if (strcmp(type, "request") != 0) { cJSON_Delete(msg); continue; }
+        cJSON *type_item = cJSON_GetObjectItem(msg, "type");
+        if (!type_item || !type_item->valuestring ||
+            strcmp(type_item->valuestring, "request") != 0) {
+            cJSON_Delete(msg); continue;
+        }
 
-        const char *command = cJSON_GetObjectItem(msg, "command")->valuestring;
+        cJSON *cmd_item = cJSON_GetObjectItem(msg, "command");
+        if (!cmd_item || !cmd_item->valuestring) { cJSON_Delete(msg); continue; }
+        const char *command = cmd_item->valuestring;
 
         if (strcmp(command, "continue") == 0) {
             cJSON *resp = dap_base_response(msg, 1);
@@ -458,10 +463,12 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
 
             if (si >= 0) {
                 g_dap.sources[si].bp.count = 0;
-                int count = cJSON_GetArraySize(breakpoints);
+                int count = breakpoints ? cJSON_GetArraySize(breakpoints) : 0;
                 for (int i = 0; i < count && i < DAP_MAX_BREAKPOINTS; i++) {
                     cJSON *bp = cJSON_GetArrayItem(breakpoints, i);
-                    int bpline = cJSON_GetObjectItem(bp, "line")->valueint;
+                    cJSON *line_item = bp ? cJSON_GetObjectItem(bp, "line") : NULL;
+                    if (!line_item) continue;
+                    int bpline = line_item->valueint;
                     g_dap.sources[si].bp.lines[g_dap.sources[si].bp.count++] = bpline;
 
                     cJSON *rbp = cJSON_CreateObject();
@@ -511,7 +518,15 @@ static FILE *dap_original_stdout = NULL;
 /* ------------------------------------------------------------------ */
 
 static int dap_handle_request(cJSON *msg) {
-    const char *command = cJSON_GetObjectItem(msg, "command")->valuestring;
+    cJSON *cmd_item = cJSON_GetObjectItem(msg, "command");
+    if (!cmd_item || !cmd_item->valuestring) {
+        fprintf(stderr, "clay-dap: request missing 'command' field\n");
+        fflush(stderr);
+        return 0;
+    }
+    const char *command = cmd_item->valuestring;
+    fprintf(stderr, "clay-dap: handling request '%s'\n", command);
+    fflush(stderr);
 
     if (strcmp(command, "initialize") == 0) {
         cJSON *resp = dap_base_response(msg, 1);
@@ -566,10 +581,12 @@ static int dap_handle_request(cJSON *msg) {
 
         if (si >= 0) {
             g_dap.sources[si].bp.count = 0;
-            int count = cJSON_GetArraySize(breakpoints);
+            int count = breakpoints ? cJSON_GetArraySize(breakpoints) : 0;
             for (int i = 0; i < count && i < DAP_MAX_BREAKPOINTS; i++) {
                 cJSON *bp = cJSON_GetArrayItem(breakpoints, i);
-                int line = cJSON_GetObjectItem(bp, "line")->valueint;
+                cJSON *line_item = bp ? cJSON_GetObjectItem(bp, "line") : NULL;
+                if (!line_item) continue;
+                int line = line_item->valueint;
                 g_dap.sources[si].bp.lines[g_dap.sources[si].bp.count++] = line;
 
                 cJSON *rbp = cJSON_CreateObject();
@@ -646,6 +663,10 @@ static char *dap_read_file(const char *path) {
 int dap_run(const char *filename) {
     memset(&g_dap, 0, sizeof(g_dap));
 
+    /* Log to stderr for diagnostics (VS Code shows this in debug console) */
+    fprintf(stderr, "clay-dap: starting for %s\n", filename);
+    fflush(stderr);
+
 #ifdef _WIN32
     /* Set stdin/stdout to binary mode for DAP protocol */
     _setmode(_fileno(stdin), _O_BINARY);
@@ -655,7 +676,11 @@ int dap_run(const char *filename) {
     /* Phase 1: DAP handshake — process initialize, launch, setBreakpoints, configurationDone */
     while (!g_dap.configured && !g_dap.terminate) {
         cJSON *msg = dap_read();
-        if (!msg) { return 1; }
+        if (!msg) {
+            fprintf(stderr, "clay-dap: failed to read message (EOF or parse error)\n");
+            fflush(stderr);
+            return 1;
+        }
 
         const char *type_str = NULL;
         cJSON *type = cJSON_GetObjectItem(msg, "type");
@@ -758,10 +783,14 @@ int dap_run(const char *filename) {
             while (g_dap.stopped && !g_dap.terminate) {
                 cJSON *req = dap_read();
                 if (!req) { g_dap.terminate = 1; break; }
-                const char *t = cJSON_GetObjectItem(req, "type")->valuestring;
-                if (strcmp(t, "request") == 0) {
-                    const char *cmd = cJSON_GetObjectItem(req, "command")->valuestring;
-                    if (strcmp(cmd, "continue") == 0 || strcmp(cmd, "disconnect") == 0) {
+                cJSON *t_item = cJSON_GetObjectItem(req, "type");
+                if (!t_item || !t_item->valuestring || strcmp(t_item->valuestring, "request") != 0) {
+                    cJSON_Delete(req); continue;
+                }
+                cJSON *cmd_item2 = cJSON_GetObjectItem(req, "command");
+                if (!cmd_item2 || !cmd_item2->valuestring) { cJSON_Delete(req); continue; }
+                const char *cmd = cmd_item2->valuestring;
+                if (strcmp(cmd, "continue") == 0 || strcmp(cmd, "disconnect") == 0) {
                         cJSON *resp = dap_base_response(req, 1);
                         dap_send(resp);
                         g_dap.stopped = 0;
@@ -811,7 +840,6 @@ int dap_run(const char *filename) {
                         cJSON *resp = dap_base_response(req, 1);
                         dap_send(resp);
                     }
-                }
                 cJSON_Delete(req);
             }
 
@@ -841,12 +869,13 @@ int dap_run(const char *filename) {
         while (!g_dap.terminate) {
             cJSON *msg = dap_read();
             if (!msg) break;
-            const char *t = cJSON_GetObjectItem(msg, "type")->valuestring;
-            if (strcmp(t, "request") == 0) {
-                const char *cmd = cJSON_GetObjectItem(msg, "command")->valuestring;
+            cJSON *t_item = cJSON_GetObjectItem(msg, "type");
+            cJSON *c_item = cJSON_GetObjectItem(msg, "command");
+            if (t_item && t_item->valuestring && strcmp(t_item->valuestring, "request") == 0 &&
+                c_item && c_item->valuestring) {
                 cJSON *resp = dap_base_response(msg, 1);
                 dap_send(resp);
-                if (strcmp(cmd, "disconnect") == 0) g_dap.terminate = 1;
+                if (strcmp(c_item->valuestring, "disconnect") == 0) g_dap.terminate = 1;
             }
             cJSON_Delete(msg);
         }
