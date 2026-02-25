@@ -770,6 +770,14 @@ rows each { |row|
 db exec("INSERT INTO users (name, email) VALUES ('Carol', 'carol@example.com')")
 db lastInsertId()   // 3
 
+// Escape strings for safe SQL (doubles single quotes)
+db escape("O'Brien")   // "O''Brien"
+
+// Float columns are returned as Clay floats
+db exec("CREATE TABLE prices (id INTEGER PRIMARY KEY, amount REAL)")
+db exec("INSERT INTO prices (amount) VALUES (9.99)")
+db query("SELECT amount FROM prices") at(0) get("amount")   // 9.99
+
 // Close when done
 db close()
 ```
@@ -795,7 +803,7 @@ db close()
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
-| Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `lastInsertId()` |
+| Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `escape(str)`, `lastInsertId()` |
 
 ## Generated C
 

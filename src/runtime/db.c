@@ -102,6 +102,9 @@ static ClayValue db_query(ClayObject *self, int argc, ClayValue *argv) {
                 case SQLITE_INTEGER:
                     val = clay_int(sqlite3_column_int64(stmt, i));
                     break;
+                case SQLITE_FLOAT:
+                    val = CLAY_VAL(clay_float_new(sqlite3_column_double(stmt, i)));
+                    break;
                 case SQLITE_TEXT:
                     val = CLAY_VAL(clay_string_new(
                         (const char *)sqlite3_column_text(stmt, i)));
@@ -139,11 +142,33 @@ static ClayValue db_last_insert_id(ClayObject *self, int argc, ClayValue *argv) 
     return clay_int((intptr_t)sqlite3_last_insert_rowid(db));
 }
 
+/* db escape(str) — escape single quotes for safe SQL embedding */
+static ClayValue db_escape(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || CLAY_IS_INT(argv[0]) || argv[0] == CLAY_NIL)
+        return CLAY_VAL(clay_string_new(""));
+
+    const char *src = clay_string_data(CLAY_OBJ(argv[0]));
+    size_t len = strlen(src);
+    /* Worst case: every char is a quote → 2x length */
+    char *buf = (char *)malloc(len * 2 + 1);
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '\'') buf[j++] = '\''; /* double the quote */
+        buf[j++] = src[i];
+    }
+    buf[j] = '\0';
+    ClayValue result = CLAY_VAL(clay_string_new(buf));
+    free(buf);
+    return result;
+}
+
 /* Register Db methods */
 void clay_db_init(ClayObject *db) {
     clay_set_method(db, "open", db_open);
     clay_set_method(db, "exec", db_exec);
     clay_set_method(db, "query", db_query);
     clay_set_method(db, "close", db_close);
+    clay_set_method(db, "escape", db_escape);
     clay_set_method(db, "lastInsertId", db_last_insert_id);
 }
