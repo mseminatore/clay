@@ -132,7 +132,7 @@ server post("/todos/add", { |req|
 server post("/todos/:id/delete", { |req|
     id = req params() get("id")
     (id != nil) ifTrue {
-        db exec("DELETE FROM todos WHERE id = " + id)
+        Todo delete(id)
     }
     server redirect("/todos")
 })
@@ -141,7 +141,16 @@ server post("/todos/:id/delete", { |req|
 server post("/todos/:id/toggle", { |req|
     id = req params() get("id")
     (id != nil) ifTrue {
-        db exec("UPDATE todos SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END WHERE id = " + id)
+        todo = Todo find(id)
+        (todo != nil) ifTrue {
+            d = Dict clone
+            (todo _data get("done") == 1) ifTrue {
+                d set("done", 0)
+            } ifFalse {
+                d set("done", 1)
+            }
+            Todo update(id, d)
+        }
     }
     server redirect("/todos")
 })
