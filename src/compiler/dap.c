@@ -257,12 +257,22 @@ static char *dap_format_vm_value(clayvm_value_t v) {
 
 static void dap_step_callback(void *vm_ptr, size_t ip) {
     clayvm_vm_t *vm = (clayvm_vm_t *)vm_ptr;
-    (void)vm;
-
     BcCompiler *bc = (BcCompiler *)g_dap.bc;
-    if (!bc || ip >= (size_t)bc->len) return;
+    if (!bc) return;
 
-    int line = bc->line_map[ip];
+    /* Determine the correct source line from the active code's line_map.
+     * When executing main code, vm->code == bc->code and we use bc->line_map.
+     * When inside a block/method chunk, the trampoline has already set
+     * clay_source_line from the chunk's line_map before calling us. */
+    int line;
+    if (vm->code == bc->code) {
+        /* Main code — look up from the main compiler's line map */
+        if (ip >= (size_t)bc->len) return;
+        line = bc->line_map[ip];
+    } else {
+        /* Inside a chunk — use clay_source_line set by the trampoline */
+        line = clay_source_line;
+    }
     if (line <= 0) return;
 
     /* Check if we should stop */
