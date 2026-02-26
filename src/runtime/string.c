@@ -401,6 +401,16 @@ static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+/* chr(code) — return a single-character string from an ASCII/Unicode code point */
+static ClayValue string_chr(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1) return CLAY_NIL;
+    intptr_t code = clay_to_int(argv[0]);
+    if (code < 0 || code > 127) return CLAY_NIL;
+    char buf[2] = { (char)code, '\0' };
+    return CLAY_VAL(clay_string_new(buf));
+}
+
 void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "println", string_println);
     clay_set_method(proto, "print", string_print);
@@ -429,4 +439,5 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "repeat", string_repeat);
     clay_set_method(proto, "padLeft", string_padLeft);
     clay_set_method(proto, "padRight", string_padRight);
+    clay_set_method(proto, "chr", string_chr);
 }

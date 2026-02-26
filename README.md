@@ -841,7 +841,7 @@ db close()
 |-----------|---------|
 | Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `getSlot(name)`, `hasMethod(name)`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
-| String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
+| String | `+`, `==`, `length()`, `at(i)`, `chr(code)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `indexOf(sub)`, `lastIndexOf(sub)`, `repeat(n)`, `padLeft(n, ch)`, `padRight(n, ch)`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue { block }`, `whileFalse { block }` |
 | Boolean | `ifTrue { block }`, `ifFalse { block }`, `not()`, `toString()` |
