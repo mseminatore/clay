@@ -1,4 +1,5 @@
 # Clay
+[![CI](https://github.com/mseminatore/clay/actions/workflows/ci.yml/badge.svg)](https://github.com/mseminatore/clay/actions/workflows/ci.yml)
 
 Clay is a prototype-based, pure object-oriented programming language. Everything is an object. Objects communicate via message passing. New objects are created by cloning existing ones and adding or modifying slots and methods.
 
