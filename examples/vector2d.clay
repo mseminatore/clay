@@ -26,16 +26,3 @@ Vector2d = Object clone {
         Math sqrt((x * x) + (y * y))
     }
 }
-
-// Example usage
-v1 = Vector2d new (3, 4)
-v1 println
-v2 = Vector2d new (1, 2)
-v2 println
-v3 = v1 add(v2)
-v3 println
-v3 magnitude println // Output: 10
-
-{ true } whileTrue {
-    // This loop will run indefinitely, demonstrating the use of whileTrue
-}

@@ -250,6 +250,26 @@ p x             // => 42
 
 Slot reads walk the prototype chain — if the object doesn't have the slot, its parent is checked, and so on.
 
+### Dynamic Methods
+
+Methods can be added to objects after cloning by assigning a block to a slot. The block is automatically invoked as a method when the slot is accessed via message passing (Io-style):
+
+```clay
+Dog = Object clone {
+  name = "Rex"
+}
+
+Dog speak = { name + " says Woof!" }
+Dog speak() println()   // Rex says Woof!
+
+// Methods added this way inherit through the prototype chain
+puppy = Dog clone()
+puppy name = "Buddy"
+puppy speak() println()  // Buddy says Woof!
+```
+
+This works because slot lookup detects blocks and invokes them with the receiver as `self`, just like regular methods.
+
 ### Constructors
 
 Define an `init` method on a prototype, then create instances with `new`:

@@ -496,6 +496,10 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
 
     /* Run the dispatch loop */
     while (g_vm->running && g_vm->ip < g_vm->code_len) {
+        /* Update source line from chunk's line_map for error reporting and debugging */
+        if (chunk->line_map && g_vm->ip < chunk->len) {
+            clay_source_line = chunk->line_map[g_vm->ip];
+        }
         uint8_t opcode = g_vm->code[g_vm->ip++];
         if (opcode >= CLAYVM_OP_COUNT) { g_vm->running = 0; break; }
         if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
@@ -1568,13 +1572,17 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
         chunk->param_names[i] = strdup(params->items[i]->as.ident.name);
     }
 
-    /* Save current bytecode and local scope */
+    /* Save current bytecode, line map, and local scope */
     uint8_t *outer_buf = NULL;
+    int *outer_line_map = NULL;
     size_t saved_len = bc->len;
     if (saved_len > 0) {
         outer_buf = (uint8_t *)malloc(saved_len);
         memcpy(outer_buf, bc->code, saved_len);
+        outer_line_map = (int *)malloc(saved_len * sizeof(int));
+        memcpy(outer_line_map, bc->line_map, saved_len * sizeof(int));
     }
+    int saved_current_line = bc->current_line;
 
     /* Save outer local state */
     BcLocal saved_locals[BC_MAX_LOCALS];
@@ -1665,12 +1673,17 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     chunk->line_map = (int *)malloc(chunk->len * sizeof(int));
     memcpy(chunk->line_map, bc->line_map, chunk->len * sizeof(int));
 
-    /* Restore outer code buffer and local state */
+    /* Restore outer code buffer, line map, and local state */
     bc->len = saved_len;
     if (outer_buf) {
         memcpy(bc->code, outer_buf, saved_len);
         free(outer_buf);
     }
+    if (outer_line_map) {
+        memcpy(bc->line_map, outer_line_map, saved_len * sizeof(int));
+        free(outer_line_map);
+    }
+    bc->current_line = saved_current_line;
 
     /* Free chunk-local names (they were strdup'd by bc_add_local) */
     for (int i = 0; i < bc->local_count; i++) {
