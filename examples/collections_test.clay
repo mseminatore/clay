@@ -1,36 +1,36 @@
 // Full collections test
 import("clay-stdlib/clay-collections")
 
-"=== Set ===" println()
-s = Set new()
+"=== Set ===" println
+s = Set new
 s add(1)
 s add(2)
 s add(3)
-s toString() println()
+s toString println
 s2 = Set from([3, 4, 5])
-s2 toString() println()
-("union: " + s union(s2) toString()) println()
-("intersection: " + s intersection(s2) toString()) println()
-("difference: " + s difference(s2) toString()) println()
+s2 toString println
+("union: " + s union(s2) toString) println
+("intersection: " + s intersection(s2) toString) println
+("difference: " + s difference(s2) toString) println
 
-"=== Stack ===" println()
-stack = Stack new()
+"=== Stack ===" println
+stack = Stack new
 stack push(10)
 stack push(20)
-("peek: " + stack peek toString()) println()
-("pop: " + stack pop toString()) println()
+("peek: " + stack peek toString) println
+("pop: " + stack pop toString) println
 
-"=== Queue ===" println()
-q = Queue new()
+"=== Queue ===" println
+q = Queue new
 q enqueue("a")
 q enqueue("b")
-("dequeue: " + q dequeue) println()
+("dequeue: " + q dequeue) println
 
-"=== Range ===" println()
-Range new(1, 5) each { |i| (i toString() + " ") print() }
-"" println()
-Range new(1, 5) map { |i| i * i } toString() println()
-("contains 3: " + Range new(1, 5) contains(3) toString()) println()
-("size: " + Range new(1, 5) size toString()) println()
+"=== Range ===" println
+Range new(1, 5) each { |i| (i toString + " ") print }
+"" println
+Range new(1, 5) map { |i| i * i } toString println
+("contains 3: " + Range new(1, 5) contains(3) toString) println
+("size: " + Range new(1, 5) size toString) println
 
-"all done!" println()
+"all done!" println

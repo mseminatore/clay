@@ -73,21 +73,21 @@ server get("/", { |req|
 
 // Todo list
 server get("/todos", { |req|
-    todos = Todo all()
+    todos = Todo all
 
     content = "<h2><i class='fa fa-list-check'></i> Todo List</h2>"
 
-    (todos size() == 0) ifTrue {
+    (todos size == 0) ifTrue {
         content = content +
             "<p class='w3-panel w3-pale-yellow w3-border w3-border-yellow'>" +
             "<i class='fa fa-info-circle'></i> No todos yet. " +
             "<a href='/todos/new'>Add one!</a></p>"
     }
 
-    (todos size() > 0) ifTrue {
+    (todos size > 0) ifTrue {
         items = todos map { |todo|
             d = Dict clone
-            d set("id", todo _data get("id") toString())
+            d set("id", todo _data get("id") toString)
             d set("title", todo _data get("title"))
             (todo _data get("done") == 1) ifTrue {
                 d set("style", "text-decoration:line-through;color:#999")
@@ -137,7 +137,7 @@ server post("/todos/add", { |req|
 
 // POST: delete todo (with :id param)
 server post("/todos/:id/delete", { |req|
-    id = req params() get("id")
+    id = req params get("id")
     (id != nil) ifTrue {
         Todo delete(id)
     }
@@ -146,7 +146,7 @@ server post("/todos/:id/delete", { |req|
 
 // POST: toggle done (with :id param)
 server post("/todos/:id/toggle", { |req|
-    id = req params() get("id")
+    id = req params get("id")
     (id != nil) ifTrue {
         todo = Todo find(id)
         (todo != nil) ifTrue {
@@ -164,12 +164,12 @@ server post("/todos/:id/toggle", { |req|
 
 // JSON API
 server get("/api/todos", { |req|
-    todos = Todo all()
+    todos = Todo all
     items = todos map { |todo|
         d = Dict clone
-        d set("id", todo _data get("id") toString())
+        d set("id", todo _data get("id") toString)
         d set("title", todo _data get("title"))
-        d set("done", todo _data get("done") toString())
+        d set("done", todo _data get("done") toString)
         d
     }
     server json(200, "[" + Template renderEach(jsonItem, items, ",") + "]")
@@ -178,4 +178,4 @@ server get("/api/todos", { |req|
 "Starting Clay Todo App..." println
 "Running on http://localhost:${port}" println
 
-server start()
+server start

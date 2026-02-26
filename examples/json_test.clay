@@ -1,36 +1,36 @@
 // Test clay-json brick
 import("clay-stdlib/clay-json")
 
-"=== stringify number ===" println()
-Json stringify(42) println()
+"=== stringify number ===" println
+Json stringify(42) println
 
-"=== stringify string ===" println()
-Json stringify("hello") println()
+"=== stringify string ===" println
+Json stringify("hello") println
 
-"=== stringify bool ===" println()
-Json stringify(true) println()
-Json stringify(false) println()
+"=== stringify bool ===" println
+Json stringify(true) println
+Json stringify(false) println
 
-"=== stringify array ===" println()
-Json stringify([1, 2, 3]) println()
+"=== stringify array ===" println
+Json stringify([1, 2, 3]) println
 
-"=== stringify dict ===" println()
+"=== stringify dict ===" println
 d = Dict clone
 d set("name", "Clay")
 d set("version", 1)
-Json stringify(d) println()
+Json stringify(d) println
 
-"=== stringify nested ===" println()
+"=== stringify nested ===" println
 d2 = Dict clone
 d2 set("lang", "Clay")
 d2 set("tags", ["fast", "fun"])
-Json stringify(d2) println()
+Json stringify(d2) println
 
-"=== prettyPrint ===" println()
+"=== prettyPrint ===" println
 d3 = Dict clone
 d3 set("name", "Clay")
 d3 set("version", 1)
 d3 set("features", ["closures", "prototypes"])
-Json prettyPrint(d3) println()
+Json prettyPrint(d3) println
 
-"all done!" println()
+"all done!" println

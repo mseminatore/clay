@@ -19,4 +19,4 @@ cleaned = Regex replace("a1b2c3", "\\d", "X")
 
 // Find all — return all matches as an array
 matches = Regex find("a1 b22 c333", "\\d+")
-("All numbers: " + (matches toString())) println
+("All numbers: " + (matches toString)) println

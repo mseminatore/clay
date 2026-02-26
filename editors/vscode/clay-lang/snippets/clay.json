@@ -41,6 +41,19 @@
     ],
     "description": "Try/catch error handling"
   },
+  "Try/Catch/Finally": {
+    "prefix": "trycatchfinally",
+    "body": [
+      "try {",
+      "\t$1",
+      "} catch { |${2:e}|",
+      "\t$3",
+      "} finally {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Try/catch/finally error handling"
+  },
   "While Loop": {
     "prefix": "while",
     "body": [
@@ -90,5 +103,45 @@
       "${1:expr} println"
     ],
     "description": "Print expression with newline"
+  },
+  "Each Iteration": {
+    "prefix": "each",
+    "body": [
+      "${1:collection} each { |${2:item}|",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate over a collection"
+  },
+  "Map": {
+    "prefix": "map",
+    "body": [
+      "${1:collection} map { |${2:item}|",
+      "\t$0",
+      "}"
+    ],
+    "description": "Map over a collection"
+  },
+  "Dict Clone": {
+    "prefix": "dict",
+    "body": [
+      "${1:d} = Dict clone",
+      "${1:d} set(\"${2:key}\", ${3:value})$0"
+    ],
+    "description": "Create a new Dict"
+  },
+  "Super Call": {
+    "prefix": "super",
+    "body": [
+      "super ${1:method}(${2:args})"
+    ],
+    "description": "Call a method on the parent prototype"
+  },
+  "Get Slot": {
+    "prefix": "getslot",
+    "body": [
+      "${1:obj} getSlot(\"${2:name}\")"
+    ],
+    "description": "Retrieve a slot value without invoking blocks"
   }
 }

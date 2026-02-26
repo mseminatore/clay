@@ -38,7 +38,7 @@
           "patterns": [
             {
               "name": "constant.character.escape.clay",
-              "match": "\\\\[nrt\\\\\"0]"
+              "match": "\\\\([nrt\\\\\"0]|x[0-9a-fA-F]{2})"
             },
             {
               "name": "meta.embedded.expression.clay",
@@ -61,6 +61,14 @@
     "numbers": {
       "patterns": [
         {
+          "name": "constant.numeric.float.clay",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+\\-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.scientific.clay",
+          "match": "\\b[0-9]+[eE][+\\-]?[0-9]+\\b"
+        },
+        {
           "name": "constant.numeric.integer.clay",
           "match": "\\b[0-9]+\\b"
         }
@@ -70,11 +78,11 @@
       "patterns": [
         {
           "name": "keyword.control.clay",
-          "match": "\\b(try|catch|raise|import)\\b"
+          "match": "\\b(try|catch|finally|raise|import)\\b"
         },
         {
           "name": "variable.language.self.clay",
-          "match": "\\bself\\b"
+          "match": "\\b(self|super)\\b"
         }
       ]
     },
@@ -98,7 +106,7 @@
       "patterns": [
         {
           "name": "support.class.clay",
-          "match": "\\b(Object|Number|String|Array|Block|Boolean|Error|Dict|Nil)\\b"
+          "match": "\\b(Object|Number|Float|String|Array|Block|Boolean|Error|Dict|Nil|Math|Console|File|System|Date|Http|Regex|Fiber|Db)\\b"
         }
       ]
     },
@@ -113,12 +121,16 @@
           "match": "&&|\\|\\||!"
         },
         {
+          "name": "keyword.operator.assignment.compound.clay",
+          "match": "[+\\-*/%]="
+        },
+        {
           "name": "keyword.operator.arithmetic.clay",
           "match": "[+\\-*/%]"
         },
         {
           "name": "keyword.operator.assignment.clay",
-          "match": "(?<![=!<>])=(?!=)"
+          "match": "(?<![=!<>+\\-*/%])=(?!=)"
         }
       ]
     },

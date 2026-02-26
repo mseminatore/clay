@@ -1,43 +1,43 @@
 // Test clay-event brick
 import("clay-stdlib/clay-event")
 
-"=== basic on/emit ===" println()
-e = Emitter new()
-e on("greet", { ("hello!") println() })
+"=== basic on/emit ===" println
+e = Emitter new
+e on("greet", { "hello!" println })
 e emit("greet")
 
-"=== emitWith data ===" println()
-e2 = Emitter new()
-e2 on("click", { |data| ("clicked: " + data toString()) println() })
+"=== emitWith data ===" println
+e2 = Emitter new
+e2 on("click", { |data| ("clicked: " + data toString) println })
 e2 emitWith("click", "button1")
 e2 emitWith("click", "button2")
 
-"=== multiple handlers ===" println()
-e3 = Emitter new()
-e3 on("test", { "handler1" println() })
-e3 on("test", { "handler2" println() })
+"=== multiple handlers ===" println
+e3 = Emitter new
+e3 on("test", { "handler1" println })
+e3 on("test", { "handler2" println })
 e3 emit("test")
 
-"=== off ===" println()
-e4 = Emitter new()
-e4 on("a", { "fired" println() })
-("before off: " + e4 listenerCount("a") toString()) println()
+"=== off ===" println
+e4 = Emitter new
+e4 on("a", { "fired" println })
+("before off: " + e4 listenerCount("a") toString) println
 e4 off("a")
-("after off: " + e4 listenerCount("a") toString()) println()
+("after off: " + e4 listenerCount("a") toString) println
 e4 emit("a")
-"(no output expected above)" println()
+"(no output expected above)" println
 
-"=== events ===" println()
-e5 = Emitter new()
-e5 on("x", { "x" println() })
-e5 on("y", { "y" println() })
-e5 events() toString() println()
+"=== events ===" println
+e5 = Emitter new
+e5 on("x", { "x" println })
+e5 on("y", { "y" println })
+e5 events toString println
 
-"=== removeAll ===" println()
-e6 = Emitter new()
-e6 on("a", { "a" println() })
-e6 on("b", { "b" println() })
-e6 removeAll()
-("after removeAll: " + e6 listenerCount("a") toString()) println()
+"=== removeAll ===" println
+e6 = Emitter new
+e6 on("a", { "a" println })
+e6 on("b", { "b" println })
+e6 removeAll
+("after removeAll: " + e6 listenerCount("a") toString) println
 
-"all done!" println()
+"all done!" println

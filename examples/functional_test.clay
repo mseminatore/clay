@@ -1,58 +1,58 @@
 // Test clay-functional brick
 import("clay-stdlib/clay-functional")
 
-"=== map ===" println()
-Fn map([1, 2, 3], { |x| x * 2 }) toString() println()
+"=== map ===" println
+Fn map([1, 2, 3], { |x| x * 2 }) toString println
 
-"=== filter ===" println()
-Fn filter([1, 2, 3, 4, 5, 6], { |x| x % 2 == 0 }) toString() println()
+"=== filter ===" println
+Fn filter([1, 2, 3, 4, 5, 6], { |x| x % 2 == 0 }) toString println
 
-"=== reduce ===" println()
-("sum: " + Fn reduce([1, 2, 3, 4], 0, { |acc, x| acc + x }) toString()) println()
+"=== reduce ===" println
+("sum: " + Fn reduce([1, 2, 3, 4], 0, { |acc, x| acc + x }) toString) println
 
-"=== compose ===" println()
+"=== compose ===" println
 dbl = { |x| x * 2 }
 addOne = { |x| x + 1 }
 doubleAndAdd = Fn compose(addOne, dbl)
-("compose(+1, *2)(5) = " + doubleAndAdd value(5) toString()) println()
+("compose(+1, *2)(5) = " + doubleAndAdd value(5) toString) println
 
-"=== pipe ===" println()
-pipeline = Fn pipe([{ |x| x * 2 }, { |x| x + 10 }, { |x| x toString() + "!" }])
-("pipe(5) = " + pipeline value(5)) println()
+"=== pipe ===" println
+pipeline = Fn pipe([{ |x| x * 2 }, { |x| x + 10 }, { |x| x toString + "!" }])
+("pipe(5) = " + pipeline value(5)) println
 
-"=== identity & constant ===" println()
-("identity(42) = " + Fn identity(42) toString()) println()
+"=== identity & constant ===" println
+("identity(42) = " + Fn identity(42) toString) println
 always7 = Fn constant(7)
-("constant(7)() = " + always7 value() toString()) println()
+("constant(7)() = " + always7 value toString) println
 
-"=== tap ===" println()
-Fn tap(42, { |v| ("tapped: " + v toString()) println() })
+"=== tap ===" println
+Fn tap(42, { |v| ("tapped: " + v toString) println })
 
-"=== negate ===" println()
+"=== negate ===" println
 isEven = { |x| x % 2 == 0 }
 isOdd = Fn negate(isEven)
-("isOdd(3) = " + isOdd value(3) toString()) println()
-("isOdd(4) = " + isOdd value(4) toString()) println()
+("isOdd(3) = " + isOdd value(3) toString) println
+("isOdd(4) = " + isOdd value(4) toString) println
 
-"=== any/all/none ===" println()
-("any >3: " + Fn any([1, 2, 3, 4, 5], { |x| x > 3 }) toString()) println()
-("all >0: " + Fn all([1, 2, 3], { |x| x > 0 }) toString()) println()
-("none <0: " + Fn none([1, 2, 3], { |x| x < 0 }) toString()) println()
+"=== any/all/none ===" println
+("any >3: " + Fn any([1, 2, 3, 4, 5], { |x| x > 3 }) toString) println
+("all >0: " + Fn all([1, 2, 3], { |x| x > 0 }) toString) println
+("none <0: " + Fn none([1, 2, 3], { |x| x < 0 }) toString) println
 
-"=== find ===" println()
-("find >3: " + Fn find([1, 2, 3, 4, 5], { |x| x > 3 }) toString()) println()
+"=== find ===" println
+("find >3: " + Fn find([1, 2, 3, 4, 5], { |x| x > 3 }) toString) println
 
-"=== count ===" println()
-("count even: " + Fn count([1, 2, 3, 4, 5, 6], { |x| x % 2 == 0 }) toString()) println()
+"=== count ===" println
+("count even: " + Fn count([1, 2, 3, 4, 5, 6], { |x| x % 2 == 0 }) toString) println
 
-"=== flatten ===" println()
-Fn flatten([[1, 2], [3, 4], [5]]) toString() println()
+"=== flatten ===" println
+Fn flatten([[1, 2], [3, 4], [5]]) toString println
 
-"=== zip ===" println()
-Fn zip([1, 2, 3], ["a", "b", "c"]) toString() println()
+"=== zip ===" println
+Fn zip([1, 2, 3], ["a", "b", "c"]) toString println
 
-"=== sum/product ===" println()
-("sum: " + Fn sum([1, 2, 3, 4, 5]) toString()) println()
-("product: " + Fn product([1, 2, 3, 4]) toString()) println()
+"=== sum/product ===" println
+("sum: " + Fn sum([1, 2, 3, 4, 5]) toString) println
+("product: " + Fn product([1, 2, 3, 4]) toString) println
 
-"all done!" println()
+"all done!" println
