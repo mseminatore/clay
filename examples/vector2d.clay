@@ -10,8 +10,8 @@ Vector2d = Object clone {
         self y = y
     }
 
-    add (other) {
-        Vector2d new  (x + other x, y + other y)
+    add (v) {
+        Vector2d new  (x + v x, y + v y)
     }
 
     toString () {
@@ -35,3 +35,7 @@ v2 println
 v3 = v1 add(v2)
 v3 println
 v3 magnitude println // Output: 10
+
+{ true } whileTrue {
+    // This loop will run indefinitely, demonstrating the use of whileTrue
+}

@@ -2,13 +2,13 @@
   "Clone Object": {
     "prefix": "clone",
     "body": [
-      "${1:Name} = ${2:Object} clone({",
+      "${1:Name} = ${2:Object} clone {",
       "\t${3:slot} = ${4:value}",
       "",
       "\t${5:method}(${6:params}) {",
       "\t\t$0",
       "\t}",
-      "})"
+      "}"
     ],
     "description": "Create a new object by cloning a prototype"
   },
@@ -33,40 +33,40 @@
   "Try/Catch": {
     "prefix": "try",
     "body": [
-      "try({",
+      "try {",
       "\t$1",
-      "}) catch({ |${2:e}|",
+      "} catch { |${2:e}|",
       "\t$0",
-      "})"
+      "}"
     ],
     "description": "Try/catch error handling"
   },
   "While Loop": {
     "prefix": "while",
     "body": [
-      "{ ${1:condition} } whileTrue({",
+      "{ ${1:condition} } whileTrue {",
       "\t$0",
-      "})"
+      "}"
     ],
     "description": "While loop using whileTrue"
   },
   "If True": {
     "prefix": "if",
     "body": [
-      "(${1:condition}) ifTrue({",
+      "(${1:condition}) ifTrue {",
       "\t$0",
-      "})"
+      "}"
     ],
     "description": "Conditional ifTrue block"
   },
   "If True / If False": {
     "prefix": "ifelse",
     "body": [
-      "(${1:condition}) ifTrue({",
+      "(${1:condition}) ifTrue {",
       "\t$2",
-      "}) ifFalse({",
+      "} ifFalse {",
       "\t$0",
-      "})"
+      "}"
     ],
     "description": "Conditional ifTrue/ifFalse chain"
   },
@@ -87,7 +87,7 @@
   "Print Line": {
     "prefix": "println",
     "body": [
-      "${1:expr} println()"
+      "${1:expr} println"
     ],
     "description": "Print expression with newline"
   }
