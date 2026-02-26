@@ -51,6 +51,28 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     BcChunk *chunk = g_bc->chunks[chunk_id];
 
+    /* If invoked as a slot-method, bind the receiver as 'self' in VM globals */
+    ClayObject *method_self = clay_slot_method_self;
+    ClayValue saved_self = CLAY_NIL;
+    int self_existed = 0;
+    if (method_self) {
+        clay_slot_method_self = NULL;
+        HashTable *globals = (HashTable *)g_vm->globals;
+        if (globals) {
+            ht_value_t old_self = ht_find(globals, (ht_key_t)"self");
+            if (old_self) {
+                clayvm_value_t *existing = (clayvm_value_t *)old_self;
+                saved_self = vm_to_clay(*existing);
+                self_existed = 1;
+                *existing = CLAYVM_OBJ(method_self);
+            } else {
+                clayvm_value_t *self_stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+                *self_stored = CLAYVM_OBJ(method_self);
+                ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
+            }
+        }
+    }
+
     /* Save VM state for re-entrant execution */
     const uint8_t *saved_code = g_vm->code;
     size_t saved_code_len = g_vm->code_len;
@@ -135,6 +157,18 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->sp = saved_sp;
     g_vm->running = saved_running;
     g_vm->frame_count = saved_frame_count;
+
+    /* Restore 'self' if we bound a slot-method receiver */
+    if (method_self) {
+        HashTable *globals = (HashTable *)g_vm->globals;
+        if (globals && self_existed) {
+            ht_value_t cur = ht_find(globals, (ht_key_t)"self");
+            if (cur) {
+                clayvm_value_t *existing = (clayvm_value_t *)cur;
+                *existing = clay_to_vm(saved_self);
+            }
+        }
+    }
 
     return retval;
 }

@@ -252,23 +252,34 @@ Slot reads walk the prototype chain — if the object doesn't have the slot, its
 
 ### Dynamic Methods
 
-Methods can be added to objects after cloning by assigning a block to a slot. The block is automatically invoked as a method when the slot is accessed via message passing (Io-style):
+Methods can be added to objects after cloning by assigning a block to a slot. The block is automatically invoked when the slot is accessed via message passing (Io-style):
 
 ```clay
 Dog = Object clone {
   name = "Rex"
 }
 
-Dog speak = { name + " says Woof!" }
-Dog speak() println()   // Rex says Woof!
+Dog speak = { self name + " says Woof!" }
+Dog speak println()     // Rex says Woof!
+
+// With arguments
+Dog greet = { |other| self name + " greets " + other }
+Dog greet("Buddy") println()  // Rex greets Buddy
 
 // Methods added this way inherit through the prototype chain
 puppy = Dog clone()
 puppy name = "Buddy"
-puppy speak() println()  // Buddy says Woof!
+puppy speak println()   // Buddy says Woof!
 ```
 
-This works because slot lookup detects blocks and invokes them with the receiver as `self`, just like regular methods.
+Note: blocks assigned to slots must use explicit `self` to access other slots, since the compiler doesn't know the block will be used as a method.
+
+Use `getSlot("name")` to retrieve the raw block without invoking it:
+
+```clay
+block = Dog getSlot("speak")   // returns the block
+block value() println()         // Rex says Woof!
+```
 
 ### Constructors
 
@@ -828,7 +839,7 @@ db close()
 
 | Prototype | Methods |
 |-----------|---------|
-| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `hasMethod(name)`, `doesNotUnderstand(name, args)` |
+| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `getSlot(name)`, `hasMethod(name)`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |

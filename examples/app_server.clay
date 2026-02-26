@@ -2,6 +2,12 @@ import("clay-stdlib/clay-http-server")
 import("clay-stdlib/clay-template")
 import("clay-stdlib/clay-orm")
 
+// -- A simple todo list web app built with Clay, demonstrating URL routing, template rendering,
+// SQLite persistence, and the POST-Redirect-GET pattern. --
+
+// -- Config --
+port = 8080
+
 // -- Database setup --
 db = Db open("todos.db")
 db exec("CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER DEFAULT 0)")
@@ -45,7 +51,7 @@ todoItem = "<li class='w3-display-container' style='{{style}}'>" +
 jsonItem = "{\"id\":{{id}},\"title\":\"{{title}}\",\"done\":{{done}}}"
 
 // -- Server setup --
-server = HttpServer new(8080)
+server = HttpServer new(port)
 
 // Home page
 server get("/", { |req|
@@ -169,4 +175,6 @@ server get("/api/todos", { |req|
 })
 
 "Starting Clay Todo App..." println
+"Running on http://localhost:${port}" println
+
 server start()

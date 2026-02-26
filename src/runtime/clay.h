@@ -148,6 +148,9 @@ ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv)
 /* Context pointer set by dispatch before calling a method (for BC compiler) */
 extern void *clay_method_context;
 
+/* When non-NULL, block trampolines bind this as 'self' (for slot-as-method dispatch) */
+extern ClayObject *clay_slot_method_self;
+
 /* --- String interning --- */
 const char *clay_intern(const char *name);
 

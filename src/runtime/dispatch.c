@@ -7,6 +7,9 @@
  * Used by the BC compiler's generic dispatch to retrieve per-method data. */
 void *clay_method_context = NULL;
 
+/* When non-NULL, block trampolines bind this as 'self' (slot-as-method dispatch) */
+ClayObject *clay_slot_method_self = NULL;
+
 /* --- Global method cache --- */
 #define METHOD_CACHE_SIZE 1024  /* must be power of 2 */
 #define METHOD_CACHE_MASK (METHOD_CACHE_SIZE - 1)
@@ -139,6 +142,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
 
     /* Slot access fallback: if a slot exists with this name, check its value.
      * If it's a Block, invoke it (Io-style: block slots act as methods).
+     * Use getSlot("name") to retrieve a block without invoking it.
      * Otherwise return the slot value (only for zero-arg sends). */
     if (clay_has_slot(obj, selector)) {
         ClayValue slot_val = clay_get_slot(obj, selector);
@@ -146,7 +150,9 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
             ClayObject *slot_obj = CLAY_OBJ(slot_val);
             if (slot_obj && slot_obj->type == CLAY_TYPE_BLOCK && slot_obj->as.block.func) {
+                clay_slot_method_self = obj;
                 ClayValue result = slot_obj->as.block.func(slot_obj, argc, argv);
+                clay_slot_method_self = NULL;
                 clay_trace_pop();
                 return result;
             }

@@ -191,6 +191,14 @@ static ClayValue object_has_slot(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_BOOL(clay_has_slot(self, clay_string_data(name_obj)));
 }
 
+/* getSlot("name") — return raw slot value without invoking blocks */
+static ClayValue object_get_slot(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_NIL;
+    ClayObject *name_obj = CLAY_OBJ(argv[0]);
+    if (name_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
+    return clay_get_slot(self, clay_string_data(name_obj));
+}
+
 static ClayValue object_has_method(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_FALSE;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
@@ -449,6 +457,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Object, "type", object_type);
     clay_set_method(clay_Object, "parent", object_parent);
     clay_set_method(clay_Object, "hasSlot", object_has_slot);
+    clay_set_method(clay_Object, "getSlot", object_get_slot);
     clay_set_method(clay_Object, "hasMethod", object_has_method);
 
     /* Number prototype */
