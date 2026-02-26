@@ -52,6 +52,7 @@ jsonItem = "{\"id\":{{id}},\"title\":\"{{title}}\",\"done\":{{done}}}"
 
 // -- Server setup --
 server = HttpServer new(port)
+server logging(true)
 
 // Home page
 server get("/", { |req|
