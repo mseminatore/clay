@@ -8,8 +8,11 @@
  * Uses the existing bytecode VM stepping infrastructure.
  */
 
+#include "clay.h"
+
 #define DAP_MAX_BREAKPOINTS 256
 #define DAP_MAX_SOURCES 16
+#define DAP_MAX_VAR_REFS 256
 
 typedef struct {
     int lines[DAP_MAX_BREAKPOINTS];
@@ -20,6 +23,14 @@ typedef struct {
     char *file;            /* source file path */
     DapBreakpointSet bp;   /* breakpoints for this file */
 } DapSource;
+
+/* Variable reference table — maps variablesReference IDs to ClayValues.
+ * IDs 1 and 2 are reserved for Globals and Locals scopes.
+ * IDs 3+ are assigned to expandable objects/arrays. */
+typedef struct {
+    ClayValue values[DAP_MAX_VAR_REFS];
+    int count;             /* next ID to assign (starts at 3) */
+} DapVarRefs;
 
 typedef struct {
     DapSource sources[DAP_MAX_SOURCES];
@@ -37,6 +48,7 @@ typedef struct {
     const char *source_file;
     void *bc;              /* BcCompiler* */
     void *vm;              /* clayvm_vm_t* */
+    DapVarRefs var_refs;   /* expandable variable tracking */
 } DapState;
 
 /* Run the DAP adapter for the given source file. Does not return until disconnect. */

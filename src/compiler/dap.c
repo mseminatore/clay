@@ -252,6 +252,39 @@ static char *dap_format_vm_value(clayvm_value_t v) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Variable reference tracking for expandable objects                 */
+/* ------------------------------------------------------------------ */
+
+static void dap_var_refs_reset(void) {
+    g_dap.var_refs.count = 3; /* 1=Globals, 2=Locals, 3+ = objects */
+}
+
+/* Returns a variablesReference for an expandable ClayValue, or 0 if not expandable */
+static int dap_var_ref_for(ClayValue cv) {
+    if (CLAY_IS_NIL(cv) || CLAY_IS_INT(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE)
+        return 0;
+    ClayObject *obj = CLAY_OBJ(cv);
+    if (!obj) return 0;
+    if (obj->type == CLAY_TYPE_ARRAY && obj->as.array.size > 0) {
+        int id = g_dap.var_refs.count;
+        if (id < DAP_MAX_VAR_REFS) {
+            g_dap.var_refs.values[id] = cv;
+            g_dap.var_refs.count++;
+            return id;
+        }
+    }
+    if (obj->type == CLAY_TYPE_OBJECT && obj->slots && obj->slots->table && ht_size(obj->slots) > 0) {
+        int id = g_dap.var_refs.count;
+        if (id < DAP_MAX_VAR_REFS) {
+            g_dap.var_refs.values[id] = cv;
+            g_dap.var_refs.count++;
+            return id;
+        }
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Step callback — fires at each VM instruction                       */
 /* ------------------------------------------------------------------ */
 
@@ -280,14 +313,14 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
     const char *reason = NULL;
 
     if (g_dap.step_mode == 1) {
-        /* Step Next — stop when line changes */
-        if (line != g_dap.step_line) {
+        /* Step Next — stop when line changes at same or shallower depth */
+        if (line != g_dap.step_line && clay_call_trace.depth <= g_dap.step_depth) {
             should_stop = 1;
             reason = "step";
         }
     } else if (g_dap.step_mode == 2) {
-        /* Step In — stop on any new line */
-        if (line != g_dap.step_line) {
+        /* Step In — stop on any new line (including inside called methods/blocks) */
+        if (line != g_dap.step_line || clay_call_trace.depth > g_dap.step_depth) {
             should_stop = 1;
             reason = "step";
         }
@@ -314,6 +347,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
     g_dap.stopped = 1;
     g_dap.step_mode = 0;
     g_dap.last_stopped_line = line;
+    dap_var_refs_reset();
     dap_send_stopped(reason, NULL);
 
     /* Process DAP requests while stopped */
@@ -351,6 +385,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             g_dap.stopped = 0;
             g_dap.step_mode = 2;
             g_dap.step_line = line;
+            g_dap.step_depth = clay_call_trace.depth;
         } else if (strcmp(command, "stepOut") == 0) {
             cJSON *resp = dap_base_response(msg, 1);
             dap_send(resp);
@@ -449,7 +484,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
                         cJSON_AddStringToObject(v, "name", name);
                         cJSON_AddStringToObject(v, "value", formatted);
                         cJSON_AddStringToObject(v, "type", dap_type_name(cv));
-                        cJSON_AddNumberToObject(v, "variablesReference", 0);
+                        cJSON_AddNumberToObject(v, "variablesReference", dap_var_ref_for(cv));
                         cJSON_AddItemToArray(variables, v);
                         free(formatted);
                     }
@@ -468,9 +503,50 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
                     cJSON_AddStringToObject(v, "name", name_buf);
                     cJSON_AddStringToObject(v, "value", formatted);
                     cJSON_AddStringToObject(v, "type", dap_type_name(cv));
-                    cJSON_AddNumberToObject(v, "variablesReference", 0);
+                    cJSON_AddNumberToObject(v, "variablesReference", dap_var_ref_for(cv));
                     cJSON_AddItemToArray(variables, v);
                     free(formatted);
+                }
+            } else if (varRef >= 3 && varRef < g_dap.var_refs.count) {
+                /* Child variables of an expanded object/array */
+                ClayValue parent_cv = g_dap.var_refs.values[varRef];
+                if (!CLAY_IS_NIL(parent_cv) && !CLAY_IS_INT(parent_cv)) {
+                    ClayObject *parent = CLAY_OBJ(parent_cv);
+                    if (parent && parent->type == CLAY_TYPE_ARRAY) {
+                        /* Array elements */
+                        size_t len = parent->as.array.size;
+                        for (size_t i = 0; i < len && i < 100; i++) {
+                            ClayValue elem = parent->as.array.items[i];
+                            char *formatted = dap_format_clay_value(elem);
+                            char idx_buf[16];
+                            snprintf(idx_buf, sizeof(idx_buf), "[%zu]", i);
+
+                            cJSON *v = cJSON_CreateObject();
+                            cJSON_AddStringToObject(v, "name", idx_buf);
+                            cJSON_AddStringToObject(v, "value", formatted);
+                            cJSON_AddStringToObject(v, "type", dap_type_name(elem));
+                            cJSON_AddNumberToObject(v, "variablesReference", dap_var_ref_for(elem));
+                            cJSON_AddItemToArray(variables, v);
+                            free(formatted);
+                        }
+                    } else if (parent && parent->slots && parent->slots->table) {
+                        /* Object slots */
+                        size_t ipos = 0;
+                        ht_key_t key;
+                        ht_value_t val;
+                        while (ht_next(parent->slots, &ipos, &key, &val)) {
+                            ClayValue sv = (ClayValue)(uintptr_t)val;
+                            char *formatted = dap_format_clay_value(sv);
+
+                            cJSON *v = cJSON_CreateObject();
+                            cJSON_AddStringToObject(v, "name", (const char *)key);
+                            cJSON_AddStringToObject(v, "value", formatted);
+                            cJSON_AddStringToObject(v, "type", dap_type_name(sv));
+                            cJSON_AddNumberToObject(v, "variablesReference", dap_var_ref_for(sv));
+                            cJSON_AddItemToArray(variables, v);
+                            free(formatted);
+                        }
+                    }
                 }
             }
 
@@ -519,11 +595,35 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             }
             dap_send(resp);
         } else if (strcmp(command, "evaluate") == 0) {
-            /* Simple evaluate — just return "not supported" for now */
+            /* Evaluate — look up a global variable by name */
+            cJSON *args = cJSON_GetObjectItem(msg, "arguments");
+            const char *expr = NULL;
+            cJSON *expr_item = cJSON_GetObjectItem(args, "expression");
+            if (expr_item) expr = expr_item->valuestring;
+
             cJSON *resp = dap_base_response(msg, 1);
             cJSON *body = cJSON_AddObjectToObject(resp, "body");
-            cJSON_AddStringToObject(body, "result", "<evaluate not supported>");
-            cJSON_AddNumberToObject(body, "variablesReference", 0);
+
+            int found = 0;
+            clayvm_vm_t *dvm = (clayvm_vm_t *)g_dap.vm;
+            if (expr && dvm && dvm->globals) {
+                HashTable *globals = (HashTable *)dvm->globals;
+                ht_value_t val;
+                if (globals->table && ht_lookup(globals, expr, &val)) {
+                    clayvm_value_t *vp = (clayvm_value_t *)val;
+                    ClayValue cv = vm_to_clay(*vp);
+                    char *formatted = dap_format_clay_value(cv);
+                    cJSON_AddStringToObject(body, "result", formatted);
+                    cJSON_AddStringToObject(body, "type", dap_type_name(cv));
+                    cJSON_AddNumberToObject(body, "variablesReference", dap_var_ref_for(cv));
+                    free(formatted);
+                    found = 1;
+                }
+            }
+            if (!found) {
+                cJSON_AddStringToObject(body, "result", "<not found>");
+                cJSON_AddNumberToObject(body, "variablesReference", 0);
+            }
             dap_send(resp);
         } else if (strcmp(command, "disconnect") == 0) {
             cJSON *resp = dap_base_response(msg, 1);

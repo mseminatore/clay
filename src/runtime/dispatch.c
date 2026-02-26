@@ -137,10 +137,24 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         return result;
     }
 
-    /* Slot access fallback: if a slot exists with this name, return its value */
-    if (argc == 0 && clay_has_slot(obj, selector)) {
-        clay_trace_pop();
-        return clay_get_slot(obj, selector);
+    /* Slot access fallback: if a slot exists with this name, check its value.
+     * If it's a Block, invoke it (Io-style: block slots act as methods).
+     * Otherwise return the slot value (only for zero-arg sends). */
+    if (clay_has_slot(obj, selector)) {
+        ClayValue slot_val = clay_get_slot(obj, selector);
+        if (!CLAY_IS_NIL(slot_val) && !CLAY_IS_INT(slot_val) &&
+            slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
+            ClayObject *slot_obj = CLAY_OBJ(slot_val);
+            if (slot_obj && slot_obj->type == CLAY_TYPE_BLOCK && slot_obj->as.block.func) {
+                ClayValue result = slot_obj->as.block.func(slot_obj, argc, argv);
+                clay_trace_pop();
+                return result;
+            }
+        }
+        if (argc == 0) {
+            clay_trace_pop();
+            return slot_val;
+        }
     }
 
     /* Try doesNotUnderstand */
