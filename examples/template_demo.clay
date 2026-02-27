@@ -1,0 +1,24 @@
+// Demo: clay-template brick -- string templates
+import("clay-stdlib/clay-template")
+
+"=== basic render ===" println
+data = Dict new
+data set("name", "World")
+data set("count", 42)
+Template render("Hello, {{name}}! You have {{count}} items.", data) println
+
+"=== multi-placeholder ===" println
+page = Dict new
+page set("title", "Clay Language")
+page set("author", "Team Clay")
+page set("year", 2025)
+Template render("<h1>{{title}}</h1><p>By {{author}}, {{year}}</p>", page) println
+
+"=== renderEach ===" println
+items = []
+d1 = Dict new; d1 set("name", "Alice"); d1 set("role", "admin")
+d2 = Dict new; d2 set("name", "Bob"); d2 set("role", "user")
+d3 = Dict new; d3 set("name", "Carol"); d3 set("role", "user")
+items append(d1); items append(d2); items append(d3)
+
+Template renderEach("- {{name}} ({{role}})", items, "\n") println

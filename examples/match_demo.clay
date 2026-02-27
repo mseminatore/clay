@@ -1,0 +1,25 @@
+// Demo: clay-match brick -- pattern matching
+import("clay-stdlib/clay-match")
+
+"=== value matching ===" println
+x = 2
+result = Match value(x) when(1, { "one" }) when(2, { "two" }) when(3, { "three" }) else({ "other" })
+("match(2) = " + result) println
+
+"=== else fallback ===" println
+result = Match value(99) when(1, { "one" }) else({ |v| "got " + v toString })
+("match(99) = " + result) println
+
+"=== type matching ===" println
+val = "hello"
+result = Match value(val) whenType("Number", { |v| "number: " + v toString }) whenType("String", { |v| "string: " + v }) else({ "unknown" })
+("matchType = " + result) println
+
+"=== predicate matching ===" println
+n = 42
+result = Match value(n) whenPred({ |v| v < 0 }, { "negative" }) whenPred({ |v| v == 0 }, { "zero" }) whenPred({ |v| v > 0 }, { "positive" }) else({ "?" })
+("matchPred(42) = " + result) println
+
+"=== first match wins ===" println
+result = Match value(5) when(5, { "five" }) when(5, { "also five" }) else({ "nope" })
+("first match: " + result) println

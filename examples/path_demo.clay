@@ -1,0 +1,21 @@
+// Demo: clay-path brick
+import("clay-stdlib/clay-path")
+
+"=== join ===" println
+Path join(["src", "compiler", "main.c"]) println
+
+"=== dirname ===" println
+Path dirname("/usr/local/bin/clay") println
+Path dirname("file.txt") println
+
+"=== basename ===" println
+Path basename("/usr/local/bin/clay") println
+Path basename("src/main.clay") println
+
+"=== extension ===" println
+Path extension("app.tar.gz") println
+Path extension("Makefile") println
+
+"=== stem ===" println
+Path stem("main.clay") println
+Path stem("/path/to/readme.md") println

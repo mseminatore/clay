@@ -1,0 +1,34 @@
+// Demo: clay-queue brick -- persistent job queue
+import("clay-stdlib/clay-queue")
+
+"=== create queue ===" println
+db = Db open(":memory:")
+q = JobQueue new(db, "jobs")
+("queue size: " + q size toString) println
+
+"=== push jobs ===" println
+q push("email", "welcome to alice@example.com")
+q push("email", "invoice to bob@example.com")
+q push("resize", "thumbnail for photo_123.jpg")
+("pending: " + q pending toString) println
+
+"=== pop and process ===" println
+job = q pop
+("popped: type=" + job get("type") + " payload=" + job get("payload")) println
+("processing: " + q processing toString) println
+
+"=== complete job ===" println
+q complete(job)
+("pending after complete: " + q pending toString) println
+
+"=== fail a job ===" println
+job2 = q pop
+q fail(job2, "SMTP timeout")
+("failed: " + q failed toString) println
+
+"=== retry failed ===" println
+q retry
+("pending after retry: " + q pending toString) println
+("failed after retry: " + q failed toString) println
+
+"all done!" println

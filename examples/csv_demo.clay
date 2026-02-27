@@ -1,0 +1,20 @@
+// Demo: clay-csv brick -- CSV parsing and generation
+import("clay-stdlib/clay-csv")
+
+"=== parse ===" println
+rows = Csv parse("name,age,city\nAlice,30,NYC\nBob,25,LA")
+rows each { |row| row toString println }
+
+"=== parseWithHeader ===" println
+records = Csv parseWithHeader("name,age,city\nAlice,30,NYC\nBob,25,LA")
+records each { |rec|
+    (rec get("name") + " is " + rec get("age") + " from " + rec get("city")) println
+}
+
+"=== stringify ===" println
+data = [["fruit", "count"], ["apple", "5"], ["banana", "3"]]
+Csv stringify(data) println
+
+"=== quoted fields ===" println
+quoted = Csv parse("name,bio\nAlice,\"Likes commas, and quotes\"\"here\"\"\"")
+quoted each { |row| row toString println }

@@ -1,0 +1,50 @@
+// Demo: clay-test brick -- testing framework
+import("clay-stdlib/clay-test")
+
+Test describe("Arithmetic") {
+    Test it("adds numbers") {
+        Test assertEqual(1 + 1, 2)
+    }
+
+    Test it("multiplies numbers") {
+        Test assertEqual(3 * 4, 12)
+    }
+
+    Test it("handles negative results") {
+        Test assertEqual(5 - 10, -5)
+    }
+}
+
+Test describe("Strings") {
+    Test it("concatenates") {
+        Test assertEqual("hello" + " world", "hello world")
+    }
+
+    Test it("reports length") {
+        Test assertEqual("clay" length, 4)
+    }
+
+    Test it("converts to upper") {
+        Test assertEqual("hello" upper, "HELLO")
+    }
+}
+
+Test describe("Booleans") {
+    Test it("assertTrue works") {
+        Test assertTrue(3 > 1)
+    }
+
+    Test it("assertFalse works") {
+        Test assertFalse(1 > 3)
+    }
+
+    Test it("assertNotEqual works") {
+        Test assertNotEqual("a", "b")
+    }
+
+    Test it("assertRaises catches errors") {
+        Test assertRaises({ 1 / 0 })
+    }
+}
+
+Test run

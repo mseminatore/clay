@@ -1,0 +1,28 @@
+// Demo: clay-markdown brick -- markdown to HTML
+import("clay-stdlib/clay-markdown")
+
+"=== headings ===" println
+Markdown render("# Hello World") println
+Markdown render("## Section Two") println
+Markdown render("### Subsection") println
+
+"=== paragraphs ===" println
+Markdown render("This is a paragraph.\n\nThis is another.") println
+
+"=== unordered list ===" println
+Markdown render("- apples\n- bananas\n- cherries") println
+
+"=== ordered list ===" println
+Markdown render("1. first\n2. second\n3. third") println
+
+"=== inline styles ===" println
+Markdown render("This is **bold** and *italic* and `code`") println
+
+"=== links ===" println
+Markdown render("Visit [Clay](https://github.com/example/clay)") println
+
+"=== code block ===" println
+Markdown render("```\nx = 42\nx println\n```") println
+
+"=== horizontal rule ===" println
+Markdown render("---") println

@@ -1,0 +1,22 @@
+// Demo: clay-args brick -- CLI argument parsing
+import("clay-stdlib/clay-args")
+
+"=== define parser ===" println
+parser = ArgParser new("myapp", "A demo application")
+parser flag("verbose", "v", "Enable verbose output")
+parser flag("dry-run", "d", "Simulate without changes")
+parser option("output", "o", "Output file path", "result.txt")
+parser option("format", "f", "Output format", "json")
+
+"=== show usage ===" println
+parser usage
+
+"=== parse simulated args ===" println
+args = ["--verbose", "-o", "data.csv", "-f", "csv", "input1.txt", "input2.txt"]
+result = parser parse(args)
+
+("verbose:  " + result get("verbose") toString) println
+("dry-run:  " + result get("dry-run") toString) println
+("output:   " + result get("output")) println
+("format:   " + result get("format")) println
+("positional: " + result get("_positional") toString) println

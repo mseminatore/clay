@@ -1,0 +1,43 @@
+// Demo: clay-orm brick -- ActiveRecord-style ORM
+import("clay-stdlib/clay-orm")
+
+"=== setup ===" println
+db = Db open(":memory:")
+db exec("CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, done TEXT)")
+
+Todo = Model define(db, "todos", ["title", "done"])
+
+"=== create records ===" println
+d1 = Dict new; d1 set("title", "Buy groceries"); d1 set("done", "0")
+d2 = Dict new; d2 set("title", "Write tests"); d2 set("done", "0")
+d3 = Dict new; d3 set("title", "Deploy app"); d3 set("done", "1")
+Todo create(d1)
+Todo create(d2)
+Todo create(d3)
+("count: " + Todo count toString) println
+
+"=== find by id ===" println
+todo = Todo find(1)
+("todo 1: " + todo _data get("title")) println
+
+"=== all records ===" println
+Todo all each { |t|
+    ("#" + t _id toString + " " + t _data get("title") + " [done=" + t _data get("done") + "]") println
+}
+
+"=== where query ===" println
+done = Todo where("done", "1")
+("done count: " + done size toString) println
+done each { |t| ("  " + t _data get("title")) println }
+
+"=== update ===" println
+upd = Dict new; upd set("done", "1")
+Todo update(2, upd)
+t2 = Todo find(2)
+("todo 2 done: " + t2 _data get("done")) println
+
+"=== delete ===" println
+Todo delete(3)
+("after delete: " + Todo count toString) println
+
+"all done!" println

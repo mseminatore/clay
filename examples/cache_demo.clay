@@ -1,0 +1,32 @@
+// Demo: clay-cache brick -- LRU cache with TTL
+import("clay-stdlib/clay-cache")
+
+"=== basic set/get ===" println
+c = Cache new
+c set("name", "Clay")
+c set("version", 1)
+("name: " + c get("name")) println
+("version: " + c get("version") toString) println
+("size: " + c size toString) println
+
+"=== has / remove ===" println
+("has name: " + c has("name") toString) println
+c remove("name")
+("has name after remove: " + c has("name") toString) println
+
+"=== maxSize (LRU eviction) ===" println
+lru = Cache new
+lru maxSize(3)
+lru set("a", 1)
+lru set("b", 2)
+lru set("c", 3)
+("before evict: " + lru keys toString) println
+lru set("d", 4)
+("after adding d: " + lru keys toString) println
+("a evicted: " + (lru get("a") == nil) toString) println
+
+"=== clear ===" println
+lru clear
+("size after clear: " + lru size toString) println
+
+"all done!" println

@@ -1,0 +1,39 @@
+// Demo: clay-iter brick -- lazy iterator pipelines
+import("clay-stdlib/clay-iter")
+
+"=== from + toArray ===" println
+Iter from([10, 20, 30]) toArray toString println
+
+"=== range ===" println
+Iter range(1, 6) toArray toString println
+
+"=== map ===" println
+Iter from([1, 2, 3, 4]) map({ |x| x * x }) toArray toString println
+
+"=== filter ===" println
+Iter from([1, 2, 3, 4, 5, 6]) filter({ |x| x % 2 == 0 }) toArray toString println
+
+"=== chained map + filter ===" println
+Iter from([1, 2, 3, 4, 5]) map({ |x| x * 10 }) filter({ |x| x > 20 }) toArray toString println
+
+"=== take ===" println
+Iter from([1, 2, 3, 4, 5]) take(3) toArray toString println
+
+"=== skip ===" println
+Iter from([1, 2, 3, 4, 5]) skip(2) toArray toString println
+
+"=== reduce ===" println
+sum = Iter from([1, 2, 3, 4, 5]) reduce(0, { |acc, x| acc + x })
+("sum: " + sum toString) println
+
+"=== first ===" println
+first = Iter from([10, 20, 30]) first
+("first: " + first toString) println
+
+"=== count ===" println
+n = Iter from([1, 2, 3]) filter({ |x| x > 1 }) count
+("count > 1: " + n toString) println
+
+"=== pipeline ===" println
+result = Iter range(1, 11) filter({ |x| x % 3 == 0 }) map({ |x| x * x }) toArray
+("squares of multiples of 3 in 1..10: " + result toString) println

@@ -1,0 +1,35 @@
+// Demo: clay-router brick -- URL pattern matching
+import("clay-stdlib/clay-router")
+
+"=== set up routes ===" println
+router = Router new
+router add("GET", "/", "home")
+router add("GET", "/users", "user_list")
+router add("GET", "/users/:id", "user_detail")
+router add("POST", "/users", "create_user")
+router add("GET", "/users/:id/posts/:postId", "user_post")
+
+"=== match static route ===" println
+m = router match("GET", "/")
+(m != nil) ifTrue { ("handler: " + m get("handler")) println }
+
+"=== match with params ===" println
+m = router match("GET", "/users/42")
+(m != nil) ifTrue {
+    ("handler: " + m get("handler")) println
+    ("params.id: " + m get("params") get("id")) println
+}
+
+"=== match multiple params ===" println
+m = router match("GET", "/users/7/posts/99")
+(m != nil) ifTrue {
+    ("user: " + m get("params") get("id") + " post: " + m get("params") get("postId")) println
+}
+
+"=== match by method ===" println
+m = router match("POST", "/users")
+(m != nil) ifTrue { ("handler: " + m get("handler")) println }
+
+"=== no match ===" println
+m = router match("DELETE", "/users")
+(m == nil) ifTrue { "no route matched" println }

@@ -1,0 +1,26 @@
+// Demo: clay-log brick -- structured logging
+import("clay-stdlib/clay-log")
+
+"=== default level (info) ===" println
+Log debug("this won't show at info level")
+Log info("server started on port 8080")
+Log warn("disk usage at 85%")
+Log error("connection to database failed")
+
+"=== set level to debug ===" println
+Log level("debug")
+Log debug("now debug messages show")
+Log info("still shows info too")
+
+"=== set level to error ===" println
+Log level("error")
+Log info("this info won't show")
+Log warn("this warn won't show")
+Log error("only errors show now")
+
+"=== with prefix ===" println
+Log level("info")
+Log prefix("[myapp]")
+Log info("request received")
+Log warn("slow response detected")
+Log error("unhandled exception")

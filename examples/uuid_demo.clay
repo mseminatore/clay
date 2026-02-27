@@ -1,0 +1,15 @@
+// Demo: clay-uuid brick
+import("clay-stdlib/clay-uuid")
+
+"=== generate UUID v4 ===" println
+id1 = Uuid v4
+("UUID 1: " + id1) println
+id2 = Uuid v4
+("UUID 2: " + id2) println
+
+"=== format check ===" println
+("Length: " + id1 length toString) println
+("Has dashes: " + (id1 contains("-")) toString) println
+
+"=== uniqueness ===" println
+(id1 != id2) ifTrue { "UUIDs are unique" println }

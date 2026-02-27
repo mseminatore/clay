@@ -1,0 +1,66 @@
+// Demo: clay-validate brick -- schema validation
+import("clay-stdlib/clay-validate")
+
+"=== valid data ===" println
+schema = Schema new
+schema required("name", "string")
+schema required("age", "number")
+schema optional("role", "string", "guest")
+
+data = Dict new
+data set("name", "Alice")
+data set("age", 30)
+errors = schema validate(data)
+("errors: " + errors size toString) println
+("role default: " + data get("role")) println
+
+"=== missing required field ===" println
+schema2 = Schema new
+schema2 required("title", "string")
+schema2 required("price", "number")
+
+bad = Dict new
+bad set("price", 10)
+errors = schema2 validate(bad)
+errors each { |e| ("  " + e) println }
+
+"=== type mismatch ===" println
+schema3 = Schema new
+schema3 required("count", "number")
+
+bad2 = Dict new
+bad2 set("count", "not a number")
+errors = schema3 validate(bad2)
+errors each { |e| ("  " + e) println }
+
+"=== constraints ===" println
+schema4 = Schema new
+schema4 required("username", "string")
+schema4 minLength("username", 3)
+schema4 maxLength("username", 20)
+schema4 required("score", "number")
+schema4 min("score", 0)
+schema4 max("score", 100)
+
+good = Dict new
+good set("username", "clay_user")
+good set("score", 85)
+errors = schema4 validate(good)
+("valid user: " + (errors size == 0) toString) println
+
+short = Dict new
+short set("username", "ab")
+short set("score", 150)
+errors = schema4 validate(short)
+("constraint errors:") println
+errors each { |e| ("  " + e) println }
+
+"=== oneOf ===" println
+schema5 = Schema new
+schema5 required("status", "string")
+schema5 oneOf("status", ["active", "inactive", "banned"])
+
+d = Dict new
+d set("status", "unknown")
+errors = schema5 validate(d)
+errors each { |e| ("  " + e) println }

@@ -1,0 +1,34 @@
+// Demo: clay-cli brick -- ANSI terminal colors and styles
+import("clay-stdlib/clay-cli")
+
+"=== foreground colors ===" println
+Cli red("This is red") println
+Cli green("This is green") println
+Cli yellow("This is yellow") println
+Cli blue("This is blue") println
+Cli magenta("This is magenta") println
+Cli cyan("This is cyan") println
+
+"=== styles ===" println
+Cli bold("Bold text") println
+Cli dim("Dim text") println
+Cli italic("Italic text") println
+Cli underline("Underlined text") println
+
+"=== background colors ===" println
+Cli bgRed("Red background") println
+Cli bgGreen("Green background") println
+Cli bgBlue("Blue background") println
+
+"=== convenience methods ===" println
+Cli success("Operation successful!") println
+Cli warning("Disk space low") println
+Cli error("Connection failed") println
+
+"=== combining styles ===" println
+Cli bold(Cli cyan("Bold cyan")) println
+
+"=== strip ANSI codes ===" println
+styled = Cli red("colored text")
+("Styled length: " + styled length toString) println
+("Plain length:  " + Cli strip(styled) length toString) println
