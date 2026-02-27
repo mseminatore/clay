@@ -966,6 +966,7 @@ Bricks is Clay's built-in package manager. Packages ("bricks") are Git repositor
 clay bricks init                              # create brick.json
 clay bricks add github.com/user/some-lib      # add + install a dependency
 clay bricks install                           # install all deps from brick.json
+clay bricks update                            # update all deps to latest
 clay bricks list                              # show project info
 clay bricks remove some-lib                   # remove a dependency
 ```
