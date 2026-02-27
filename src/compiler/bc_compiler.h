@@ -77,6 +77,7 @@ typedef struct {
     int native_stop_vm;
     int native_try_catch;
     int native_raise;
+    int native_make_range;
 
     int had_error;
 

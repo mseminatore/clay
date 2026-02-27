@@ -284,22 +284,45 @@ vm:
       operands: [{ name: index, type: uint16 }]
       description: "Read captured variable via upvalue index"
       action_c: |
-        /* Upvalue access is handled through native calls for now */
-        (void)index;
+        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+            if (uv) {
+                clayvm_vm_push(vm, *uv->location);
+            } else {
+                clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+            }
+        } else {
+            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+        }
 
     - name: SET_UPVALUE
       operands: [{ name: index, type: uint16 }]
       description: "Write captured variable via upvalue index"
       action_c: |
-        /* Upvalue write is handled through native calls for now */
-        (void)index;
+        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+            if (uv) {
+                *uv->location = vm->stack[vm->sp - 1];
+            }
+        }
 
     - name: CLOSE_UPVALUE
       operands: [{ name: slot, type: uint16 }]
       description: "Close all open upvalues at or above the given stack slot"
       action_c: |
-        /* Close upvalue is handled through native calls for now */
-        (void)slot;
+        {
+            clayvm_upvalue_t **prev = &vm->open_upvalues;
+            clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+            while (*prev) {
+                clayvm_upvalue_t *uv = *prev;
+                if (uv->location >= slot_ptr) {
+                    clayvm_close_upvalue(uv);
+                    *prev = uv->next;
+                } else {
+                    prev = &uv->next;
+                }
+            }
+        }
 
     # Exception handling
     - name: TRY_BEGIN
@@ -339,3 +362,5 @@ vm:
     - { name: natives, type: "clayvm_native_table_t", include: "native.h" }
     - { name: globals, type: "void *", comment: "HashTable* for REPL variable persistence" }
     - { name: arith_fallback, type: "void (*)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int)", comment: "Fallback for non-numeric binary ops" }
+    - { name: open_upvalues, type: "clayvm_upvalue_t *", comment: "Head of open upvalue linked list" }
+    - { name: current_closure, type: "clayvm_closure_t *", comment: "Currently executing closure" }

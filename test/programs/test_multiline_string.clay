@@ -1,0 +1,22 @@
+// Test multi-line strings
+
+// Basic multi-line
+s1 = """hello
+world"""
+(s1 length > 5) ifTrue { "PASS: multiline basic" println } ifFalse { "FAIL: multiline basic" println }
+
+// Interpolation in multi-line
+name = "Clay"
+s2 = """Hello
+${name}!"""
+(s2 contains("Clay")) ifTrue { "PASS: multiline interp" println } ifFalse { "FAIL: multiline interp" println }
+
+// Empty multi-line
+s3 = """"""
+(s3 == "") ifTrue { "PASS: empty triple" println } ifFalse { "FAIL: empty triple" println }
+
+// Backslash is literal
+s4 = """path\to\file"""
+(s4 contains("\\")) ifTrue { "PASS: literal backslash" println } ifFalse { "FAIL: literal backslash" println }
+
+"All multi-line string tests completed" println

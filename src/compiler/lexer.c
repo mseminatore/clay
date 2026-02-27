@@ -73,6 +73,24 @@ static void skip_whitespace(Lexer *lexer) {
     }
 }
 
+static Token lex_triple_string(Lexer *lexer) {
+    const char *start = lexer->current; /* after opening """ */
+    int has_interp = 0;
+    while (!(lexer->current[0] == '"' && lexer->current[1] == '"' && lexer->current[2] == '"')) {
+        if (peek(lexer) == '\0') {
+            return error_token(lexer, "Unterminated triple-quoted string");
+        }
+        if (peek(lexer) == '\n') lexer->line++;
+        if (peek(lexer) == '$' && lexer->current[1] == '{') has_interp = 1;
+        advance(lexer);
+    }
+    int length = (int)(lexer->current - start);
+    advance(lexer); /* skip first closing " */
+    advance(lexer); /* skip second closing " */
+    advance(lexer); /* skip third closing " */
+    return make_token(lexer, has_interp ? TOK_INTERP_STRING : TOK_STRING, start, length);
+}
+
 static Token lex_string(Lexer *lexer) {
     const char *start = lexer->current; /* after opening quote */
     int has_interp = 0;
@@ -160,6 +178,11 @@ Token lexer_next(Lexer *lexer) {
 
     /* String literal */
     if (c == '"') {
+        if (lexer->current[0] == '"' && lexer->current[1] == '"') {
+            advance(lexer); /* skip second " */
+            advance(lexer); /* skip third " */
+            return lex_triple_string(lexer);
+        }
         return lex_string(lexer);
     }
 
@@ -186,7 +209,9 @@ Token lexer_next(Lexer *lexer) {
         case '[': return make_token(lexer, TOK_LBRACKET, start, 1);
         case ']': return make_token(lexer, TOK_RBRACKET, start, 1);
         case ',': return make_token(lexer, TOK_COMMA, start, 1);
-        case '.': return make_token(lexer, TOK_DOT, start, 1);
+        case '.':
+            if (match(lexer, '.')) return make_token(lexer, TOK_RANGE, start, 2);
+            return make_token(lexer, TOK_DOT, start, 1);
         case '|':
             if (match(lexer, '|')) return make_token(lexer, TOK_OR, start, 2);
             return make_token(lexer, TOK_PIPE, start, 1);
@@ -254,6 +279,7 @@ const char *token_type_name(TokenType type) {
         case TOK_RBRACKET:   return "]";
         case TOK_COMMA:      return ",";
         case TOK_DOT:        return ".";
+        case TOK_RANGE:      return "..";
         case TOK_PIPE:       return "|";
         case TOK_HASH_LBRACE: return "#{";
         case TOK_COLON:      return ":";

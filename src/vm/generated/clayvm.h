@@ -198,13 +198,13 @@ clayvm_string_t *clayvm_string_find(clayvm_string_table_t *table, const char *st
 #include <stddef.h>
 
 typedef struct clayvm_upvalue {
-    int64_t *location;
-    int64_t closed;
+    clayvm_value_t *location;
+    clayvm_value_t closed;
     int is_closed;
     struct clayvm_upvalue *next;
 } clayvm_upvalue_t;
 
-typedef struct {
+typedef struct clayvm_closure {
     uint16_t function_index;
     clayvm_upvalue_t **upvalues;
     int upvalue_count;
@@ -212,8 +212,8 @@ typedef struct {
 
 int  clayvm_init_closure(clayvm_closure_t *closure, uint16_t fn_index, int upvalue_count);
 void clayvm_free_closure(clayvm_closure_t *closure);
-int64_t clayvm_get_upvalue(clayvm_closure_t *closure, int index);
-void clayvm_set_upvalue(clayvm_closure_t *closure, int index, int64_t value);
+clayvm_value_t clayvm_get_upvalue(clayvm_closure_t *closure, int index);
+void clayvm_set_upvalue(clayvm_closure_t *closure, int index, clayvm_value_t value);
 void clayvm_close_upvalue(clayvm_upvalue_t *upvalue);
 
 
@@ -252,6 +252,11 @@ int  clayvm_native_call(clayvm_native_table_t *table, int index,
 
 #include <stdint.h>
 #include <stddef.h>
+
+struct clayvm_upvalue;
+typedef struct clayvm_upvalue clayvm_upvalue_t;
+struct clayvm_closure;
+typedef struct clayvm_closure clayvm_closure_t;
 
 typedef enum {
     CLAYVM_VAL_NIL,
@@ -342,6 +347,8 @@ typedef struct clayvm_vm {
     clayvm_native_table_t natives;
     void * globals; /* HashTable* for REPL variable persistence */
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
+    clayvm_upvalue_t * open_upvalues; /* Head of open upvalue linked list */
+    clayvm_closure_t * current_closure; /* Currently executing closure */
     void (*cleanup)(struct clayvm_vm *vm);
 } clayvm_vm_t;
 
@@ -616,13 +623,13 @@ void clayvm_free_closure(clayvm_closure_t *closure) {
     closure->upvalue_count = 0;
 }
 
-int64_t clayvm_get_upvalue(clayvm_closure_t *closure, int index) {
+clayvm_value_t clayvm_get_upvalue(clayvm_closure_t *closure, int index) {
     if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
-        return 0;
+        return (clayvm_value_t){0};
     return *closure->upvalues[index]->location;
 }
 
-void clayvm_set_upvalue(clayvm_closure_t *closure, int index, int64_t value) {
+void clayvm_set_upvalue(clayvm_closure_t *closure, int index, clayvm_value_t value) {
     if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
         return;
     *closure->upvalues[index]->location = value;
@@ -1092,22 +1099,45 @@ int handle_SET_LOCAL(clayvm_vm_t *vm) {
 
 int handle_GET_UPVALUE(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
-    /* Upvalue access is handled through native calls for now */
-    (void)index;
+    if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+        clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+        if (uv) {
+            clayvm_vm_push(vm, *uv->location);
+        } else {
+            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+        }
+    } else {
+        clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+    }
     return 0;
 }
 
 int handle_SET_UPVALUE(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
-    /* Upvalue write is handled through native calls for now */
-    (void)index;
+    if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+        clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+        if (uv) {
+            *uv->location = vm->stack[vm->sp - 1];
+        }
+    }
     return 0;
 }
 
 int handle_CLOSE_UPVALUE(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
-    /* Close upvalue is handled through native calls for now */
-    (void)slot;
+    {
+        clayvm_upvalue_t **prev = &vm->open_upvalues;
+        clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+        while (*prev) {
+            clayvm_upvalue_t *uv = *prev;
+            if (uv->location >= slot_ptr) {
+                clayvm_close_upvalue(uv);
+                *prev = uv->next;
+            } else {
+                prev = &uv->next;
+            }
+        }
+    }
     return 0;
 }
 
@@ -1593,8 +1623,16 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         uint16_t index = READ_UINT16();
-        /* Upvalue access is handled through native calls for now */
-        (void)index;
+        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+            if (uv) {
+                clayvm_vm_push(vm, *uv->location);
+            } else {
+                clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+            }
+        } else {
+            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+        }
         DISPATCH();
     }
 
@@ -1603,8 +1641,12 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         uint16_t index = READ_UINT16();
-        /* Upvalue write is handled through native calls for now */
-        (void)index;
+        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+            if (uv) {
+                *uv->location = vm->stack[vm->sp - 1];
+            }
+        }
         DISPATCH();
     }
 
@@ -1613,8 +1655,19 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         uint16_t slot = READ_UINT16();
-        /* Close upvalue is handled through native calls for now */
-        (void)slot;
+        {
+            clayvm_upvalue_t **prev = &vm->open_upvalues;
+            clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+            while (*prev) {
+                clayvm_upvalue_t *uv = *prev;
+                if (uv->location >= slot_ptr) {
+                    clayvm_close_upvalue(uv);
+                    *prev = uv->next;
+                } else {
+                    prev = &uv->next;
+                }
+            }
+        }
         DISPATCH();
     }
 
@@ -1959,20 +2012,43 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     }
     case CLAYVM_OP_GET_UPVALUE: {
         uint16_t index = READ_UINT16();
-        /* Upvalue access is handled through native calls for now */
-        (void)index;
+        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+            if (uv) {
+                clayvm_vm_push(vm, *uv->location);
+            } else {
+                clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+            }
+        } else {
+            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+        }
         break;
     }
     case CLAYVM_OP_SET_UPVALUE: {
         uint16_t index = READ_UINT16();
-        /* Upvalue write is handled through native calls for now */
-        (void)index;
+        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
+            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
+            if (uv) {
+                *uv->location = vm->stack[vm->sp - 1];
+            }
+        }
         break;
     }
     case CLAYVM_OP_CLOSE_UPVALUE: {
         uint16_t slot = READ_UINT16();
-        /* Close upvalue is handled through native calls for now */
-        (void)slot;
+        {
+            clayvm_upvalue_t **prev = &vm->open_upvalues;
+            clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+            while (*prev) {
+                clayvm_upvalue_t *uv = *prev;
+                if (uv->location >= slot_ptr) {
+                    clayvm_close_upvalue(uv);
+                    *prev = uv->next;
+                } else {
+                    prev = &uv->next;
+                }
+            }
+        }
         break;
     }
     case CLAYVM_OP_TRY_BEGIN: {

@@ -1,0 +1,73 @@
+// test_range.clay — Range literal operations
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue {
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        }
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue { self _p = self _p + 1 }
+        (!(v == true)) ifTrue { self _f = self _f + 1; "FAIL: not true" println() }
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+// Basic creation and toString
+r = 1..5
+Test eq(r toString(), "1..5")
+
+// start and end
+Test eq((1..5) start(), 1)
+Test eq((1..5) end(), 5)
+
+// size
+Test eq((1..5) size(), 5)
+
+// toArray
+arr = (1..5) toArray()
+Test eq(arr size(), 5)
+Test eq(arr first(), 1)
+Test eq(arr last(), 5)
+
+// contains
+Test ok((1..10) contains(5))
+Test ok(!((1..10) contains(11)))
+Test ok((1..10) contains(1))
+Test ok((1..10) contains(10))
+
+// each
+sum = 0
+(1..5) each { |i| sum = sum + i }
+Test eq(sum, 15)
+
+// map
+doubled = (1..5) map { |i| i * 2 }
+Test eq(doubled size(), 5)
+Test eq(doubled first(), 2)
+Test eq(doubled last(), 10)
+
+// filter
+evens = (1..10) filter { |i| i % 2 == 0 }
+Test eq(evens size(), 5)
+Test eq(evens first(), 2)
+
+// reverse
+rev = (1..5) reverse()
+Test eq(rev toString(), "5..1 step -1")
+
+Test done()

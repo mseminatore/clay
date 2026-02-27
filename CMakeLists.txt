@@ -61,6 +61,7 @@ set(RUNTIME_SOURCES
     src/runtime/array.c
     src/runtime/error.c
     src/runtime/clay_dict.c
+    src/runtime/range.c
     src/runtime/math.c
     src/runtime/file.c
     src/runtime/ffi.c
@@ -203,3 +204,6 @@ add_test(NAME clay_test_null_coalesce COMMAND clay_compiler ${CMAKE_CURRENT_SOUR
 add_test(NAME clay_test_default_params COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_default_params.clay)
 add_test(NAME clay_test_slot_assign COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_slot_assign.clay)
 add_test(NAME clay_test_refcount COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_refcount.clay)
+add_test(NAME clay_test_multiline_string COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_multiline_string.clay)
+add_test(NAME clay_test_range COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_range.clay)
+add_test(NAME clay_test_shared_capture COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_shared_capture.clay)

@@ -30,7 +30,8 @@ ClayObject *clay_Http    = NULL;
 ClayObject *clay_Regex   = NULL;
 ClayObject *clay_Fiber   = NULL;
 ClayObject *clay_Db     = NULL;
-ClayObject *clay_BreakSignal    = NULL;
+ClayObject *clay_Range  = NULL;
+ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
 
 /* External init functions from each type module */
@@ -47,6 +48,7 @@ extern void clay_http_init(ClayObject *proto);
 extern void clay_regex_init_methods(ClayObject *proto);
 extern void clay_fiber_init_methods(ClayObject *proto);
 extern void clay_db_init(ClayObject *proto);
+extern void clay_range_init_methods(ClayObject *proto);
 
 /* Object base methods */
 
@@ -541,6 +543,13 @@ void clay_bootstrap(void) {
     clay_Dict->type = CLAY_TYPE_DICT;
     clay_Dict->refcount = 1000000;
     clay_dict_init_methods(clay_Dict);
+
+    /* Range prototype */
+    clay_Range = clay_object_new();
+    clay_Range->parent = clay_Object;
+    clay_Range->refcount = 1000000;
+    clay_set_slot(clay_Range, "_name", CLAY_VAL(clay_string_new("Range")));
+    clay_range_init_methods(clay_Range);
 
     /* Math object */
     clay_Math = clay_object_new();

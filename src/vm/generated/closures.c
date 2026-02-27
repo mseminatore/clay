@@ -29,13 +29,13 @@ void clayvm_free_closure(clayvm_closure_t *closure) {
     closure->upvalue_count = 0;
 }
 
-int64_t clayvm_get_upvalue(clayvm_closure_t *closure, int index) {
+clayvm_value_t clayvm_get_upvalue(clayvm_closure_t *closure, int index) {
     if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
-        return 0;
+        return (clayvm_value_t){0};
     return *closure->upvalues[index]->location;
 }
 
-void clayvm_set_upvalue(clayvm_closure_t *closure, int index, int64_t value) {
+void clayvm_set_upvalue(clayvm_closure_t *closure, int index, clayvm_value_t value) {
     if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
         return;
     *closure->upvalues[index]->location = value;

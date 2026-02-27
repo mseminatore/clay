@@ -7,6 +7,7 @@
  */
 #include "bc_compiler.h"
 #include "clay.h"
+#include "range.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1062,6 +1063,20 @@ static int native_raise_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* native_make_range(start, end) — create a Range object */
+static int native_make_range_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t end_v = clayvm_vm_pop(vm);
+    clayvm_value_t start_v = clayvm_vm_pop(vm);
+    ClayValue start = vm_to_clay(start_v);
+    ClayValue end = vm_to_clay(end_v);
+    intptr_t s = CLAY_IS_INT(start) ? clay_to_int(start) : 0;
+    intptr_t e = CLAY_IS_INT(end) ? clay_to_int(end) : 0;
+    ClayObject *range = clay_range_new(s, e, 1);
+    clayvm_vm_push(vm, clay_to_vm(CLAY_VAL(range)));
+    return 0;
+}
+
 /* native_make_array() — create empty array */
 static int native_make_array_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
@@ -1215,6 +1230,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_stop_vm = clayvm_native_register(&vm->natives, "stop_vm", native_stop_vm_fn, 0);
     bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 3);
     bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
+    bc->native_make_range = clayvm_native_register(&vm->natives, "make_range", native_make_range_fn, 2);
 
     /* Pre-register Clay builtin prototypes as globals */
     struct { const char *name; ClayObject *obj; } builtins[] = {
@@ -1227,6 +1243,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Date", clay_Date},
         {"Http", clay_Http},
         {"Regex", clay_Regex},
+        {"Range", clay_Range},
         {"Fiber", clay_Fiber},
         {"Db", clay_Db},
         {"BreakSignal", clay_BreakSignal},
@@ -2026,6 +2043,12 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 /* NOT nil → left value is already on stack */
                 patch_jump(bc, not_nil_jump);
                 patch_jump(bc, end_jump);
+            } else if (strcmp(op, "..") == 0) {
+                bc_emit_expr(bc, node->as.binary.left);
+                bc_emit_expr(bc, node->as.binary.right);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_make_range);
+                emit_byte(bc, 2);
             } else {
                 /* Map arithmetic operators to VM opcodes for fast path */
                 int vm_op = -1;

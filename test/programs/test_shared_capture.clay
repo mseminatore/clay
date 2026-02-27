@@ -1,0 +1,51 @@
+// Test shared capture semantics (true upvalue behavior)
+
+// Two blocks sharing a captured variable
+makeCounters = {
+  n = 0
+  inc = { n = n + 1; n }
+  dec = { n = n - 1; n }
+  [inc, dec]
+}
+
+pair = makeCounters value
+inc = pair at(0)
+dec = pair at(1)
+
+r1 = inc value
+(r1 == 1) ifTrue { "PASS: shared inc 1" println } ifFalse { ("FAIL: shared inc 1 got " + r1 toString) println }
+
+r2 = inc value
+(r2 == 2) ifTrue { "PASS: shared inc 2" println } ifFalse { ("FAIL: shared inc 2 got " + r2 toString) println }
+
+r3 = dec value
+(r3 == 1) ifTrue { "PASS: shared dec" println } ifFalse { ("FAIL: shared dec got " + r3 toString) println }
+
+r4 = inc value
+(r4 == 2) ifTrue { "PASS: shared inc after dec" println } ifFalse { ("FAIL: shared inc after dec got " + r4 toString) println }
+
+// 3-level nested capture
+outer = {
+  x = 0
+  middle = {
+    inner = { x = x + 1; x }
+    inner
+  }
+  [middle, { x }]
+}
+
+result = outer value
+getInc = result at(0)
+getX = result at(1)
+
+innerInc = getInc value
+r5 = innerInc value
+(r5 == 1) ifTrue { "PASS: 3-level inc" println } ifFalse { ("FAIL: 3-level inc got " + r5 toString) println }
+
+r6 = innerInc value
+(r6 == 2) ifTrue { "PASS: 3-level inc 2" println } ifFalse { ("FAIL: 3-level inc 2 got " + r6 toString) println }
+
+r7 = getX value
+(r7 == 2) ifTrue { "PASS: outer sees nested write" println } ifFalse { ("FAIL: outer sees nested got " + r7 toString) println }
+
+"All shared capture tests completed" println

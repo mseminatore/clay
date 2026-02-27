@@ -735,25 +735,28 @@ static int is_binary_op(TokenType type) {
            type == TOK_LESS || type == TOK_GREATER ||
            type == TOK_LESS_EQ || type == TOK_GREATER_EQ ||
            type == TOK_AND || type == TOK_OR ||
-           type == TOK_NULLCOALESCE;
+           type == TOK_NULLCOALESCE ||
+           type == TOK_RANGE;
 }
 
 static int precedence(TokenType type) {
     switch (type) {
         case TOK_NULLCOALESCE:
             return 1;
-        case TOK_OR:
+        case TOK_RANGE:
             return 2;
-        case TOK_AND:
+        case TOK_OR:
             return 3;
-        case TOK_EQUAL: case TOK_NOT_EQUAL:
+        case TOK_AND:
             return 4;
-        case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
+        case TOK_EQUAL: case TOK_NOT_EQUAL:
             return 5;
-        case TOK_PLUS: case TOK_MINUS:
+        case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
             return 6;
-        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+        case TOK_PLUS: case TOK_MINUS:
             return 7;
+        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+            return 8;
         default: return 0;
     }
 }

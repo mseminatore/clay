@@ -53,6 +53,7 @@ typedef enum {
     TOK_AND,            /* && */
     TOK_OR,             /* || */
     TOK_NULLCOALESCE,   /* ?? */
+    TOK_RANGE,          /* .. */
 
     /* Compound assignment */
     TOK_PLUS_ASSIGN,    /* += */

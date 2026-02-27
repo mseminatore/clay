@@ -31,6 +31,7 @@ static int clay_is_singleton(ClayObject *obj) {
            obj == clay_Date ||
            obj == clay_Http ||
            obj == clay_Regex ||
+           obj == clay_Range ||
            obj == clay_Fiber ||
            obj == clay_Db ||
            obj == clay_BreakSignal ||

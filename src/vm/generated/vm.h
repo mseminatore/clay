@@ -12,6 +12,11 @@
 #include "opcodes.h"
 #include "native.h"
 
+struct clayvm_upvalue;
+typedef struct clayvm_upvalue clayvm_upvalue_t;
+struct clayvm_closure;
+typedef struct clayvm_closure clayvm_closure_t;
+
 typedef enum {
     CLAYVM_VAL_NIL,
     CLAYVM_VAL_INT64,
@@ -101,6 +106,8 @@ typedef struct clayvm_vm {
     clayvm_native_table_t natives;
     void * globals; /* HashTable* for REPL variable persistence */
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
+    clayvm_upvalue_t * open_upvalues; /* Head of open upvalue linked list */
+    clayvm_closure_t * current_closure; /* Currently executing closure */
     void (*cleanup)(struct clayvm_vm *vm);
 } clayvm_vm_t;
 

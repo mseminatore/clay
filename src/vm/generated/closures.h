@@ -9,15 +9,16 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "vm.h"
 
 typedef struct clayvm_upvalue {
-    int64_t *location;
-    int64_t closed;
+    clayvm_value_t *location;
+    clayvm_value_t closed;
     int is_closed;
     struct clayvm_upvalue *next;
 } clayvm_upvalue_t;
 
-typedef struct {
+typedef struct clayvm_closure {
     uint16_t function_index;
     clayvm_upvalue_t **upvalues;
     int upvalue_count;
@@ -25,8 +26,8 @@ typedef struct {
 
 int  clayvm_init_closure(clayvm_closure_t *closure, uint16_t fn_index, int upvalue_count);
 void clayvm_free_closure(clayvm_closure_t *closure);
-int64_t clayvm_get_upvalue(clayvm_closure_t *closure, int index);
-void clayvm_set_upvalue(clayvm_closure_t *closure, int index, int64_t value);
+clayvm_value_t clayvm_get_upvalue(clayvm_closure_t *closure, int index);
+void clayvm_set_upvalue(clayvm_closure_t *closure, int index, clayvm_value_t value);
 void clayvm_close_upvalue(clayvm_upvalue_t *upvalue);
 
 #endif /* CLAYVM_CLOSURES_H */

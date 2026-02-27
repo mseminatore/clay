@@ -193,8 +193,9 @@ extern ClayObject *clay_Http;
 extern ClayObject *clay_Regex;
 extern ClayObject *clay_Fiber;
 extern ClayObject *clay_Db;
+extern ClayObject *clay_Range;
 
-/* Loop control signal singletons (Error clones used by break/continue) */
+/* Loop control signal singletons(Error clones used by break/continue) */
 extern ClayObject *clay_BreakSignal;
 extern ClayObject *clay_ContinueSignal;
 
