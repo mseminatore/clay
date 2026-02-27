@@ -14,6 +14,12 @@ AR = ar
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
+# On macOS, _POSIX_C_SOURCE hides BSD/Darwin extensions (u_short, malloc_zone_t, etc.)
+ifeq ($(UNAME_S),Darwin)
+    CFLAGS += -D_DARWIN_C_SOURCE
+    VM_CFLAGS += -D_DARWIN_C_SOURCE
+endif
+
 # Source files
 RUNTIME_SRCS = src/runtime/object.c src/runtime/memory.c src/runtime/dispatch.c \
                src/runtime/tagged.c src/runtime/string.c src/runtime/number.c \
