@@ -144,6 +144,231 @@ int brick_write(const char *path, const BrickManifest *m) {
     return 0;
 }
 
+/* --- Lockfile support --- */
+
+#define BRICK_LOCK_VERSION 1
+#define BRICK_LOCK_FILE "brick.lock"
+
+/* Forward declarations for functions used by lockfile code */
+static void split_url_parts(const char *url,
+                             char *clone_url, size_t url_sz,
+                             char *subpath, size_t sub_sz,
+                             char *ref, size_t ref_sz);
+static void url_to_repo_name(const char *url, char *name, size_t sz);
+
+typedef struct {
+    char name[BRICK_MAX_NAME];
+    char url[BRICK_MAX_PATH];
+    char version[64];
+    char resolved[128]; /* git commit SHA or empty for local */
+} BrickLockEntry;
+
+typedef struct {
+    int lockfile_version;
+    BrickLockEntry entries[BRICK_MAX_DEPS];
+    int entry_count;
+} BrickLock;
+
+/* Parse a brick.lock file. Returns 0 on success, -1 on error. */
+static int parse_lock(const char *json, BrickLock *lock) {
+    memset(lock, 0, sizeof(*lock));
+    lock->lockfile_version = 0;
+    const char *p = skip_ws(json);
+    if (*p != '{') return -1;
+    p = skip_ws(p + 1);
+
+    while (*p && *p != '}') {
+        char key[128] = "";
+        p = parse_string(p, key, sizeof(key));
+        if (!p) return -1;
+        p = skip_ws(p);
+        if (*p != ':') return -1;
+        p = skip_ws(p + 1);
+
+        if (strcmp(key, "lockfile_version") == 0) {
+            /* Parse integer */
+            lock->lockfile_version = (int)strtol(p, (char **)&p, 10);
+        } else if (strcmp(key, "locked") == 0) {
+            if (*p != '{') return -1;
+            p = skip_ws(p + 1);
+            while (*p && *p != '}') {
+                if (lock->entry_count >= BRICK_MAX_DEPS) return -1;
+                BrickLockEntry *e = &lock->entries[lock->entry_count];
+                p = parse_string(p, e->name, sizeof(e->name));
+                if (!p) return -1;
+                p = skip_ws(p);
+                if (*p != ':') return -1;
+                p = skip_ws(p + 1);
+                /* Parse entry object */
+                if (*p != '{') return -1;
+                p = skip_ws(p + 1);
+                while (*p && *p != '}') {
+                    char ekey[64] = "";
+                    p = parse_string(p, ekey, sizeof(ekey));
+                    if (!p) return -1;
+                    p = skip_ws(p);
+                    if (*p != ':') return -1;
+                    p = skip_ws(p + 1);
+                    if (strcmp(ekey, "url") == 0) {
+                        p = parse_string(p, e->url, sizeof(e->url));
+                    } else if (strcmp(ekey, "version") == 0) {
+                        p = parse_string(p, e->version, sizeof(e->version));
+                    } else if (strcmp(ekey, "resolved") == 0) {
+                        p = parse_string(p, e->resolved, sizeof(e->resolved));
+                    } else {
+                        /* Skip unknown value */
+                        if (*p == '"') {
+                            char discard[1024];
+                            p = parse_string(p, discard, sizeof(discard));
+                        } else {
+                            while (*p && *p != ',' && *p != '}') p++;
+                        }
+                    }
+                    if (!p) return -1;
+                    p = skip_ws(p);
+                    if (*p == ',') p = skip_ws(p + 1);
+                }
+                if (*p == '}') p++;
+                lock->entry_count++;
+                p = skip_ws(p);
+                if (*p == ',') p = skip_ws(p + 1);
+            }
+            if (*p == '}') p++;
+        } else {
+            /* Skip unknown value */
+            if (*p == '"') {
+                char discard[1024];
+                p = parse_string(p, discard, sizeof(discard));
+            } else {
+                while (*p && *p != ',' && *p != '}') p++;
+            }
+        }
+        if (!p) return -1;
+        p = skip_ws(p);
+        if (*p == ',') p = skip_ws(p + 1);
+    }
+    return 0;
+}
+
+static int bricks_read_lock(BrickLock *lock) {
+    FILE *f = fopen(BRICK_LOCK_FILE, "r");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = (char *)malloc((size_t)len + 1);
+    if (!buf) { fclose(f); return -1; }
+    size_t n = fread(buf, 1, (size_t)len, f);
+    buf[n] = '\0';
+    fclose(f);
+    int rc = parse_lock(buf, lock);
+    free(buf);
+    return rc;
+}
+
+static int bricks_has_lock(void) {
+    struct stat st;
+    return stat(BRICK_LOCK_FILE, &st) == 0;
+}
+
+/* Get the resolved git commit SHA for a dependency directory.
+ * Returns 0 on success, -1 if not a git repo or error. */
+static int get_dep_resolved(const char *dep_dir, char *out, size_t out_sz) {
+    char cmd[2048];
+    char tmp_file[BRICK_MAX_PATH];
+    out[0] = '\0';
+
+    snprintf(tmp_file, sizeof(tmp_file), "bricks/.brick_resolve_tmp");
+    snprintf(cmd, sizeof(cmd),
+             "git -C \"%s\" rev-parse HEAD > \"%s\" 2>%s",
+             dep_dir, tmp_file,
+#ifdef _WIN32
+             "nul"
+#else
+             "/dev/null"
+#endif
+    );
+
+    int rc = system(cmd);
+    if (rc != 0) return -1;
+
+    FILE *f = fopen(tmp_file, "r");
+    if (!f) return -1;
+    if (fgets(out, (int)out_sz, f)) {
+        /* Trim trailing newline */
+        size_t len = strlen(out);
+        while (len > 0 && (out[len-1] == '\n' || out[len-1] == '\r'))
+            out[--len] = '\0';
+    }
+    fclose(f);
+    remove(tmp_file);
+    return (out[0] != '\0') ? 0 : -1;
+}
+
+/* Write brick.lock from the current manifest and installed deps. */
+static void bricks_write_lock(const BrickManifest *m) {
+    FILE *f = fopen(BRICK_LOCK_FILE, "w");
+    if (!f) {
+        fprintf(stderr, "warning: could not write %s\n", BRICK_LOCK_FILE);
+        return;
+    }
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"lockfile_version\": %d,\n", BRICK_LOCK_VERSION);
+    fprintf(f, "  \"locked\": {");
+
+    for (int i = 0; i < m->dep_count; i++) {
+        char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+        split_url_parts(m->deps[i].url, clone_url, sizeof(clone_url),
+                        subpath, sizeof(subpath), ref, sizeof(ref));
+
+        /* Determine the git directory for this dep */
+        char git_dir[BRICK_MAX_PATH];
+        if (subpath[0]) {
+            char repo_name[BRICK_MAX_NAME];
+            url_to_repo_name(m->deps[i].url, repo_name, sizeof(repo_name));
+            snprintf(git_dir, sizeof(git_dir), "bricks/%s", repo_name);
+        } else {
+            snprintf(git_dir, sizeof(git_dir), "bricks/%s", m->deps[i].name);
+        }
+
+        /* Try to resolve commit SHA */
+        char resolved[128] = "";
+        get_dep_resolved(git_dir, resolved, sizeof(resolved));
+
+        fprintf(f, "%s\n    \"%s\": {\n", i > 0 ? "," : "", m->deps[i].name);
+        fprintf(f, "      \"url\": \"%s\",\n", m->deps[i].url);
+        fprintf(f, "      \"version\": \"%s\",\n", ref[0] ? ref : "latest");
+        fprintf(f, "      \"resolved\": \"%s\"\n", resolved);
+        fprintf(f, "    }");
+    }
+
+    if (m->dep_count > 0) fprintf(f, "\n  ");
+    fprintf(f, "}\n}\n");
+    fclose(f);
+    printf("Wrote %s\n", BRICK_LOCK_FILE);
+}
+
+/* Check if the lock matches the current manifest.
+ * Returns 1 if lock is up-to-date, 0 if not. */
+static int bricks_lock_matches(const BrickManifest *m, const BrickLock *lock) {
+    if (lock->lockfile_version != BRICK_LOCK_VERSION) return 0;
+    if (lock->entry_count != m->dep_count) return 0;
+
+    for (int i = 0; i < m->dep_count; i++) {
+        int found = 0;
+        for (int j = 0; j < lock->entry_count; j++) {
+            if (strcmp(m->deps[i].name, lock->entries[j].name) == 0 &&
+                strcmp(m->deps[i].url, lock->entries[j].url) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) return 0;
+    }
+    return 1;
+}
+
 /* --- Subcommands --- */
 
 static void make_dir(const char *path) {
@@ -449,6 +674,15 @@ static int cmd_install(void) {
         return 0;
     }
 
+    /* Check if lockfile is up-to-date */
+    if (bricks_has_lock()) {
+        BrickLock lock;
+        if (bricks_read_lock(&lock) == 0 && bricks_lock_matches(&m, &lock)) {
+            printf("Dependencies already locked and up to date.\n");
+            return 0;
+        }
+    }
+
     make_dir("bricks");
     printf("Installing %d dependencies...\n", m.dep_count);
     int failed = 0;
@@ -461,6 +695,7 @@ static int cmd_install(void) {
         fprintf(stderr, "%d dependencies failed to install.\n", failed);
         return 1;
     }
+    bricks_write_lock(&m);
     printf("Done.\n");
     return 0;
 }
@@ -498,6 +733,7 @@ static int cmd_add(const char *url) {
     strncpy(dep->url, url, sizeof(dep->url) - 1);
     brick_write("brick.json", &m);
     printf("Added '%s' to brick.json\n", name);
+    bricks_write_lock(&m);
     return 0;
 }
 
@@ -580,6 +816,7 @@ static int cmd_remove(const char *name) {
 #endif
         system(cmd);
     }
+    bricks_write_lock(&m);
     return 0;
 }
 
@@ -667,8 +904,10 @@ static int cmd_update(void) {
     }
     if (failures)
         printf("Done with %d failure(s).\n", failures);
-    else
+    else {
+        bricks_write_lock(&m);
         printf("All dependencies up to date.\n");
+    }
     return failures ? 1 : 0;
 }
 

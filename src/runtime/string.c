@@ -2,6 +2,7 @@
  * string.c - String object implementation
  */
 #include "clay.h"
+#include "range.h"
 #include <ctype.h>
 
 ClayObject *clay_string_new(const char *str) {
@@ -119,6 +120,24 @@ static ClayValue string_neq(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
+
+    /* Range-based slicing: "hello" at(1..3) → "el" */
+    if (CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
+        ClayObject *arg = CLAY_OBJ(argv[0]);
+        if (arg->parent == clay_Range || arg == clay_Range) {
+            ClayValue start_v = clay_get_slot(arg, "_start");
+            ClayValue end_v = clay_get_slot(arg, "_end");
+            intptr_t start = CLAY_IS_INT(start_v) ? clay_to_int(start_v) : 0;
+            intptr_t end = CLAY_IS_INT(end_v) ? clay_to_int(end_v) : 0;
+            intptr_t len = (intptr_t)self->as.string.length;
+            if (start < 0) start = 0;
+            if (end > len) end = len;
+            if (start >= end) return CLAY_VAL(clay_string_new(""));
+            return CLAY_VAL(clay_string_new_len(self->as.string.data + start, (size_t)(end - start)));
+        }
+    }
+
+    /* Original integer indexing */
     intptr_t idx = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0])
                  : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
     if (idx < 0 || (size_t)idx >= self->as.string.length) return CLAY_NIL;

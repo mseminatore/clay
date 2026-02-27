@@ -2,6 +2,7 @@
  * array.c - Array object implementation
  */
 #include "clay.h"
+#include "range.h"
 
 #define CLAY_ARRAY_INITIAL_CAP 8
 
@@ -48,7 +49,31 @@ static ClayValue array_append(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue array_at(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_NIL;
+    if (argc < 1) return CLAY_NIL;
+
+    /* Range-based slicing: arr at(1..4) → sub-array */
+    if (CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
+        ClayObject *arg = CLAY_OBJ(argv[0]);
+        if (arg->parent == clay_Range || arg == clay_Range) {
+            ClayValue start_v = clay_get_slot(arg, "_start");
+            ClayValue end_v = clay_get_slot(arg, "_end");
+            intptr_t start = CLAY_IS_INT(start_v) ? clay_to_int(start_v) : 0;
+            intptr_t end = CLAY_IS_INT(end_v) ? clay_to_int(end_v) : 0;
+            ClayObject *result = clay_array_new();
+            intptr_t len = (intptr_t)self->as.array.size;
+            if (start < 0) start = 0;
+            if (start > len) start = len;
+            if (end > len) end = len;
+            for (intptr_t i = start; i < end; i++) {
+                ClayValue elem = clay_array_at(self, (size_t)i);
+                clay_array_append(result, elem);
+            }
+            return CLAY_VAL(result);
+        }
+    }
+
+    /* Original integer indexing */
+    if (!CLAY_IS_INT(argv[0])) return CLAY_NIL;
     intptr_t idx = clay_to_int(argv[0]);
     if (idx < 0) return CLAY_NIL;
     return clay_array_at(self, (size_t)idx);
