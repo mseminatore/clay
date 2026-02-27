@@ -1,0 +1,26 @@
+// Test Range-based slicing
+
+// String slicing
+s = "hello world"
+r1 = s at(0..5)
+(r1 == "hello") ifTrue { "PASS: string slice 0..5" println } ifFalse { ("FAIL: string slice got " + r1) println }
+
+r2 = s at(6..11)
+(r2 == "world") ifTrue { "PASS: string slice 6..11" println } ifFalse { ("FAIL: string slice got " + r2) println }
+
+// Empty range
+r3 = s at(3..3)
+(r3 == "") ifTrue { "PASS: empty range" println } ifFalse { ("FAIL: empty range got " + r3) println }
+
+// Array slicing
+arr = [10, 20, 30, 40, 50]
+sub = arr at(1..4)
+(sub length == 3) ifTrue { "PASS: array slice length" println } ifFalse { ("FAIL: array slice length " + sub length toString) println }
+(sub at(0) == 20) ifTrue { "PASS: array slice first" println } ifFalse { "FAIL: array slice first" println }
+(sub at(2) == 40) ifTrue { "PASS: array slice last" println } ifFalse { "FAIL: array slice last" println }
+
+// Single element still works
+(s at(0) == "h") ifTrue { "PASS: string single at" println } ifFalse { ("FAIL: string single at got " + s at(0)) println }
+(arr at(0) == 10) ifTrue { "PASS: array single at" println } ifFalse { "FAIL: array single at" println }
+
+"All range slice tests completed" println

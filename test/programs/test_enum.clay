@@ -1,0 +1,82 @@
+// test_enum.clay — Enum type tests
+
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue {
+        passed = passed + 1
+    }
+    (cond == false) ifTrue {
+        ("FAIL: " + msg) println()
+        failed = failed + 1
+    }
+}
+
+// Inline Enum definition (bricks may not be loadable in test context)
+Enum = Object clone {
+    _names = []
+    _size = 0
+
+    from(names) {
+        e = Enum clone
+        e _names = names
+        e _size = names length
+        i = 0
+        names each { |name|
+            e setSlot(name, i)
+            i = i + 1
+        }
+        e
+    }
+
+    name(idx) {
+        (idx >= 0 && idx < _size) ifTrue {
+            _names at(idx)
+        } ifFalse {
+            nil
+        }
+    }
+
+    contains(n) {
+        _names contains(n)
+    }
+
+    values() { _names }
+
+    size() { _size }
+
+    toString() {
+        "Enum(" + _names toString() + ")"
+    }
+}
+
+// Create enum
+Color = Enum from(["red", "green", "blue"])
+
+// Test index values via slot access
+assert value(Color red == 0, "red is 0")
+assert value(Color green == 1, "green is 1")
+assert value(Color blue == 2, "blue is 2")
+
+// Test reverse lookup by index
+assert value(Color name(0) == "red", "name(0) is red")
+assert value(Color name(1) == "green", "name(1) is green")
+assert value(Color name(2) == "blue", "name(2) is blue")
+assert value(Color name(3) == nil, "name(3) is nil")
+
+// Test contains
+assert value(Color contains("green"), "contains green")
+assert value(Color contains("yellow") == false, "does not contain yellow")
+
+// Test size
+assert value(Color size == 3, "size is 3")
+
+// Test values
+assert value(Color values length == 3, "values length is 3")
+
+// Test toString
+assert value(Color toString == "Enum([red, green, blue])", "toString")
+
+(passed toString() + " passed, " + failed toString() + " failed") println()
+(failed > 0) ifTrue { raise("test failures") }
