@@ -7,9 +7,7 @@ schema required("name", "string")
 schema required("age", "number")
 schema optional("role", "string", "guest")
 
-data = Dict new
-data set("name", "Alice")
-data set("age", 30)
+data = #{name: "Alice", age: 30}
 errors = schema validate(data)
 ("errors: " + errors size toString) println
 ("role default: " + data get("role")) println
@@ -19,8 +17,7 @@ schema2 = Schema new
 schema2 required("title", "string")
 schema2 required("price", "number")
 
-bad = Dict new
-bad set("price", 10)
+bad = #{price: 10}
 errors = schema2 validate(bad)
 errors each { |e| ("  " + e) println }
 
@@ -28,8 +25,7 @@ errors each { |e| ("  " + e) println }
 schema3 = Schema new
 schema3 required("count", "number")
 
-bad2 = Dict new
-bad2 set("count", "not a number")
+bad2 = #{count: "not a number"}
 errors = schema3 validate(bad2)
 errors each { |e| ("  " + e) println }
 
@@ -42,15 +38,11 @@ schema4 required("score", "number")
 schema4 min("score", 0)
 schema4 max("score", 100)
 
-good = Dict new
-good set("username", "clay_user")
-good set("score", 85)
+good = #{username: "clay_user", score: 85}
 errors = schema4 validate(good)
 ("valid user: " + (errors size == 0) toString) println
 
-short = Dict new
-short set("username", "ab")
-short set("score", 150)
+short = #{username: "ab", score: 150}
 errors = schema4 validate(short)
 ("constraint errors:") println
 errors each { |e| ("  " + e) println }
@@ -60,7 +52,6 @@ schema5 = Schema new
 schema5 required("status", "string")
 schema5 oneOf("status", ["active", "inactive", "banned"])
 
-d = Dict new
-d set("status", "unknown")
+d = #{status: "unknown"}
 errors = schema5 validate(d)
 errors each { |e| ("  " + e) println }

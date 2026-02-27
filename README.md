@@ -301,6 +301,18 @@ p x             // => 3
 p y             // => 4
 ```
 
+#### Default parameters
+
+Methods can have default values for trailing parameters:
+
+```clay
+greet(name, greeting = "Hello") {
+  "${greeting}, ${name}!" println()
+}
+greet("world")             // Hello, world!
+greet("world", "Hi")       // Hi, world!
+```
+
 `new` clones the prototype and calls `init(args...)` on the clone if an `init` method exists. If there is no `init`, `new` just clones:
 
 ```clay
@@ -341,6 +353,32 @@ multiplier(factor) {
   { |x| x * factor }   // 'factor' is captured from the method scope
 }
 ```
+
+### Return
+
+`return` exits a method early with a value. Bare `return` returns nil:
+
+```clay
+abs(x) {
+  (x < 0) ifTrue { return -x }
+  x
+}
+```
+
+> **Note:** `return` inside a block (e.g., `ifTrue { return x }`) currently exits the block, not the enclosing method.
+
+### Break and continue
+
+`break` exits the nearest loop. `continue` skips to the next iteration:
+
+```clay
+[1, 2, 3, 4, 5] each { |n|
+  (n == 3) ifTrue { break }
+  n println()   // prints 1, 2
+}
+```
+
+Works with `times`, `each`, `whileTrue`, and `whileFalse`.
 
 ### Imports
 
@@ -385,6 +423,18 @@ Expressions are automatically converted via `toString()`.
 ```
 
 `&&` and `||` short-circuit: the right side is only evaluated if needed. Values are truthy unless they are `nil`, `false`, or `0`.
+
+#### Null-coalescing (`??`)
+
+Returns the left operand if non-nil, otherwise the right:
+
+```clay
+x = nil
+x ?? "default"         // "default"
+a ?? b ?? c            // first non-nil value
+```
+
+`??` has lower precedence than all other binary operators.
 
 ### While loops
 
@@ -492,6 +542,17 @@ s toInt                             // error (not a number)
 ```
 
 ### Dict (HashMap)
+
+Dict literals use `#{}` syntax — keys are identifiers that become strings:
+
+```clay
+d = #{name: "Clay", version: 1}
+d get("name")              // "Clay"
+empty = #{}
+nested = #{outer: #{inner: 1}}
+```
+
+The `Dict` prototype also supports programmatic construction:
 
 ```clay
 d = Dict clone()

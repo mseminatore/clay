@@ -8,12 +8,9 @@ db exec("CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, d
 Todo = Model define(db, "todos", ["title", "done"])
 
 "=== create records ===" println
-d1 = Dict new; d1 set("title", "Buy groceries"); d1 set("done", "0")
-d2 = Dict new; d2 set("title", "Write tests"); d2 set("done", "0")
-d3 = Dict new; d3 set("title", "Deploy app"); d3 set("done", "1")
-Todo create(d1)
-Todo create(d2)
-Todo create(d3)
+Todo create(#{title: "Buy groceries", done: "0"})
+Todo create(#{title: "Write tests", done: "0"})
+Todo create(#{title: "Deploy app", done: "1"})
 ("count: " + Todo count toString) println
 
 "=== find by id ===" println
@@ -31,8 +28,7 @@ done = Todo where("done", "1")
 done each { |t| ("  " + t _data get("title")) println }
 
 "=== update ===" println
-upd = Dict new; upd set("done", "1")
-Todo update(2, upd)
+Todo update(2, #{done: "1"})
 t2 = Todo find(2)
 ("todo 2 done: " + t2 _data get("done")) println
 
