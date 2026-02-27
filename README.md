@@ -52,7 +52,7 @@ Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)
 >>> doubler = { |x| x * 2 }
 >>> doubler value(5)
 => 10
->>> [1, 2, 3] each { |n| n println() }
+>>> [1, 2, 3] each { |n| n println }
 1
 2
 3
@@ -62,10 +62,10 @@ Clay VM REPL v0.1 (type 'quit' or 'exit' to leave)
 >>> Point = Object clone {
 ...   x = 0
 ...   y = 0
-...   getX() { self x() }
+...   getX() { self x }
 ... }
 >>> p = Point clone {}
->>> p getX()
+>>> p getX
 => 0
 >>> quit
 Bye!
@@ -153,8 +153,8 @@ clay --ast hello.clay
 Integers, strings, booleans, arrays, blocks — all objects. All operations are message sends.
 
 ```clay
-42 println()          // send 'println' to an integer
-"hello" length()      // send 'length' to a string
+42 println              // send 'println' to an integer
+"hello" length          // send 'length' to a string
 ```
 
 ### Message passing
@@ -164,9 +164,9 @@ Messages use IO-style syntax: `receiver message(args)`. Parentheses are optional
 ```clay
 "hello" println          // no parens (preferred for unary)
 "hello" println()        // parens also work
-"hello" length()         // returns 5
+"hello" length           // returns 5
 arr at(0)                // message with one arg
-arr each { |x| x println() }  // message with trailing block
+arr each { |x| x println }  // message with trailing block
 ```
 
 ### Binary operators
@@ -195,13 +195,13 @@ Point = Object clone {
   }
 
   toString() {
-    "(" + x toString() + ", " + y toString() + ")"
+    "(" + x toString + ", " + y toString + ")"
   }
 }
 
-p = Point clone()
+p = Point clone
 p moveTo(3, 4)
-p toString() println()   // (3, 4)
+p toString println   // (3, 4)
 ```
 
 Inside methods, bare identifiers are looked up as slots on `self`. Parameters shadow slot names.
@@ -216,19 +216,19 @@ Animal = Object clone {
 }
 
 Dog = Animal clone {
-    speak() { super speak() + " Woof!" }
+    speak() { super speak + " Woof!" }
 }
 
-Dog speak() println()   // ... Woof!
+Dog speak println   // ... Woof!
 ```
 
 Super works correctly through multi-level chains:
 
 ```clay
 A = Object clone { greet() { "A" } }
-B = A clone { greet() { super greet() + "B" } }
-C = B clone { greet() { super greet() + "C" } }
-C greet() println()   // ABC
+B = A clone { greet() { super greet + "B" } }
+C = B clone { greet() { super greet + "C" } }
+C greet println   // ABC
 ```
 
 `super` dispatches from the prototype where the method was *defined*, not from `self`, so it is safe with deeply cloned instances.
@@ -238,7 +238,7 @@ C greet() println()   // ABC
 Read a slot by sending its name as a zero-argument message:
 
 ```clay
-p = Point clone()
+p = Point clone
 p x             // => 0 (reads the 'x' slot)
 ```
 
@@ -261,16 +261,16 @@ Dog = Object clone {
 }
 
 Dog speak = { self name + " says Woof!" }
-Dog speak println()     // Rex says Woof!
+Dog speak println     // Rex says Woof!
 
 // With arguments
 Dog greet = { |other| self name + " greets " + other }
-Dog greet("Buddy") println()  // Rex greets Buddy
+Dog greet("Buddy") println  // Rex greets Buddy
 
 // Methods added this way inherit through the prototype chain
-puppy = Dog clone()
+puppy = Dog clone
 puppy name = "Buddy"
-puppy speak println()   // Buddy says Woof!
+puppy speak println   // Buddy says Woof!
 ```
 
 Note: blocks assigned to slots must use explicit `self` to access other slots, since the compiler doesn't know the block will be used as a method.
@@ -279,7 +279,7 @@ Use `getSlot("name")` to retrieve the raw block without invoking it:
 
 ```clay
 block = Dog getSlot("speak")   // returns the block
-block value() println()         // Rex says Woof!
+block value println         // Rex says Woof!
 ```
 
 ### Constructors
@@ -307,7 +307,7 @@ Methods can have default values for trailing parameters:
 
 ```clay
 greet(name, greeting = "Hello") {
-  "${greeting}, ${name}!" println()
+  "${greeting}, ${name}!" println
 }
 greet("world")             // Hello, world!
 greet("world", "Hi")       // Hi, world!
@@ -327,11 +327,11 @@ Blocks are closures. Parameters go between pipes:
 
 ```clay
 doubler = { |x| x * 2 }
-doubler value(5) println()   // 10
+doubler value(5) println   // 10
 
 // No-arg block
-greet = { "hello" println() }
-greet value()
+greet = { "hello" println }
+greet value
 ```
 
 ### Control flow
@@ -339,8 +339,8 @@ greet value()
 Booleans are objects. Control flow is message passing with blocks:
 
 ```clay
-(x > 0) ifTrue { "positive" println() }
-(x > 0) ifFalse { "non-positive" println() }
+(x > 0) ifTrue { "positive" println }
+(x > 0) ifFalse { "non-positive" println }
 
 // Chaining ifTrue/ifFalse
 (x > 0) ifTrue { "positive" } ifFalse { "non-positive" }
@@ -374,7 +374,7 @@ abs(x) {
 ```clay
 [1, 2, 3, 4, 5] each { |n|
   (n == 3) ifTrue { break }
-  n println()   // prints 1, 2
+  n println   // prints 1, 2
 }
 ```
 
@@ -407,9 +407,9 @@ Use `${}` inside strings to embed expressions:
 
 ```clay
 name = "Clay"
-"Hello, ${name}!" println()       // Hello, Clay!
-"2 + 3 = ${2 + 3}" println()     // 2 + 3 = 5
-"${x} + ${y} = ${x + y}" println()
+"Hello, ${name}!" println       // Hello, Clay!
+"2 + 3 = ${2 + 3}" println     // 2 + 3 = 5
+"${x} + ${y} = ${x + y}" println
 ```
 
 Expressions are automatically converted via `toString()`.
@@ -443,7 +443,7 @@ Blocks support `whileTrue` and `whileFalse` for looping:
 ```clay
 i = 0
 { i < 10 } whileTrue {
-  i println()
+  i println
   i = i + 1
 }
 ```
@@ -454,10 +454,10 @@ i = 0
 arr = [1, 2, 3]
 arr at(0)                     // 1
 arr append(4)
-arr size()                    // 4
+arr size                      // 4
 arr first                     // 1
 arr last                      // 3
-arr each { |item| item println() }
+arr each { |item| item println }
 
 // Functional methods (trailing block syntax)
 arr map { |x| x * 2 }            // [2, 4, 6]
@@ -478,8 +478,8 @@ arr min                       // minimum value
 arr max                       // maximum value
 arr avg                       // average value
 arr unique                    // unique elements
-arr pop()                     // remove + return last
-arr shift()                   // remove + return first
+arr pop                       // remove + return last
+arr shift                     // remove + return first
 arr slice(1, 3)               // sub-array [index 1..3)
 arr insert(1, "x")            // insert at index
 arr setAt(0, "y")             // set element at index
@@ -500,8 +500,8 @@ Integers are tagged values (fast, no allocation). Floats are heap-allocated obje
 10 toFloat / 3                // 3.33333 (float division)
 3.14 + 2                      // 5.14 (mixed → float)
 3.14 toInt                    // 3 (truncation)
-(-5) abs()                    // 5
-5 times { |i| i println() }  // prints 0..4
+(-5) abs                      // 5
+5 times { |i| i println }  // prints 0..4
 ```
 
 ### Strings
@@ -510,7 +510,7 @@ Strings support C-style escape sequences: `\n` (newline), `\t` (tab), `\r` (carr
 
 ```clay
 s = "hello world"
-s length()                          // 11
+s length                            // 11
 s at(0)                             // "h"
 s contains("world")                 // true
 s slice(0, 5)                       // "hello"
@@ -555,34 +555,34 @@ nested = #{outer: #{inner: 1}}
 The `Dict` prototype also supports programmatic construction:
 
 ```clay
-d = Dict clone()
+d = Dict clone
 d set("name", "Clay")
 d set("version", 1)
 
-d get("name") println()     // "Clay"
-d has("name") println()     // true
-d size() println()          // 2
+d get("name") println       // "Clay"
+d has("name") println       // true
+d size println              // 2
 d remove("version")
 
 // Iteration
 d each { |key, value|
-  "${key}: ${value toString()}" println()
+  "${key}: ${value toString}" println
 }
 
 // Inspect
-d keys() println()          // [name]
-d values() println()        // [Clay]
-d toString() println()      // {name: Clay}
+d keys println              // [name]
+d values println            // [Clay]
+d toString println          // {name: Clay}
 
 // Equality (key-value comparison)
-d1 = Dict clone(); d1 set("a", 1)
-d2 = Dict clone(); d2 set("a", 1)
+d1 = Dict clone; d1 set("a", 1)
+d2 = Dict clone; d2 set("a", 1)
 d1 == d2                    // true
 
 // Merge, entries, clear
 d merge(other)              // merge other dict into d (mutates d)
-d entries()                 // [[key1, val1], [key2, val2], ...]
-d clear()                   // remove all entries
+d entries                   // [[key1, val1], [key2, val2], ...]
+d clear                     // remove all entries
 ```
 
 ### Error handling
@@ -594,7 +594,7 @@ Clay provides `try`/`catch`/`finally` blocks and `raise` for error handling:
 result = try {
   10 / 0
 } catch { |e|
-  "Caught: " + e message()
+  "Caught: " + e message
 }
 
 // Raise custom errors
@@ -602,10 +602,10 @@ raise("something went wrong")
 
 // Errors have message() and type() methods
 try {
-  nil banana()
+  nil banana
 } catch { |e|
-  e type() println()    // "NilError"
-  e message() println() // "message 'banana' sent to nil"
+  e type println    // "NilError"
+  e message println // "message 'banana' sent to nil"
 }
 
 // Finally runs whether try succeeds or fails
@@ -613,9 +613,9 @@ try {
   f = File open("data.txt")
   // ... use file ...
 } catch { |e|
-  "Error: " + e message()
+  "Error: " + e message
 } finally {
-  f close()             // always runs
+  f close             // always runs
 }
 ```
 
@@ -627,12 +627,12 @@ Errors automatically capture a stack trace showing the call chain:
 
 ```clay
 boom = { raise("deep error") }
-middle = { boom value() }
+middle = { boom value }
 
 try {
-  middle value()
+  middle value
 } catch { |e|
-  e stackTrace() println
+  e stackTrace println
   // Output:
   //   at example.clay:1 in value()
   //   at example.clay:2 in value()
@@ -661,9 +661,9 @@ Poodle = Dog clone {}
 Poodle parent == Dog          // true (walk the prototype chain)
 Poodle hasSlot("_name")       // true
 Poodle hasMethod("clone")     // true (inherited from Object)
-Poodle methods()              // array of method names
-Poodle slots()                // array of slot names
-Poodle type()                 // "Dog" (from _name slot)
+Poodle methods              // array of method names
+Poodle slots                // array of slot names
+Poodle type                 // "Dog" (from _name slot)
 ```
 
 ### System
@@ -671,15 +671,15 @@ Poodle type()                 // "Dog" (from _name slot)
 The `System` object provides OS-level operations:
 
 ```clay
-System platform()             // "windows", "macos", or "linux"
+System platform             // "windows", "macos", or "linux"
 System env("PATH")            // environment variable (nil if unset)
-System args()                 // command-line arguments as array
-System clock()                // monotonic clock in seconds (float)
+System args                 // command-line arguments as array
+System clock                // monotonic clock in seconds (float)
 System exit(0)                // exit process with code
 
 // Memory diagnostics
-System allocCount()           // total objects allocated
-System deallocCount()         // total objects freed
+System allocCount           // total objects allocated
+System deallocCount         // total objects freed
 ```
 
 ### FFI (Foreign Function Interface)
@@ -689,7 +689,7 @@ Load and call functions from shared libraries (`.dll`, `.so`, `.dylib`). Plugin 
 ```clay
 lib = FFI load("./my_plugin.dll")  // or .so / .dylib
 result = lib call("my_function", arg1, arg2)
-lib close()
+lib close
 ```
 
 ### File operations
@@ -717,23 +717,23 @@ File listDir("src")                  // array of filenames
 ### Date and time
 
 ```clay
-d = Date now()
-d toString() println()               // "2026-02-23 14:30:45"
-d year()                             // 2026
-d month()                            // 2 (1-12)
-d day()                              // 23 (1-31)
-d hour()                             // 14 (0-23)
-d minute()                           // 30 (0-59)
-d second()                           // 45 (0-59)
-d weekday()                          // 1 (0=Sun..6=Sat)
-d timestamp()                        // Unix epoch seconds
+d = Date now
+d toString println               // "2026-02-23 14:30:45"
+d year                             // 2026
+d month                            // 2 (1-12)
+d day                              // 23 (1-31)
+d hour                             // 14 (0-23)
+d minute                           // 30 (0-59)
+d second                           // 45 (0-59)
+d weekday                          // 1 (0=Sun..6=Sat)
+d timestamp                        // Unix epoch seconds
 
 // Create from timestamp
 d2 = Date fromTimestamp(1700000000)
 
 // strftime-style formatting
-d format("%A, %B %d, %Y") println()  // "Sunday, February 23, 2026"
-d format("%H:%M") println()          // "14:30"
+d format("%A, %B %d, %Y") println  // "Sunday, February 23, 2026"
+d format("%H:%M") println          // "14:30"
 ```
 
 ### HTTP client
@@ -741,16 +741,16 @@ d format("%H:%M") println()          // "14:30"
 ```clay
 // GET request
 resp = Http get("http://example.com")
-resp status() println()              // 200
-resp body() println()                // HTML content
+resp status println              // 200
+resp body println                // HTML content
 
 // HTTPS (Windows always, Unix/macOS with OpenSSL)
 resp = Http get("https://example.com")
 
 // POST request
 resp = Http post("http://api.example.com/data", "hello")
-resp status() println()
-resp body() println()
+resp status println
+resp body println
 ```
 
 > **Note:** On Windows, Http uses WinHTTP and supports HTTPS natively. On Unix/macOS, HTTPS requires OpenSSL (`brew install openssl` on macOS, typically pre-installed on Linux). Build with `cmake` and it will auto-detect OpenSSL. Without OpenSSL, only HTTP is supported.
@@ -760,10 +760,10 @@ resp body() println()
 ```clay
 // Simple server — handle all requests with a single block
 Http serve(8080, { |req|
-    method = req method()   // "GET", "POST", etc.
-    path = req path()       // "/api/data"
-    query = req query()     // "name=clay" (after ?)
-    body = req body()       // POST body
+    method = req method   // "GET", "POST", etc.
+    path = req path       // "/api/data"
+    query = req query     // "name=clay" (after ?)
+    body = req body       // POST body
 
     Http response(200, "Hello World")
 })
@@ -781,18 +781,18 @@ import("clay-stdlib/clay-http-server")
 
 server = HttpServer new(8080)
 server get("/", { |req| server html(200, "<h1>Hello!</h1>") })
-server get("/api/time", { |req| server json(200, Date now() toString()) })
-server post("/api/echo", { |req| server text(200, req body()) })
+server get("/api/time", { |req| server json(200, Date now toString) })
+server post("/api/echo", { |req| server text(200, req body) })
 
 // URL params with :param patterns
 server get("/users/:id", { |req|
-    id = req params() get("id")
+    id = req params get("id")
     server json(200, "{\"user\": " + id + "}")
 })
 
 // Redirect helper
 server post("/login", { |req| server redirect("/dashboard") })
-server start()
+server start
 ```
 
 ### Regular expressions
@@ -827,10 +827,10 @@ f = Fiber new {
     3
 }
 
-f resume()     // 1
-f resume()     // 2
-f resume()     // 3 (final value)
-f isDone()     // true
+f resume     // 1
+f resume     // 2
+f resume     // 3 (final value)
+f isDone     // true
 
 // Generator pattern — yield from inside loops
 counter = Fiber new {
@@ -840,24 +840,24 @@ counter = Fiber new {
         i = i + 1
     }
 }
-counter resume()   // 0
-counter resume()   // 1
-counter resume()   // 2
+counter resume   // 0
+counter resume   // 1
+counter resume   // 2
 
 // Yield from array iteration
 items = Fiber new {
     [10, 20, 30] each { |x| Fiber yield(x) }
 }
-items resume()     // 10
-items resume()     // 20
+items resume     // 10
+items resume     // 20
 
 // Two independent fibers
 a = Fiber new { Fiber yield(10); 20 }
 b = Fiber new { Fiber yield(30); 40 }
-a resume()     // 10
-b resume()     // 30
-a resume()     // 20
-b resume()     // 40
+a resume     // 10
+b resume     // 30
+a resume     // 20
+b resume     // 40
 ```
 
 ### Database (SQLite)
@@ -883,7 +883,7 @@ rows each { |row|
 
 // Last insert ID
 db exec("INSERT INTO users (name, email) VALUES ('Carol', 'carol@example.com')")
-db lastInsertId()   // 3
+db lastInsertId   // 3
 
 // Escape strings for safe SQL (doubles single quotes)
 db escape("O'Brien")   // "O''Brien"
@@ -894,7 +894,7 @@ db exec("INSERT INTO prices (amount) VALUES (9.99)")
 db query("SELECT amount FROM prices") at(0) get("amount")   // 9.99
 
 // Close when done
-db close()
+db close
 ```
 
 ## Core Objects
@@ -925,7 +925,7 @@ db close()
 Clay generates readable C. This Clay code:
 
 ```clay
-p = Point clone()
+p = Point clone
 p moveTo(3, 4)
 ```
 
