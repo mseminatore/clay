@@ -133,6 +133,8 @@ typedef struct MethodDef {
     char *obj_context; /* which object this method belongs to */
     AstNode *node;     /* NODE_METHOD_DEF or NODE_BLOCK */
     CaptureList captures; /* captured variables for blocks */
+    const char **clone_slots; /* slot names from enclosing clone (Io-style assign) */
+    int clone_slot_count;
     struct MethodDef *next;
 } MethodDef;
 
@@ -144,6 +146,8 @@ static void collect_method(const char *func_name, const char *obj_ctx, AstNode *
     m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
     m->node = node;
     capture_init(&m->captures);
+    m->clone_slots = NULL;
+    m->clone_slot_count = 0;
     m->next = collected_methods;
     collected_methods = m;
 }
@@ -156,6 +160,8 @@ static void collect_method_with_captures(const char *func_name, const char *obj_
     m->node = node;
     m->captures = *caps; /* take ownership */
     caps->names = NULL; caps->count = 0; caps->capacity = 0;
+    m->clone_slots = NULL;
+    m->clone_slot_count = 0;
     m->next = collected_methods;
     collected_methods = m;
 }
@@ -523,6 +529,13 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
         default:
             break;
     }
+}
+
+static int is_known_slot(CodeGen *cg, const char *name) {
+    for (int i = 0; i < cg->known_slot_count; i++) {
+        if (strcmp(cg->known_slots[i], name) == 0) return 1;
+    }
+    return 0;
 }
 
 static char *emit_ident(CodeGen *cg, AstNode *node) {
@@ -1069,6 +1082,22 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
     fprintf(cg->out, "%s = CLAY_VAL(clay_clone(CLAY_OBJ(%s)));\n", var_name, proto);
     free(proto);
 
+    /* Collect slot names for Io-style assignment in methods */
+    int slot_name_count = 0;
+    for (int i = 0; i < node->as.clone.members.count; i++) {
+        if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
+            slot_name_count++;
+    }
+    const char **slot_names = NULL;
+    if (slot_name_count > 0) {
+        slot_names = (const char **)malloc((size_t)slot_name_count * sizeof(const char *));
+        int si = 0;
+        for (int i = 0; i < node->as.clone.members.count; i++) {
+            if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
+                slot_names[si++] = node->as.clone.members.items[i]->as.slot_def.name;
+        }
+    }
+
     /* Emit slot assignments and method registrations */
     for (int i = 0; i < node->as.clone.members.count; i++) {
         AstNode *member = node->as.clone.members.items[i];
@@ -1087,11 +1116,16 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
                 continue;
             }
             collect_method(fname, var_name, member);
+            /* Attach clone slot names to the just-collected method */
+            collected_methods->clone_slots = slot_names;
+            collected_methods->clone_slot_count = slot_name_count;
             emit_indent(cg);
             fprintf(cg->out, "clay_set_method(CLAY_OBJ(%s), \"%s\", %s);\n",
                     var_name, member->as.method_def.name, fname);
         }
     }
+
+    /* slot_names is shared by all methods; freed when last MethodDef is freed */
 
     /* Auto-set _name slot to variable name */
     emit_indent(cg);
@@ -1128,9 +1162,13 @@ static void emit_method_bodies(CodeGen *cg) {
         int saved_boxed_count = cg->boxed_count;
         int saved_method_local_base = cg->method_local_base;
         const char *saved_super_proto = cg->super_proto;
+        const char **saved_known_slots = cg->known_slots;
+        int saved_known_slot_count = cg->known_slot_count;
         cg->method_local_base = cg->local_count;
         cg->in_method = 1;
         cg->super_proto = cur->obj_context;
+        cg->known_slots = cur->clone_slots;
+        cg->known_slot_count = cur->clone_slot_count;
 
         if (node->type == NODE_METHOD_DEF) {
             /* Make method's self available for capture by nested blocks */
@@ -1166,6 +1204,11 @@ static void emit_method_bodies(CodeGen *cg) {
                         } else if (is_method_local(cg, stmt->as.assign.name)) {
                             /* Reassignment to existing method local */
                             fprintf(cg->out, "%s = %s;\n", stmt->as.assign.name, val);
+                        } else if (is_known_slot(cg, stmt->as.assign.name) &&
+                                   !is_local(cg, stmt->as.assign.name)) {
+                            /* Known slot from enclosing clone → write to self */
+                            fprintf(cg->out, "clay_set_slot(self, \"%s\", %s);\n",
+                                    stmt->as.assign.name, val);
                         } else {
                             /* New method-local variable */
                             fprintf(cg->out, "ClayValue %s = %s;\n", stmt->as.assign.name, val);
@@ -1252,6 +1295,8 @@ static void emit_method_bodies(CodeGen *cg) {
         cg->in_method = saved_in_method;
         cg->super_proto = saved_super_proto;
         cg->method_local_base = saved_method_local_base;
+        cg->known_slots = saved_known_slots;
+        cg->known_slot_count = saved_known_slot_count;
         /* Clear locals added in this scope */
         while (cg->local_count > saved_local_count) {
             cg->local_count--;
@@ -1291,6 +1336,8 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->boxed_names = NULL;
     cg->boxed_count = 0;
     cg->boxed_capacity = 0;
+    cg->known_slots = NULL;
+    cg->known_slot_count = 0;
 }
 
 /* First pass: collect all variable names from assignments for declaration */

@@ -1620,15 +1620,25 @@ static void bc_prescan_list(BcCompiler *bc, NodeList *list) {
         bc_prescan_node(bc, list->items[i]);
 }
 
+/* Check if a name is a known slot from the enclosing clone block */
+static int bc_is_known_slot(BcCompiler *bc, const char *name) {
+    for (int i = 0; i < bc->known_slot_count; i++) {
+        if (strcmp(bc->known_slots[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
 /* Pre-register method-local variables: walk the body for bare NODE_ASSIGN
  * names that aren't already locals or builtins, and register them as locals.
+ * Skip names that are known slots — those should be slot writes to self.
  * This ensures prescan can correctly identify which locals nested blocks capture. */
 static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
     for (int i = 0; i < body->count; i++) {
         AstNode *stmt = body->items[i];
         if (stmt && stmt->type == NODE_ASSIGN) {
             const char *name = stmt->as.assign.name;
-            if (!is_builtin_global(name) && !bc_is_user_global(name) && bc_resolve_local(bc, name) < 0) {
+            if (!is_builtin_global(name) && !bc_is_user_global(name) &&
+                !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
                 bc_add_local(bc, name);
             }
         }
@@ -2171,6 +2181,26 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             emit_u16(bc, (uint16_t)bc->native_clone);
             emit_byte(bc, 1);
 
+            /* Collect slot names for Io-style assignment in methods */
+            const char **saved_slots = bc->known_slots;
+            int saved_slot_count = bc->known_slot_count;
+            int slot_name_count = 0;
+            for (int i = 0; i < node->as.clone.members.count; i++) {
+                if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
+                    slot_name_count++;
+            }
+            const char **slot_names = NULL;
+            if (slot_name_count > 0) {
+                slot_names = (const char **)malloc((size_t)slot_name_count * sizeof(const char *));
+                int si = 0;
+                for (int i = 0; i < node->as.clone.members.count; i++) {
+                    if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
+                        slot_names[si++] = node->as.clone.members.items[i]->as.slot_def.name;
+                }
+            }
+            bc->known_slots = slot_names;
+            bc->known_slot_count = slot_name_count;
+
             /* Set slots and methods on the cloned object */
             for (int i = 0; i < node->as.clone.members.count; i++) {
                 AstNode *member = node->as.clone.members.items[i];
@@ -2209,6 +2239,11 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_op(bc, CLAYVM_OP_POP); /* discard set_method return */
                 }
             }
+
+            /* Restore slot context */
+            free(slot_names);
+            bc->known_slots = saved_slots;
+            bc->known_slot_count = saved_slot_count;
             break;
         }
 

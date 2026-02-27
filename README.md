@@ -190,8 +190,8 @@ Point = Object clone {
   y = 0
 
   moveTo(newX, newY) {
-    self x = newX
-    self y = newY
+    x = newX
+    y = newY
   }
 
   toString() {
@@ -204,7 +204,7 @@ p moveTo(3, 4)
 p toString println   // (3, 4)
 ```
 
-Inside methods, bare identifiers like `x` are read from slots on `self`. However, **assignment** (`x = val`) creates a local variable — use `self x = val` to write to a slot. This is why `moveTo` above uses `self x = newX`. The `init` pattern below uses `self` for the same reason (plus the parameter names shadow the slot names).
+Inside methods, bare identifiers like `x` resolve to slots on `self` — both for reads and writes. If `x` is a slot defined in the enclosing `clone` block, then `x = val` writes to the slot (Io-style `updateSlot` semantics). Truly new names (not matching any slot) create method-local variables. Use `self x = val` when a parameter shadows a slot name, as in the `init` pattern below.
 
 ### Super
 

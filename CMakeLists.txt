@@ -201,3 +201,4 @@ add_test(NAME clay_test_break_continue COMMAND clay_compiler ${CMAKE_CURRENT_SOU
 add_test(NAME clay_test_dict_literal COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_dict_literal.clay)
 add_test(NAME clay_test_null_coalesce COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_null_coalesce.clay)
 add_test(NAME clay_test_default_params COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_default_params.clay)
+add_test(NAME clay_test_slot_assign COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_slot_assign.clay)

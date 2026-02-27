@@ -96,6 +96,10 @@ typedef struct {
 
     /* Method context flag — 1 when compiling inside a method body */
     int      in_method;
+
+    /* Known slot names from the enclosing clone block (for Io-style assignment) */
+    const char **known_slots;
+    int          known_slot_count;
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);

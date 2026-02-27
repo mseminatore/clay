@@ -1,0 +1,64 @@
+// Test Io-style slot assignment: bare x = val writes to slot, not local
+// when x is a known slot from the enclosing clone block
+
+// Basic slot write without self
+Point = Object clone {
+  x = 0
+  y = 0
+
+  moveTo(newX, newY) {
+    x = newX
+    y = newY
+  }
+
+  toString() {
+    "(" + x toString + ", " + y toString + ")"
+  }
+}
+
+p = Point clone
+p moveTo(3, 4)
+(p x == 3) ifTrue { "PASS: x == 3" println } ifFalse { "FAIL: x != 3, got " + p x toString println }
+(p y == 4) ifTrue { "PASS: y == 4" println } ifFalse { "FAIL: y != 4, got " + p y toString println }
+(p toString == "(3, 4)") ifTrue { "PASS: toString" println } ifFalse { "FAIL: toString = " + p toString println }
+
+// Truly new names should still create locals (not write to slot)
+Counter = Object clone {
+  count = 0
+
+  increment() {
+    temp = count + 1
+    count = temp
+  }
+}
+
+c = Counter clone
+c increment
+c increment
+c increment
+(c count == 3) ifTrue { "PASS: count == 3" println } ifFalse { "FAIL: count != 3, got " + c count toString println }
+
+// Parameter names should take priority over slot names
+Rect = Object clone {
+  w = 0
+  h = 0
+
+  resize(w, h) {
+    self w = w
+    self h = h
+  }
+
+  area() { w * h }
+}
+
+r = Rect clone
+r resize(5, 10)
+(r area == 50) ifTrue { "PASS: area == 50" println } ifFalse { "FAIL: area != 50, got " + r area toString println }
+
+// Cloned instances should be independent
+p2 = Point clone
+p2 moveTo(10, 20)
+(p x == 3) ifTrue { "PASS: p.x still 3" println } ifFalse { "FAIL: p.x changed" println }
+(p2 x == 10) ifTrue { "PASS: p2.x == 10" println } ifFalse { "FAIL: p2.x != 10" println }
+
+"All slot assignment tests completed" println
