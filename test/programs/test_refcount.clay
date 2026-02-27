@@ -1,0 +1,35 @@
+// test_refcount.clay - refcount regression tests
+
+// --- Test 1: Dict each does not leak key strings ---
+before = System allocCount
+d = #{ "a": 1, "b": 2, "c": 3 }
+count = 0
+d each({ |k, v| count = count + v })
+after = System allocCount
+delta1 = after - before
+("test 1 - dict each: alloc delta = " + delta1 toString) println
+
+// --- Test 2: Slot write releases old value ---
+Point = Object clone {
+  _x = 0
+  _y = 0
+  setX(v) { _x = v }
+}
+before2 = System allocCount
+p = Point clone
+p setX("hello")
+p setX("world")
+p setX("final")
+after2 = System allocCount
+delta2 = after2 - before2
+("test 2 - slot write: alloc delta = " + delta2 toString) println
+
+// --- Test 3: Array toString does not leak ---
+before3 = System allocCount
+arr = [1, 2, 3, "four", "five"]
+s = arr toString
+after3 = System allocCount
+delta3 = after3 - before3
+("test 3 - array toString: alloc delta = " + delta3 toString) println
+
+"PASS" println

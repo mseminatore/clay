@@ -16,6 +16,7 @@ ClayObject *clay_array_new(void) {
     return obj;
 }
 
+/* Append retains val; ownership shared with array until removal. */
 void clay_array_append(ClayObject *arr, ClayValue val) {
     if (arr->as.array.size >= arr->as.array.capacity) {
         arr->as.array.capacity *= 2;
@@ -289,6 +290,7 @@ static ClayValue array_sort(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+/* Ownership of removed item transfers to caller (array's retain not released). */
 static ClayValue array_removeAt(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_NIL;
     intptr_t idx = clay_to_int(argv[0]);

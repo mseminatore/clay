@@ -134,11 +134,13 @@ static ClayValue dict_each(ClayObject *self, int argc, ClayValue *argv) {
     ht_key_t key;
     ht_value_t val;
     while (ht_next(self->as.dict.map, &pos, &key, &val)) {
+        ClayObject *key_str = clay_string_new((const char *)key);
         ClayValue args[2] = {
-            CLAY_VAL(clay_string_new((const char *)key)),
+            CLAY_VAL(key_str),
             (ClayValue)(uintptr_t)val
         };
         clay_send(CLAY_OBJ(argv[0]), "value", 2, args);
+        clay_release(key_str);
     }
     return CLAY_VAL(self);
 }
