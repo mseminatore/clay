@@ -73,6 +73,8 @@ typedef struct {
     int native_cell_set;
     int native_is_truthy;
     int native_to_bool;
+    int native_is_nil;
+    int native_stop_vm;
     int native_try_catch;
     int native_raise;
 

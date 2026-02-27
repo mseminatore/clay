@@ -196,3 +196,8 @@ add_test(NAME clay_test_regex COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)
 add_test(NAME clay_test_new_methods COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_new_methods.clay)
 add_test(NAME clay_test_trailing_blocks COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_trailing_blocks.clay)
+add_test(NAME clay_test_return COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_return.clay)
+add_test(NAME clay_test_break_continue COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_break_continue.clay)
+add_test(NAME clay_test_dict_literal COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_dict_literal.clay)
+add_test(NAME clay_test_null_coalesce COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_null_coalesce.clay)
+add_test(NAME clay_test_default_params COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_default_params.clay)

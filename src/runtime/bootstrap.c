@@ -30,6 +30,8 @@ ClayObject *clay_Http    = NULL;
 ClayObject *clay_Regex   = NULL;
 ClayObject *clay_Fiber   = NULL;
 ClayObject *clay_Db     = NULL;
+ClayObject *clay_BreakSignal    = NULL;
+ClayObject *clay_ContinueSignal = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -519,6 +521,19 @@ void clay_bootstrap(void) {
     clay_Error->parent = clay_Object;
     clay_Error->refcount = 1000000;
     clay_error_init_methods(clay_Error);
+
+    /* Loop control signal singletons (Error clones for break/continue) */
+    clay_BreakSignal = clay_clone(clay_Error);
+    clay_BreakSignal->refcount = 1000000;
+    clay_set_slot(clay_BreakSignal, "_message", CLAY_VAL(clay_string_new("break")));
+    clay_set_slot(clay_BreakSignal, "_type", CLAY_VAL(clay_string_new("BreakSignal")));
+    clay_set_slot(clay_BreakSignal, "_name", CLAY_VAL(clay_string_new("BreakSignal")));
+
+    clay_ContinueSignal = clay_clone(clay_Error);
+    clay_ContinueSignal->refcount = 1000000;
+    clay_set_slot(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("continue")));
+    clay_set_slot(clay_ContinueSignal, "_type", CLAY_VAL(clay_string_new("ContinueSignal")));
+    clay_set_slot(clay_ContinueSignal, "_name", CLAY_VAL(clay_string_new("ContinueSignal")));
 
     /* Dict prototype */
     clay_Dict = clay_object_new();

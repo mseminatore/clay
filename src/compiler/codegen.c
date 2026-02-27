@@ -263,6 +263,14 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             prewalk_assign_names(node->as.slot_assign.receiver, parent_name);
             prewalk_assign_names(node->as.slot_assign.value, parent_name);
             break;
+        case NODE_RETURN:
+            if (node->as.return_stmt.expr)
+                prewalk_assign_names(node->as.return_stmt.expr, parent_name);
+            break;
+        case NODE_DICT_LIT:
+            for (int i = 0; i < node->as.dict_lit.values.count; i++)
+                prewalk_assign_names(node->as.dict_lit.values.items[i], parent_name);
+            break;
         default:
             break;
     }
@@ -505,6 +513,13 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             scan_free_vars(node->as.slot_assign.receiver, block_params, param_count, caps, cg);
             scan_free_vars(node->as.slot_assign.value, block_params, param_count, caps, cg);
             break;
+        case NODE_RETURN:
+            if (node->as.return_stmt.expr)
+                scan_free_vars(node->as.return_stmt.expr, block_params, param_count, caps, cg);
+            break;
+        case NODE_DICT_LIT:
+            scan_free_vars_list(&node->as.dict_lit.values, block_params, param_count, caps, cg);
+            break;
         default:
             break;
     }
@@ -644,6 +659,33 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         char *right = emit_expr(cg, node->as.binary.right);
         emit_indent(cg);
         fprintf(cg->out, "%s = CLAY_BOOL(CLAY_IS_TRUTHY(%s));\n", t, right);
+        free(right);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "}\n");
+        free(left);
+        return t;
+    }
+    /* Null-coalescing: lhs ?? rhs — returns lhs if non-nil, else rhs */
+    if (strcmp(op, "??") == 0) {
+        char *left = emit_expr(cg, node->as.binary.left);
+        if (!left) return NULL;
+        char *t = temp_name(cg);
+        emit_line(cg, node->line);
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "if (%s != CLAY_NIL) {\n", left);
+        cg->indent++;
+        emit_indent(cg);
+        fprintf(cg->out, "%s = %s;\n", t, left);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "} else {\n");
+        cg->indent++;
+        char *right = emit_expr(cg, node->as.binary.right);
+        emit_indent(cg);
+        fprintf(cg->out, "%s = %s;\n", t, right);
         free(right);
         cg->indent--;
         emit_indent(cg);
@@ -793,6 +835,25 @@ static char *emit_array_lit(CodeGen *cg, AstNode *node) {
     return t;
 }
 
+static char *emit_dict_lit(CodeGen *cg, AstNode *node) {
+    char *t = temp_name(cg);
+    emit_indent(cg);
+    fprintf(cg->out, "ClayObject *%s_obj = clay_dict_new();\n", t);
+
+    for (int i = 0; i < node->as.dict_lit.keys.count; i++) {
+        AstNode *key_node = node->as.dict_lit.keys.items[i];
+        const char *key_str = key_node->as.string_lit.value;
+        char *val = emit_expr(cg, node->as.dict_lit.values.items[i]);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_dict_set(%s_obj, \"%s\", %s);\n", t, key_str, val);
+        free(val);
+    }
+
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s = CLAY_VAL(%s_obj);\n", t, t);
+    return t;
+}
+
 static char *emit_try_catch(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     char *try_tmp = temp_name(cg);
@@ -901,6 +962,7 @@ static char *emit_expr(CodeGen *cg, AstNode *node) {
         case NODE_BINARY:     return emit_binary(cg, node);
         case NODE_BLOCK:      return emit_block(cg, node);
         case NODE_ARRAY_LIT:  return emit_array_lit(cg, node);
+        case NODE_DICT_LIT:   return emit_dict_lit(cg, node);
         case NODE_TRY_CATCH:  return emit_try_catch(cg, node);
         case NODE_RAISE:      return emit_raise(cg, node);
         default:
@@ -937,6 +999,38 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
             }
         }
         free(val);
+        return;
+    }
+
+    /* Return: emit expression and early return from method/block */
+    if (node->type == NODE_RETURN) {
+        emit_line(cg, node->line);
+        if (node->as.return_stmt.expr) {
+            char *val = emit_expr(cg, node->as.return_stmt.expr);
+            if (val) {
+                emit_indent(cg);
+                fprintf(cg->out, "_result = %s;\n", val);
+                free(val);
+            }
+        }
+        emit_indent(cg);
+        fprintf(cg->out, "return _result;\n");
+        return;
+    }
+
+    /* Break: raise BreakSignal */
+    if (node->type == NODE_BREAK) {
+        emit_line(cg, node->line);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_raise(CLAY_VAL(clay_error_new(\"break\", \"BreakSignal\")));\n");
+        return;
+    }
+
+    /* Continue: raise ContinueSignal */
+    if (node->type == NODE_CONTINUE) {
+        emit_line(cg, node->line);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_raise(CLAY_VAL(clay_error_new(\"continue\", \"ContinueSignal\")));\n");
         return;
     }
 
@@ -1041,12 +1135,22 @@ static void emit_method_bodies(CodeGen *cg) {
         if (node->type == NODE_METHOD_DEF) {
             /* Make method's self available for capture by nested blocks */
             push_local(cg, "_method_self");
-            /* Register params as locals */
+            /* Register params as locals, handling default values */
             for (int i = 0; i < node->as.method_def.params.count; i++) {
                 AstNode *param = node->as.method_def.params.items[i];
-                fprintf(cg->out, "    ClayValue %s = (argc > %d) ? argv[%d] : CLAY_NIL;\n",
-                        param->as.ident.name, i, i);
-                push_local(cg, param->as.ident.name);
+                if (param->type == NODE_ASSIGN) {
+                    /* Default parameter: name = defaultExpr */
+                    const char *pname = param->as.assign.name;
+                    char *def_val = emit_expr(cg, param->as.assign.value);
+                    fprintf(cg->out, "    ClayValue %s = (argc > %d) ? argv[%d] : %s;\n",
+                            pname, i, i, def_val ? def_val : "CLAY_NIL");
+                    push_local(cg, pname);
+                    free(def_val);
+                } else {
+                    fprintf(cg->out, "    ClayValue %s = (argc > %d) ? argv[%d] : CLAY_NIL;\n",
+                            param->as.ident.name, i, i);
+                    push_local(cg, param->as.ident.name);
+                }
             }
             fprintf(cg->out, "    ClayValue _result = CLAY_NIL;\n");
             int saved_indent = cg->indent;
@@ -1070,7 +1174,10 @@ static void emit_method_bodies(CodeGen *cg) {
                         fprintf(cg->out, "    _result = %s;\n", val);
                         free(val);
                     }
-                } else if (stmt->type == NODE_SLOT_ASSIGN) {
+                } else if (stmt->type == NODE_SLOT_ASSIGN ||
+                           stmt->type == NODE_RETURN ||
+                           stmt->type == NODE_BREAK ||
+                           stmt->type == NODE_CONTINUE) {
                     emit_stmt(cg, stmt);
                 } else {
                     char *val = emit_expr(cg, stmt);
@@ -1117,7 +1224,10 @@ static void emit_method_bodies(CodeGen *cg) {
                         fprintf(cg->out, "    _result = %s;\n", val);
                         free(val);
                     }
-                } else if (stmt->type == NODE_SLOT_ASSIGN) {
+                } else if (stmt->type == NODE_SLOT_ASSIGN ||
+                           stmt->type == NODE_RETURN ||
+                           stmt->type == NODE_BREAK ||
+                           stmt->type == NODE_CONTINUE) {
                     emit_stmt(cg, stmt);
                 } else {
                     char *val = emit_expr(cg, stmt);

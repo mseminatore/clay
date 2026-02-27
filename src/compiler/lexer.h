@@ -17,6 +17,9 @@ typedef enum {
     TOK_CATCH,          /* catch */
     TOK_FINALLY,        /* finally */
     TOK_RAISE,          /* raise */
+    TOK_RETURN,         /* return */
+    TOK_BREAK,          /* break */
+    TOK_CONTINUE,       /* continue */
 
     /* Punctuation */
     TOK_LPAREN,         /* ( */
@@ -28,6 +31,8 @@ typedef enum {
     TOK_COMMA,          /* , */
     TOK_DOT,            /* . */
     TOK_PIPE,           /* | */
+    TOK_HASH_LBRACE,    /* #{ (dict literal) */
+    TOK_COLON,          /* : */
     TOK_NEWLINE,        /* newline (statement separator) */
     TOK_SEMICOLON,      /* ; (optional statement separator) */
 
@@ -47,6 +52,7 @@ typedef enum {
     TOK_BANG,           /* ! */
     TOK_AND,            /* && */
     TOK_OR,             /* || */
+    TOK_NULLCOALESCE,   /* ?? */
 
     /* Compound assignment */
     TOK_PLUS_ASSIGN,    /* += */

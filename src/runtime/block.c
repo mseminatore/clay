@@ -68,7 +68,25 @@ static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
         if (!CLAY_IS_TRUTHY(cond)) break;
-        result = body->as.block.func(body, 0, NULL);
+        if (clay_try_push() == 0) {
+            result = body->as.block.func(body, 0, NULL);
+            clay_try_pop();
+        } else {
+            /* Exception caught — check for break/continue signals */
+            ClayValue err = clay_error_stack.current_error;
+            if (CLAY_IS_PTR(err) && !CLAY_IS_NIL(err)) {
+                ClayObject *eobj = CLAY_OBJ(err);
+                ClayValue type_val = clay_get_slot(eobj, "_type");
+                if (CLAY_IS_PTR(type_val) && !CLAY_IS_NIL(type_val) &&
+                    CLAY_OBJ(type_val)->type == CLAY_TYPE_STRING) {
+                    const char *tstr = clay_string_data(CLAY_OBJ(type_val));
+                    if (strcmp(tstr, "BreakSignal") == 0) return result;
+                    if (strcmp(tstr, "ContinueSignal") == 0) continue;
+                }
+            }
+            /* Re-raise unknown errors */
+            clay_raise(err);
+        }
     }
     return result;
 }
@@ -80,7 +98,23 @@ static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
         if (CLAY_IS_TRUTHY(cond)) break;
-        result = body->as.block.func(body, 0, NULL);
+        if (clay_try_push() == 0) {
+            result = body->as.block.func(body, 0, NULL);
+            clay_try_pop();
+        } else {
+            ClayValue err = clay_error_stack.current_error;
+            if (CLAY_IS_PTR(err) && !CLAY_IS_NIL(err)) {
+                ClayObject *eobj = CLAY_OBJ(err);
+                ClayValue type_val = clay_get_slot(eobj, "_type");
+                if (CLAY_IS_PTR(type_val) && !CLAY_IS_NIL(type_val) &&
+                    CLAY_OBJ(type_val)->type == CLAY_TYPE_STRING) {
+                    const char *tstr = clay_string_data(CLAY_OBJ(type_val));
+                    if (strcmp(tstr, "BreakSignal") == 0) return result;
+                    if (strcmp(tstr, "ContinueSignal") == 0) continue;
+                }
+            }
+            clay_raise(err);
+        }
     }
     return result;
 }

@@ -194,6 +194,10 @@ extern ClayObject *clay_Regex;
 extern ClayObject *clay_Fiber;
 extern ClayObject *clay_Db;
 
+/* Loop control signal singletons (Error clones used by break/continue) */
+extern ClayObject *clay_BreakSignal;
+extern ClayObject *clay_ContinueSignal;
+
 /* Fiber context cleanup (called from memory.c when fiber objects are freed) */
 void clay_fiber_context_free(intptr_t ctx_ptr);
 

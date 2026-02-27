@@ -1,0 +1,65 @@
+// Test: break and continue in loops
+
+// Test break in times loop
+sum = 0
+10 times { |i|
+    (i == 5) ifTrue {
+        break
+    }
+    sum = sum + i
+}
+// 0+1+2+3+4 = 10
+(sum != 10) ifTrue {
+    raise("FAIL: times break - expected 10, got " + sum toString)
+}
+
+// Test continue in times loop
+sum2 = 0
+10 times { |i|
+    (i % 2 == 0) ifTrue {
+        continue
+    }
+    sum2 = sum2 + i
+}
+// 1+3+5+7+9 = 25
+(sum2 != 25) ifTrue {
+    raise("FAIL: times continue - expected 25, got " + sum2 toString)
+}
+
+// Test break in each loop
+result = ""
+["a", "b", "c", "d"] each { |x|
+    (x == "c") ifTrue {
+        break
+    }
+    result = result + x
+}
+(result != "ab") ifTrue {
+    raise("FAIL: each break - expected 'ab', got '" + result + "'")
+}
+
+// Test continue in each loop
+result2 = ""
+["a", "b", "c", "d"] each { |x|
+    (x == "b") ifTrue {
+        continue
+    }
+    result2 = result2 + x
+}
+(result2 != "acd") ifTrue {
+    raise("FAIL: each continue - expected 'acd', got '" + result2 + "'")
+}
+
+// Test break in whileTrue loop
+n = 0
+{ n < 100 } whileTrue {
+    (n == 7) ifTrue {
+        break
+    }
+    n = n + 1
+}
+(n != 7) ifTrue {
+    raise("FAIL: whileTrue break - expected 7, got " + n toString)
+}
+
+"PASS: break and continue" println

@@ -447,6 +447,41 @@ static AstNode *parse_primary(Parser *p) {
         return node;
     }
 
+    /* Dict literal: #{key: value, ...} */
+    if (match(p, TOK_HASH_LBRACE)) {
+        int line = p->previous.line;
+        AstNode *node = ast_new(NODE_DICT_LIT, line);
+        nodelist_init(&node->as.dict_lit.keys);
+        nodelist_init(&node->as.dict_lit.values);
+        skip_newlines(p);
+        if (!check(p, TOK_RBRACE)) {
+            /* Parse first key: value pair */
+            while (1) {
+                skip_newlines(p);
+                AstNode *key = NULL;
+                if (match(p, TOK_IDENT)) {
+                    key = ast_new(NODE_STRING_LIT, p->previous.line);
+                    key->as.string_lit.value = token_strdup(&p->previous);
+                } else if (match(p, TOK_STRING)) {
+                    key = ast_new(NODE_STRING_LIT, p->previous.line);
+                    key->as.string_lit.value = process_escapes(p->previous.start, p->previous.length);
+                } else {
+                    parser_error(p, "Expected key name or string in dict literal");
+                    break;
+                }
+                expect(p, TOK_COLON, "Expected ':' after dict key");
+                AstNode *val = parse_expression(p);
+                nodelist_push(&node->as.dict_lit.keys, key);
+                nodelist_push(&node->as.dict_lit.values, val);
+                skip_newlines(p);
+                if (!match(p, TOK_COMMA)) break;
+            }
+        }
+        skip_newlines(p);
+        expect(p, TOK_RBRACE, "Expected '}' to close dict literal");
+        return node;
+    }
+
     parser_error(p, "Expected expression");
     return NULL;
 }
@@ -528,16 +563,35 @@ static AstNode *parse_clone_body(Parser *p) {
             nodelist_init(&method->as.method_def.params);
             nodelist_init(&method->as.method_def.body);
 
-            /* Parse params */
+            /* Parse params (with optional defaults: name = expr) */
             if (!check(p, TOK_RPAREN)) {
+                /* Parse first param */
+                if (check(p, TOK_DOT) && p->current.start[0] == '.' && p->current.start[1] == '.' && p->current.start[2] == '.') {
+                    /* ...rest param — handled by existing varargs logic */
+                }
                 expect(p, TOK_IDENT, "Expected parameter name");
                 AstNode *param = ast_new(NODE_IDENT, p->previous.line);
                 param->as.ident.name = token_strdup(&p->previous);
+                if (match(p, TOK_ASSIGN)) {
+                    /* Default value: rewrite as NODE_ASSIGN(name, default_expr) */
+                    AstNode *def = ast_new(NODE_ASSIGN, param->line);
+                    def->as.assign.name = strdup(param->as.ident.name);
+                    def->as.assign.value = parse_expression(p);
+                    ast_free(param);
+                    param = def;
+                }
                 nodelist_push(&method->as.method_def.params, param);
                 while (match(p, TOK_COMMA)) {
                     expect(p, TOK_IDENT, "Expected parameter name");
                     param = ast_new(NODE_IDENT, p->previous.line);
                     param->as.ident.name = token_strdup(&p->previous);
+                    if (match(p, TOK_ASSIGN)) {
+                        AstNode *def = ast_new(NODE_ASSIGN, param->line);
+                        def->as.assign.name = strdup(param->as.ident.name);
+                        def->as.assign.value = parse_expression(p);
+                        ast_free(param);
+                        param = def;
+                    }
                     nodelist_push(&method->as.method_def.params, param);
                 }
             }
@@ -680,23 +734,26 @@ static int is_binary_op(TokenType type) {
            type == TOK_EQUAL || type == TOK_NOT_EQUAL ||
            type == TOK_LESS || type == TOK_GREATER ||
            type == TOK_LESS_EQ || type == TOK_GREATER_EQ ||
-           type == TOK_AND || type == TOK_OR;
+           type == TOK_AND || type == TOK_OR ||
+           type == TOK_NULLCOALESCE;
 }
 
 static int precedence(TokenType type) {
     switch (type) {
-        case TOK_OR:
+        case TOK_NULLCOALESCE:
             return 1;
-        case TOK_AND:
+        case TOK_OR:
             return 2;
-        case TOK_EQUAL: case TOK_NOT_EQUAL:
+        case TOK_AND:
             return 3;
-        case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
+        case TOK_EQUAL: case TOK_NOT_EQUAL:
             return 4;
-        case TOK_PLUS: case TOK_MINUS:
+        case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
             return 5;
-        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+        case TOK_PLUS: case TOK_MINUS:
             return 6;
+        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+            return 7;
         default: return 0;
     }
 }
@@ -744,6 +801,30 @@ static const char *compound_assign_op(TokenType type) {
 
 static AstNode *parse_statement(Parser *p) {
     if (p->had_error) return NULL;
+
+    /* Check for return [expr] */
+    if (match(p, TOK_RETURN)) {
+        int line = p->previous.line;
+        AstNode *node = ast_new(NODE_RETURN, line);
+        /* Optional expression — return nil if at end of statement */
+        if (check(p, TOK_NEWLINE) || check(p, TOK_SEMICOLON) ||
+            check(p, TOK_RBRACE) || check(p, TOK_EOF)) {
+            node->as.return_stmt.expr = NULL;
+        } else {
+            node->as.return_stmt.expr = parse_expression(p);
+        }
+        return node;
+    }
+
+    /* Check for break */
+    if (match(p, TOK_BREAK)) {
+        return ast_new(NODE_BREAK, p->previous.line);
+    }
+
+    /* Check for continue */
+    if (match(p, TOK_CONTINUE)) {
+        return ast_new(NODE_CONTINUE, p->previous.line);
+    }
 
     /* Check for import("path") */
     if (check(p, TOK_IMPORT)) {

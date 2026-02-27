@@ -1,0 +1,46 @@
+// Test: null-coalescing operator ??
+
+// Basic nil case
+a = nil
+result = a ?? "default"
+(result != "default") ifTrue {
+    raise("FAIL: nil ?? 'default' should be 'default', got '" + result toString + "'")
+}
+
+// Non-nil case
+b = "hello"
+result2 = b ?? "default"
+(result2 != "hello") ifTrue {
+    raise("FAIL: 'hello' ?? 'default' should be 'hello', got '" + result2 + "'")
+}
+
+// Numeric values
+c = 0
+result3 = c ?? 42
+(result3 != 0) ifTrue {
+    raise("FAIL: 0 ?? 42 should be 0 (0 is not nil), got " + result3 toString)
+}
+
+// false is not nil
+d = false
+result4 = d ?? true
+(result4 != false) ifTrue {
+    raise("FAIL: false ?? true should be false (false is not nil)")
+}
+
+// Chained null-coalescing
+e = nil
+f = nil
+result5 = e ?? f ?? "fallback"
+(result5 != "fallback") ifTrue {
+    raise("FAIL: nil ?? nil ?? 'fallback' should be 'fallback'")
+}
+
+// With expressions
+g = nil
+result6 = g ?? (1 + 2)
+(result6 != 3) ifTrue {
+    raise("FAIL: nil ?? (1+2) should be 3")
+}
+
+"PASS: null-coalescing" println

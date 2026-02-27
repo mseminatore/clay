@@ -91,12 +91,15 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     size_t base = g_vm->sp;   /* locals start here */
 
-    if (g_vm->frame_count < g_vm->frame_capacity) {
-        g_vm->frames[g_vm->frame_count].return_ip = 0;
-        g_vm->frames[g_vm->frame_count].base_sp = base;
-        g_vm->frames[g_vm->frame_count].func_index = 0;
-        g_vm->frame_count++;
+    if (g_vm->frame_count >= g_vm->frame_capacity) {
+        g_vm->frame_capacity *= 2;
+        g_vm->frames = (clayvm_frame_t *)realloc(g_vm->frames,
+            (size_t)g_vm->frame_capacity * sizeof(clayvm_frame_t));
     }
+    g_vm->frames[g_vm->frame_count].return_ip = 0;
+    g_vm->frames[g_vm->frame_count].base_sp = base;
+    g_vm->frames[g_vm->frame_count].func_index = 0;
+    g_vm->frame_count++;
 
     /* Push params as stack locals (slots 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
@@ -510,12 +513,15 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
 
     size_t base = g_vm->sp;
 
-    if (g_vm->frame_count < g_vm->frame_capacity) {
-        g_vm->frames[g_vm->frame_count].return_ip = 0;
-        g_vm->frames[g_vm->frame_count].base_sp = base;
-        g_vm->frames[g_vm->frame_count].func_index = 0;
-        g_vm->frame_count++;
+    if (g_vm->frame_count >= g_vm->frame_capacity) {
+        g_vm->frame_capacity *= 2;
+        g_vm->frames = (clayvm_frame_t *)realloc(g_vm->frames,
+            (size_t)g_vm->frame_capacity * sizeof(clayvm_frame_t));
     }
+    g_vm->frames[g_vm->frame_count].return_ip = 0;
+    g_vm->frames[g_vm->frame_count].base_sp = base;
+    g_vm->frames[g_vm->frame_count].func_index = 0;
+    g_vm->frame_count++;
 
     /* Push params as stack locals (slots 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
@@ -968,6 +974,22 @@ static int native_to_bool_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* native_is_nil(val) — push 1 if nil, 0 otherwise (for JUMP_IF_FALSE) */
+static int native_is_nil_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    ClayValue v = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_vm_push(vm, CLAYVM_INT64(v == CLAY_NIL ? 1 : 0));
+    return 0;
+}
+
+/* native_stop_vm() — stop the dispatch loop (for early return).
+ * The top-of-stack value is preserved as the return value. */
+static int native_stop_vm_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    vm->running = 0;
+    return 1; /* non-zero also breaks the dispatch loop */
+}
+
 /* native_try_catch(try_block, catch_block) — setjmp-based exception handling */
 static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
@@ -1045,6 +1067,14 @@ static int native_make_array_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     ClayObject *arr = clay_array_new();
     clayvm_vm_push(vm, CLAYVM_OBJ(arr));
+    return 0;
+}
+
+/* native_make_dict() — create empty Dict */
+static int native_make_dict_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    ClayObject *dict = clay_dict_new();
+    clayvm_vm_push(vm, CLAYVM_OBJ(dict));
     return 0;
 }
 
@@ -1173,6 +1203,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_println = clayvm_native_register(&vm->natives, "println", native_println_fn, 1);
     bc->native_make_block = clayvm_native_register(&vm->natives, "make_block", native_make_block_fn, 2);
     bc->native_make_array = clayvm_native_register(&vm->natives, "make_array", native_make_array_fn, 0);
+    bc->native_make_dict = clayvm_native_register(&vm->natives, "make_dict", native_make_dict_fn, 0);
     bc->native_load_global = clayvm_native_register(&vm->natives, "load_global", native_load_global_fn, 1);
     bc->native_store_global = clayvm_native_register(&vm->natives, "store_global", native_store_global_fn, 2);
     bc->native_cell_new = clayvm_native_register(&vm->natives, "cell_new", native_cell_new_fn, 1);
@@ -1180,6 +1211,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_cell_set = clayvm_native_register(&vm->natives, "cell_set", native_cell_set_fn, 2);
     bc->native_is_truthy = clayvm_native_register(&vm->natives, "is_truthy", native_is_truthy_fn, 1);
     bc->native_to_bool = clayvm_native_register(&vm->natives, "to_bool", native_to_bool_fn, 1);
+    bc->native_is_nil = clayvm_native_register(&vm->natives, "is_nil", native_is_nil_fn, 1);
+    bc->native_stop_vm = clayvm_native_register(&vm->natives, "stop_vm", native_stop_vm_fn, 0);
     bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 3);
     bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
 
@@ -1196,6 +1229,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Regex", clay_Regex},
         {"Fiber", clay_Fiber},
         {"Db", clay_Db},
+        {"BreakSignal", clay_BreakSignal},
+        {"ContinueSignal", clay_ContinueSignal},
         {NULL, NULL}
     };
 
@@ -1248,6 +1283,8 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
            strcmp(name, "Db") == 0 ||
+           strcmp(name, "BreakSignal") == 0 ||
+           strcmp(name, "ContinueSignal") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -1380,6 +1417,8 @@ static int bc_is_builtin_global(const char *name) {
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
            strcmp(name, "Db") == 0 ||
+           strcmp(name, "BreakSignal") == 0 ||
+           strcmp(name, "ContinueSignal") == 0 ||
            strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
 }
@@ -1503,6 +1542,13 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
             bc_scan_free_vars(node->as.slot_assign.receiver, block_params, param_count, caps, bc);
             bc_scan_free_vars(node->as.slot_assign.value, block_params, param_count, caps, bc);
             break;
+        case NODE_RETURN:
+            if (node->as.return_stmt.expr)
+                bc_scan_free_vars(node->as.return_stmt.expr, block_params, param_count, caps, bc);
+            break;
+        case NODE_DICT_LIT:
+            bc_scan_free_vars_list(&node->as.dict_lit.values, block_params, param_count, caps, bc);
+            break;
         default:
             break;
     }
@@ -1557,6 +1603,13 @@ static void bc_prescan_node(BcCompiler *bc, AstNode *node) {
             bc_prescan_node(bc, node->as.slot_assign.receiver);
             bc_prescan_node(bc, node->as.slot_assign.value);
             break;
+        case NODE_RETURN:
+            if (node->as.return_stmt.expr)
+                bc_prescan_node(bc, node->as.return_stmt.expr);
+            break;
+        case NODE_DICT_LIT:
+            bc_prescan_list(bc, &node->as.dict_lit.values);
+            break;
         default:
             break;
     }
@@ -1600,10 +1653,15 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     BcChunk *chunk = (BcChunk *)calloc(1, sizeof(BcChunk));
     chunk->code = (uint8_t *)malloc(BC_CHUNK_CODE);
 
-    /* Record param names (strdup since AST may be freed) */
+    /* Record param names (strdup since AST may be freed).
+     * Default params (NODE_ASSIGN) encode name in assign.name. */
     chunk->param_count = params ? params->count : 0;
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
-        chunk->param_names[i] = strdup(params->items[i]->as.ident.name);
+        if (params->items[i]->type == NODE_ASSIGN) {
+            chunk->param_names[i] = strdup(params->items[i]->as.assign.name);
+        } else {
+            chunk->param_names[i] = strdup(params->items[i]->as.ident.name);
+        }
     }
 
     /* Save current bytecode, line map, and local scope */
@@ -1678,11 +1736,48 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
         }
     }
 
+    /* Emit default parameter values: for each param with a default expression,
+     * check if it's nil (not provided by caller) and set the default. */
+    if (params) {
+        for (int i = 0; i < params->count && i < 16; i++) {
+            if (params->items[i]->type == NODE_ASSIGN) {
+                AstNode *default_expr = params->items[i]->as.assign.value;
+                /* Check if param is nil (wasn't provided by caller) */
+                emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)i);
+                if (bc_local_is_captured(bc, i)) {
+                    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                    emit_u16(bc, (uint16_t)bc->native_cell_get);
+                    emit_byte(bc, 1);
+                }
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_is_nil);
+                emit_byte(bc, 1);
+                int skip_jump = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+                /* Param was nil — emit default and store */
+                if (bc_local_is_captured(bc, i)) {
+                    /* Cell-boxed: cell_set(cell, default_val) */
+                    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)i);
+                    bc_emit_expr(bc, default_expr);
+                    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                    emit_u16(bc, (uint16_t)bc->native_cell_set);
+                    emit_byte(bc, 2);
+                    emit_op(bc, CLAYVM_OP_POP);
+                } else {
+                    bc_emit_expr(bc, default_expr);
+                    emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)i);
+                    emit_op(bc, CLAYVM_OP_POP);
+                }
+                patch_jump(bc, skip_jump);
+            }
+        }
+    }
+
     /* Compile body: intermediate stmts POP, last expr stays on stack */
     for (int i = 0; i < body->count; i++) {
         AstNode *stmt = body->items[i];
         int is_last = (i == body->count - 1);
-        if (is_last) {
+        if (is_last && stmt->type != NODE_RETURN &&
+            stmt->type != NODE_BREAK && stmt->type != NODE_CONTINUE) {
             bc_emit_expr(bc, stmt);
         } else {
             bc_emit_stmt(bc, stmt);
@@ -1903,6 +1998,24 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_u16(bc, (uint16_t)bc->native_to_bool);
                 emit_byte(bc, 1);
                 patch_jump(bc, end_jump);
+            } else if (strcmp(op, "??") == 0) {
+                /* Null-coalescing: if left is not nil, use it; else use right.
+                 * Stack protocol: emit left, DUP, is_nil, branch. */
+                bc_emit_expr(bc, node->as.binary.left);
+                emit_op(bc, CLAYVM_OP_DUP);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_is_nil);
+                emit_byte(bc, 1);
+                /* is_nil returns 1 if nil, 0 if not nil.
+                 * JUMP_IF_FALSE jumps when value is 0 (not nil). */
+                int not_nil_jump = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+                /* Fall through: IS nil → discard nil, emit right */
+                emit_op(bc, CLAYVM_OP_POP);
+                bc_emit_expr(bc, node->as.binary.right);
+                int end_jump = emit_jump(bc, CLAYVM_OP_JUMP);
+                /* NOT nil → left value is already on stack */
+                patch_jump(bc, not_nil_jump);
+                patch_jump(bc, end_jump);
             } else {
                 /* Map arithmetic operators to VM opcodes for fast path */
                 int vm_op = -1;
@@ -2022,6 +2135,32 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_op(bc, CLAYVM_OP_POP); /* discard send result */
             }
             /* Array is left on stack */
+            break;
+        }
+
+        case NODE_DICT_LIT: {
+            /* Create empty Dict via native */
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_make_dict);
+            emit_byte(bc, 0);
+            /* For each key-value pair: DUP dict, send set(key, val) */
+            int set_idx = add_constant_string(bc, "set");
+            for (int i = 0; i < node->as.dict_lit.keys.count; i++) {
+                emit_op(bc, CLAYVM_OP_DUP); /* keep dict on stack */
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)set_idx);
+                /* Push key as string constant */
+                AstNode *key_node = node->as.dict_lit.keys.items[i];
+                const char *key_str = key_node->as.string_lit.value;
+                int key_idx = add_constant_string(bc, key_str);
+                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)key_idx);
+                /* Push value expression */
+                bc_emit_expr(bc, node->as.dict_lit.values.items[i]);
+                emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+                emit_u16(bc, (uint16_t)bc->native_send);
+                emit_byte(bc, 4); /* dict, "set", key, val */
+                emit_op(bc, CLAYVM_OP_POP); /* discard send result */
+            }
+            /* Dict is left on stack */
             break;
         }
 
@@ -2202,6 +2341,46 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
         emit_u16(bc, (uint16_t)bc->native_set_slot);
         emit_byte(bc, 3);
         emit_op(bc, CLAYVM_OP_POP);
+        return;
+    }
+
+    /* Return statement: emit expression (or nil), then stop VM to exit chunk */
+    if (node->type == NODE_RETURN) {
+        if (node->as.return_stmt.expr) {
+            bc_emit_expr(bc, node->as.return_stmt.expr);
+        } else {
+            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+                (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        }
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_stop_vm);
+        emit_byte(bc, 0);
+        return;
+    }
+
+    /* Break: raise a BreakSignal */
+    if (node->type == NODE_BREAK) {
+        int name_idx = add_constant_string(bc, "BreakSignal");
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_load_global);
+        emit_byte(bc, 1);
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_raise);
+        emit_byte(bc, 1);
+        return;
+    }
+
+    /* Continue: raise a ContinueSignal */
+    if (node->type == NODE_CONTINUE) {
+        int name_idx = add_constant_string(bc, "ContinueSignal");
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_load_global);
+        emit_byte(bc, 1);
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_raise);
+        emit_byte(bc, 1);
         return;
     }
 

@@ -1,0 +1,57 @@
+// Test: early return from methods
+
+Animal = Object clone {
+    sound = "..."
+
+    speak(n) {
+        return self sound + " x" + n toString
+    }
+
+    compute(x) {
+        return x * 2 + 1
+    }
+}
+
+// Test basic return
+result = Animal speak(3)
+(result != "... x3") ifTrue {
+    raise("FAIL: expected '... x3', got '" + result + "'")
+}
+
+// Test return with computation
+r2 = Animal compute(5)
+(r2 != 11) ifTrue {
+    raise("FAIL: expected 11, got " + r2 toString)
+}
+
+// Test return with no expression
+Counter = Object clone {
+    count = 0
+    bump() {
+        self count = self count + 1
+        return
+    }
+}
+
+c = Counter clone
+c bump
+// return with no value should complete without error
+
+// Test return from multi-statement method (early exit)
+Finder = Object clone {
+    check(x) {
+        (x > 10) ifTrue {
+            return "big"
+        }
+        return "small"
+    }
+}
+
+// Note: return inside ifTrue block currently exits the block, not the method.
+// This tests that the second return works correctly.
+r3 = Finder check(5)
+(r3 != "small") ifTrue {
+    raise("FAIL: expected 'small', got '" + r3 + "'")
+}
+
+"PASS: early return" println

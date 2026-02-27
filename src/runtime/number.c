@@ -224,7 +224,23 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue result = CLAY_NIL;
     for (intptr_t i = 0; i < n; i++) {
         ClayValue arg = clay_int(i);
-        result = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+        if (clay_try_push() == 0) {
+            result = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+            clay_try_pop();
+        } else {
+            ClayValue err = clay_error_stack.current_error;
+            if (CLAY_IS_PTR(err) && !CLAY_IS_NIL(err)) {
+                ClayObject *eobj = CLAY_OBJ(err);
+                ClayValue type_val = clay_get_slot(eobj, "_type");
+                if (CLAY_IS_PTR(type_val) && !CLAY_IS_NIL(type_val) &&
+                    CLAY_OBJ(type_val)->type == CLAY_TYPE_STRING) {
+                    const char *tstr = clay_string_data(CLAY_OBJ(type_val));
+                    if (strcmp(tstr, "BreakSignal") == 0) return result;
+                    if (strcmp(tstr, "ContinueSignal") == 0) continue;
+                }
+            }
+            clay_raise(err);
+        }
     }
     return result;
 }

@@ -19,7 +19,11 @@ typedef enum {
     NODE_IMPORT,        /* import("path") */
     NODE_TRY_CATCH,     /* try({ ... }) catch({ |e| ... }) */
     NODE_RAISE,         /* raise(expr) */
-    NODE_SLOT_ASSIGN    /* receiver slot = expr */
+    NODE_SLOT_ASSIGN,   /* receiver slot = expr */
+    NODE_RETURN,        /* return expr */
+    NODE_BREAK,         /* break */
+    NODE_CONTINUE,      /* continue */
+    NODE_DICT_LIT       /* #{key: val, ...} */
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -116,6 +120,15 @@ struct AstNode {
             char *slot_name;
             AstNode *value;
         } slot_assign;
+
+        /* NODE_RETURN: return expr (expr is optional, NULL means return nil) */
+        struct { AstNode *expr; } return_stmt;
+
+        /* NODE_DICT_LIT: #{key: val, ...} */
+        struct {
+            NodeList keys;    /* list of NODE_STRING_LIT for key names */
+            NodeList values;  /* list of expressions for values */
+        } dict_lit;
 
         /* NODE_PROGRAM */
         struct { NodeList stmts; } program;

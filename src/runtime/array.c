@@ -63,7 +63,23 @@ static ClayValue array_each(ClayObject *self, int argc, ClayValue *argv) {
 
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
-        clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
+        if (clay_try_push() == 0) {
+            clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
+            clay_try_pop();
+        } else {
+            ClayValue err = clay_error_stack.current_error;
+            if (CLAY_IS_PTR(err) && !CLAY_IS_NIL(err)) {
+                ClayObject *eobj = CLAY_OBJ(err);
+                ClayValue type_val = clay_get_slot(eobj, "_type");
+                if (CLAY_IS_PTR(type_val) && !CLAY_IS_NIL(type_val) &&
+                    CLAY_OBJ(type_val)->type == CLAY_TYPE_STRING) {
+                    const char *tstr = clay_string_data(CLAY_OBJ(type_val));
+                    if (strcmp(tstr, "BreakSignal") == 0) return CLAY_VAL(self);
+                    if (strcmp(tstr, "ContinueSignal") == 0) continue;
+                }
+            }
+            clay_raise(err);
+        }
     }
     return CLAY_VAL(self);
 }

@@ -57,6 +57,13 @@ AstNode *ast_clone(AstNode *node) {
             c->as.slot_assign.slot_name = strdup(node->as.slot_assign.slot_name);
             c->as.slot_assign.value = ast_clone(node->as.slot_assign.value);
             break;
+        case NODE_RETURN:
+            c->as.return_stmt.expr = ast_clone(node->as.return_stmt.expr);
+            break;
+        case NODE_DICT_LIT:
+            nodelist_clone(&c->as.dict_lit.keys, &node->as.dict_lit.keys);
+            nodelist_clone(&c->as.dict_lit.values, &node->as.dict_lit.values);
+            break;
         default:
             /* Remaining node types not expected as compound assignment receivers */
             break;
@@ -149,6 +156,16 @@ void ast_free(AstNode *node) {
             free(node->as.slot_assign.slot_name);
             ast_free(node->as.slot_assign.value);
             break;
+        case NODE_RETURN:
+            ast_free(node->as.return_stmt.expr);
+            break;
+        case NODE_DICT_LIT:
+            nodelist_free(&node->as.dict_lit.keys);
+            nodelist_free(&node->as.dict_lit.values);
+            break;
+        case NODE_BREAK:
+        case NODE_CONTINUE:
+            break;
         case NODE_PROGRAM:
             nodelist_free(&node->as.program.stmts);
             break;
@@ -238,6 +255,23 @@ void ast_print(AstNode *node, int indent) {
             printf("SlotAssign(.%s)\n", node->as.slot_assign.slot_name);
             ast_print(node->as.slot_assign.receiver, indent + 1);
             ast_print(node->as.slot_assign.value, indent + 1);
+            break;
+        case NODE_RETURN:
+            printf("Return\n");
+            if (node->as.return_stmt.expr) ast_print(node->as.return_stmt.expr, indent + 1);
+            break;
+        case NODE_BREAK:
+            printf("Break\n");
+            break;
+        case NODE_CONTINUE:
+            printf("Continue\n");
+            break;
+        case NODE_DICT_LIT:
+            printf("DictLit(count=%d)\n", node->as.dict_lit.keys.count);
+            for (int i = 0; i < node->as.dict_lit.keys.count; i++) {
+                ast_print(node->as.dict_lit.keys.items[i], indent + 1);
+                ast_print(node->as.dict_lit.values.items[i], indent + 2);
+            }
             break;
         case NODE_PROGRAM:
             printf("Program(stmts=%d)\n", node->as.program.stmts.count);

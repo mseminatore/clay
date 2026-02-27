@@ -127,6 +127,9 @@ static TokenType check_keyword(const char *start, int length) {
     if (length == 5 && memcmp(start, "catch", 5) == 0) return TOK_CATCH;
     if (length == 7 && memcmp(start, "finally", 7) == 0) return TOK_FINALLY;
     if (length == 5 && memcmp(start, "raise", 5) == 0) return TOK_RAISE;
+    if (length == 6 && memcmp(start, "return", 6) == 0) return TOK_RETURN;
+    if (length == 5 && memcmp(start, "break", 5) == 0) return TOK_BREAK;
+    if (length == 8 && memcmp(start, "continue", 8) == 0) return TOK_CONTINUE;
     return TOK_IDENT;
 }
 
@@ -176,6 +179,10 @@ Token lexer_next(Lexer *lexer) {
         case ')': return make_token(lexer, TOK_RPAREN, start, 1);
         case '{': return make_token(lexer, TOK_LBRACE, start, 1);
         case '}': return make_token(lexer, TOK_RBRACE, start, 1);
+        case '#':
+            if (match(lexer, '{')) return make_token(lexer, TOK_HASH_LBRACE, start, 2);
+            return error_token(lexer, "Unexpected character '#' (did you mean '#{' for a dict literal?)");
+        case ':': return make_token(lexer, TOK_COLON, start, 1);
         case '[': return make_token(lexer, TOK_LBRACKET, start, 1);
         case ']': return make_token(lexer, TOK_RBRACKET, start, 1);
         case ',': return make_token(lexer, TOK_COMMA, start, 1);
@@ -214,6 +221,9 @@ Token lexer_next(Lexer *lexer) {
         case '&':
             if (match(lexer, '&')) return make_token(lexer, TOK_AND, start, 2);
             return error_token(lexer, "Unexpected character '&' (did you mean '&&'?)");
+        case '?':
+            if (match(lexer, '?')) return make_token(lexer, TOK_NULLCOALESCE, start, 2);
+            return error_token(lexer, "Unexpected character '?' (did you mean '??'?)");
         default:
             return error_token(lexer, "Unexpected character");
     }
@@ -233,6 +243,9 @@ const char *token_type_name(TokenType type) {
         case TOK_CATCH:      return "CATCH";
         case TOK_FINALLY:    return "FINALLY";
         case TOK_RAISE:      return "RAISE";
+        case TOK_RETURN:     return "RETURN";
+        case TOK_BREAK:      return "BREAK";
+        case TOK_CONTINUE:   return "CONTINUE";
         case TOK_LPAREN:     return "(";
         case TOK_RPAREN:     return ")";
         case TOK_LBRACE:     return "{";
@@ -242,6 +255,8 @@ const char *token_type_name(TokenType type) {
         case TOK_COMMA:      return ",";
         case TOK_DOT:        return ".";
         case TOK_PIPE:       return "|";
+        case TOK_HASH_LBRACE: return "#{";
+        case TOK_COLON:      return ":";
         case TOK_NEWLINE:    return "NEWLINE";
         case TOK_SEMICOLON:  return ";";
         case TOK_ASSIGN:     return "=";
@@ -259,6 +274,7 @@ const char *token_type_name(TokenType type) {
         case TOK_BANG:       return "!";
         case TOK_AND:        return "&&";
         case TOK_OR:         return "||";
+        case TOK_NULLCOALESCE: return "??";
         case TOK_PLUS_ASSIGN:    return "+=";
         case TOK_MINUS_ASSIGN:   return "-=";
         case TOK_STAR_ASSIGN:    return "*=";

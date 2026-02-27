@@ -1,0 +1,41 @@
+// Test: default parameter values
+
+Greeter = Object clone {
+    greet(name, greeting = "Hello") {
+        return greeting + ", " + name + "!"
+    }
+
+    add(a, b = 0, c = 0) {
+        return a + b + c
+    }
+}
+
+// Test with all args provided
+r1 = Greeter greet("World", "Hi")
+(r1 != "Hi, World!") ifTrue {
+    raise("FAIL: expected 'Hi, World!', got '" + r1 + "'")
+}
+
+// Test with default arg
+r2 = Greeter greet("World")
+(r2 != "Hello, World!") ifTrue {
+    raise("FAIL: expected 'Hello, World!', got '" + r2 + "'")
+}
+
+// Test multiple defaults
+r3 = Greeter add(1, 2, 3)
+(r3 != 6) ifTrue {
+    raise("FAIL: add(1,2,3) should be 6, got " + r3 toString)
+}
+
+r4 = Greeter add(1, 2)
+(r4 != 3) ifTrue {
+    raise("FAIL: add(1,2) should be 3, got " + r4 toString)
+}
+
+r5 = Greeter add(1)
+(r5 != 1) ifTrue {
+    raise("FAIL: add(1) should be 1, got " + r5 toString)
+}
+
+"PASS: default parameters" println

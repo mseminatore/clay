@@ -1,0 +1,39 @@
+// Test: dict literal syntax #{key: value}
+
+d = #{name: "Clay", version: 1, active: true}
+
+// Test getting values
+(d get("name") != "Clay") ifTrue {
+    raise("FAIL: expected 'Clay', got '" + d get("name") + "'")
+}
+(d get("version") != 1) ifTrue {
+    raise("FAIL: expected 1, got " + d get("version") toString)
+}
+(d get("active") != true) ifTrue {
+    raise("FAIL: expected true")
+}
+
+// Test with expressions as values
+x = 21
+d2 = #{answer: x * 2, greeting: "hello " + "world"}
+(d2 get("answer") != 42) ifTrue {
+    raise("FAIL: expected 42, got " + d2 get("answer") toString)
+}
+(d2 get("greeting") != "hello world") ifTrue {
+    raise("FAIL: expected 'hello world'")
+}
+
+// Test empty dict literal
+d3 = #{}
+(d3 size != 0) ifTrue {
+    raise("FAIL: empty dict should have size 0")
+}
+
+// Test nested dict literal
+d4 = #{inner: #{x: 1, y: 2}}
+inner = d4 get("inner")
+(inner get("x") != 1) ifTrue {
+    raise("FAIL: nested dict x should be 1")
+}
+
+"PASS: dict literals" println
