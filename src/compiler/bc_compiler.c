@@ -1652,12 +1652,11 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
         }
     }
 
-    /* Pre-register method-local variables: scan body for bare assignments
-     * that create new locals (not params, captures, or builtins).
-     * This ensures prescan can identify which locals blocks will capture. */
-    if (is_method) {
-        bc_preregister_method_locals(bc, body);
-    }
+    /* Pre-register locals: scan body for bare assignments that create new
+     * local variables (not params, captures, builtins, or user globals).
+     * This ensures prescan can identify which locals nested blocks capture,
+     * enabling proper cell-boxing for closures that escape their scope. */
+    bc_preregister_method_locals(bc, body);
 
     /* Pre-scan body for nested blocks to identify params that will be captured.
      * This must happen AFTER params are registered as locals. */
