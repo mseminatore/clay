@@ -922,7 +922,17 @@ int main(int argc, char *argv[]) {
             return 1;
         } else {
             source_file = argv[i];
+            break; /* remaining args belong to the script */
         }
+    }
+
+    /* Set script args: pass only args after the source file to the script */
+    if (source_file) {
+        int script_arg_start = 0;
+        for (int i = 1; i < argc; i++) {
+            if (argv[i] == source_file) { script_arg_start = i + 1; break; }
+        }
+        clay_set_args(argc - script_arg_start, argv + script_arg_start);
     }
 
     if (!source_file && !repl_mode && !vm_repl_mode) {

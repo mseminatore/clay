@@ -1,0 +1,45 @@
+// -- A simple Markdown to HTML converter using Clay's markdown library. --
+import("clay-stdlib/clay-markdown")
+import("clay-stdlib/clay-cli")
+import("clay-stdlib/clay-args")
+import("clay-stdlib/clay-path")
+
+Converter = Object clone {
+    render(input, output) {
+        (File exists(input)) ifTrue {
+            markdownText = File read(input)
+            htmlText = Markdown render(markdownText)
+            File write(output, htmlText)
+            Cli success("Successfully converted " + input + " to " + output) println
+        } ifFalse {
+            Cli error("Input file not found: " + input) println
+        }
+    }
+}
+
+parser = ArgParser new("md2html", "A markdown to html conversion application")
+parser option("output", "o", "Output file path", "output.html")
+
+// parse command-line arguments
+result = parser parse(System args)
+
+// update options with parsed arguments
+output = result get("output")
+
+// get array of positional arguments (markdown file paths)
+arr = result get("_positional")
+
+(arr length == 0) ifTrue {
+    Cli error("No markdown files provided. Please specify at least one file path.") println
+    System exit(1)
+}
+
+(arr length == 1) ifTrue {
+    Converter render(arr at(0), output)
+} ifFalse {
+    arr each { |filePath|
+        basename = Path stem(filePath)
+        outputFile = Path join([Path dirname(output), basename + ".html"])
+        Converter render(filePath, outputFile)
+    }
+}

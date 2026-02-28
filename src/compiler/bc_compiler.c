@@ -122,22 +122,34 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
         clayvm_vm_push(g_vm, CLAYVM_NIL_VAL);
     }
 
-    /* Run the dispatch loop manually (can't use vm_run — it resets sp) */
-    while (g_vm->running && g_vm->ip < g_vm->code_len) {
-        /* Update source line from chunk's line_map for error reporting */
-        if (chunk->line_map && g_vm->ip < chunk->len) {
-            clay_source_line = chunk->line_map[g_vm->ip];
-        }
+    /* Run the dispatch loop manually (can't use vm_run — it resets sp).
+     * Wrap in clay_try_push so that exceptions (break/continue/errors)
+     * raised from nested calls still get VM state restored before the
+     * longjmp propagates to the caller's try handler. */
+    ClayValue raised_err = CLAY_NIL;
+    int had_exception = 0;
 
-        uint8_t opcode = g_vm->code[g_vm->ip++];
-        if (opcode >= CLAYVM_OP_COUNT) {
-            g_vm->running = 0;
-            break;
-        }
-        if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
+    if (clay_try_push() == 0) {
+        while (g_vm->running && g_vm->ip < g_vm->code_len) {
+            if (chunk->line_map && g_vm->ip < chunk->len) {
+                clay_source_line = chunk->line_map[g_vm->ip];
+            }
 
-        int rc = clayvm_dispatch_table[opcode](g_vm);
-        if (rc != 0) break;
+            uint8_t opcode = g_vm->code[g_vm->ip++];
+            if (opcode >= CLAYVM_OP_COUNT) {
+                g_vm->running = 0;
+                break;
+            }
+            if (g_vm->step_callback) g_vm->step_callback(g_vm, g_vm->ip - 1);
+
+            int rc = clayvm_dispatch_table[opcode](g_vm);
+            if (rc != 0) break;
+        }
+        clay_try_pop();
+    } else {
+        /* Exception caught — save it, restore VM state, then re-raise */
+        raised_err = clay_error_stack.current_error;
+        had_exception = 1;
     }
 
     /* Write back captured values from locals to env (by-reference semantics) */
@@ -150,7 +162,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     /* Get return value (last value on stack) */
     ClayValue retval = CLAY_NIL;
-    if (g_vm->sp > base) {
+    if (!had_exception && g_vm->sp > base) {
         retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
     }
 
@@ -172,6 +184,12 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
                 *existing = clay_to_vm(saved_self);
             }
         }
+    }
+
+    /* Re-raise after VM state is safely restored */
+    if (had_exception) {
+        clay_raise(raised_err);
+        return CLAY_NIL; /* unreachable */
     }
 
     return retval;
