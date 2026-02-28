@@ -51,14 +51,11 @@ typedef enum {
     CLAYVM_OP_HALT = 21,
     CLAYVM_OP_GET_LOCAL = 22,
     CLAYVM_OP_SET_LOCAL = 23,
-    CLAYVM_OP_GET_UPVALUE = 24,
-    CLAYVM_OP_SET_UPVALUE = 25,
-    CLAYVM_OP_CLOSE_UPVALUE = 26,
-    CLAYVM_OP_TRY_BEGIN = 27,
-    CLAYVM_OP_TRY_END = 28,
-    CLAYVM_OP_CATCH = 29,
-    CLAYVM_OP_THROW = 30,
-    CLAYVM_OP_COUNT = 31
+    CLAYVM_OP_TRY_BEGIN = 24,
+    CLAYVM_OP_TRY_END = 25,
+    CLAYVM_OP_CATCH = 26,
+    CLAYVM_OP_THROW = 27,
+    CLAYVM_OP_COUNT = 28
 } clayvm_opcode_t;
 
 static const char *clayvm_opcode_names[] = {
@@ -86,9 +83,6 @@ static const char *clayvm_opcode_names[] = {
     "HALT",
     "GET_LOCAL",
     "SET_LOCAL",
-    "GET_UPVALUE",
-    "SET_UPVALUE",
-    "CLOSE_UPVALUE",
     "TRY_BEGIN",
     "TRY_END",
     "CATCH",
@@ -120,9 +114,6 @@ static const int clayvm_operand_counts[] = {
     0,  /* HALT */
     1,  /* GET_LOCAL */
     1,  /* SET_LOCAL */
-    1,  /* GET_UPVALUE */
-    1,  /* SET_UPVALUE */
-    1,  /* CLOSE_UPVALUE */
     1,  /* TRY_BEGIN */
     0,  /* TRY_END */
     0,  /* CATCH */
@@ -155,9 +146,6 @@ static const int clayvm_instruction_sizes[] = {
     1,  /* HALT */
     3,  /* GET_LOCAL */
     3,  /* SET_LOCAL */
-    3,  /* GET_UPVALUE */
-    3,  /* SET_UPVALUE */
-    3,  /* CLOSE_UPVALUE */
     3,  /* TRY_BEGIN */
     1,  /* TRY_END */
     1,  /* CATCH */
@@ -253,11 +241,6 @@ int  clayvm_native_call(clayvm_native_table_t *table, int index,
 #include <stdint.h>
 #include <stddef.h>
 
-struct clayvm_upvalue;
-typedef struct clayvm_upvalue clayvm_upvalue_t;
-struct clayvm_closure;
-typedef struct clayvm_closure clayvm_closure_t;
-
 typedef enum {
     CLAYVM_VAL_NIL,
     CLAYVM_VAL_INT64,
@@ -347,8 +330,6 @@ typedef struct clayvm_vm {
     clayvm_native_table_t natives;
     void * globals; /* HashTable* for REPL variable persistence */
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
-    clayvm_upvalue_t * open_upvalues; /* Head of open upvalue linked list */
-    clayvm_closure_t * current_closure; /* Currently executing closure */
     void (*cleanup)(struct clayvm_vm *vm);
 } clayvm_vm_t;
 
@@ -1097,50 +1078,6 @@ int handle_SET_LOCAL(clayvm_vm_t *vm) {
     return 0;
 }
 
-int handle_GET_UPVALUE(clayvm_vm_t *vm) {
-    uint16_t index = READ_UINT16();
-    if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
-        clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
-        if (uv) {
-            clayvm_vm_push(vm, *uv->location);
-        } else {
-            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-        }
-    } else {
-        clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-    }
-    return 0;
-}
-
-int handle_SET_UPVALUE(clayvm_vm_t *vm) {
-    uint16_t index = READ_UINT16();
-    if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
-        clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
-        if (uv) {
-            *uv->location = vm->stack[vm->sp - 1];
-        }
-    }
-    return 0;
-}
-
-int handle_CLOSE_UPVALUE(clayvm_vm_t *vm) {
-    uint16_t slot = READ_UINT16();
-    {
-        clayvm_upvalue_t **prev = &vm->open_upvalues;
-        clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
-        while (*prev) {
-            clayvm_upvalue_t *uv = *prev;
-            if (uv->location >= slot_ptr) {
-                clayvm_close_upvalue(uv);
-                *prev = uv->next;
-            } else {
-                prev = &uv->next;
-            }
-        }
-    }
-    return 0;
-}
-
 int handle_TRY_BEGIN(clayvm_vm_t *vm) {
     int16_t handler_offset = READ_INT16();
     /* push exception frame */
@@ -1204,9 +1141,6 @@ clayvm_handler_t clayvm_dispatch_table[] = {
     handle_HALT,
     handle_GET_LOCAL,
     handle_SET_LOCAL,
-    handle_GET_UPVALUE,
-    handle_SET_UPVALUE,
-    handle_CLOSE_UPVALUE,
     handle_TRY_BEGIN,
     handle_TRY_END,
     handle_CATCH,
@@ -1246,9 +1180,6 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         &&op_HALT,
         &&op_GET_LOCAL,
         &&op_SET_LOCAL,
-        &&op_GET_UPVALUE,
-        &&op_SET_UPVALUE,
-        &&op_CLOSE_UPVALUE,
         &&op_TRY_BEGIN,
         &&op_TRY_END,
         &&op_CATCH,
@@ -1618,59 +1549,6 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         DISPATCH();
     }
 
-    op_GET_UPVALUE: {
-        if (vm->trace_enabled) {
-            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
-        }
-        uint16_t index = READ_UINT16();
-        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
-            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
-            if (uv) {
-                clayvm_vm_push(vm, *uv->location);
-            } else {
-                clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-            }
-        } else {
-            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-        }
-        DISPATCH();
-    }
-
-    op_SET_UPVALUE: {
-        if (vm->trace_enabled) {
-            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
-        }
-        uint16_t index = READ_UINT16();
-        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
-            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
-            if (uv) {
-                *uv->location = vm->stack[vm->sp - 1];
-            }
-        }
-        DISPATCH();
-    }
-
-    op_CLOSE_UPVALUE: {
-        if (vm->trace_enabled) {
-            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
-        }
-        uint16_t slot = READ_UINT16();
-        {
-            clayvm_upvalue_t **prev = &vm->open_upvalues;
-            clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
-            while (*prev) {
-                clayvm_upvalue_t *uv = *prev;
-                if (uv->location >= slot_ptr) {
-                    clayvm_close_upvalue(uv);
-                    *prev = uv->next;
-                } else {
-                    prev = &uv->next;
-                }
-            }
-        }
-        DISPATCH();
-    }
-
     op_TRY_BEGIN: {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
@@ -2010,47 +1888,6 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
         break;
     }
-    case CLAYVM_OP_GET_UPVALUE: {
-        uint16_t index = READ_UINT16();
-        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
-            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
-            if (uv) {
-                clayvm_vm_push(vm, *uv->location);
-            } else {
-                clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-            }
-        } else {
-            clayvm_vm_push(vm, CLAYVM_NIL_VAL);
-        }
-        break;
-    }
-    case CLAYVM_OP_SET_UPVALUE: {
-        uint16_t index = READ_UINT16();
-        if (vm->current_closure && index < (uint16_t)vm->current_closure->upvalue_count) {
-            clayvm_upvalue_t *uv = vm->current_closure->upvalues[index];
-            if (uv) {
-                *uv->location = vm->stack[vm->sp - 1];
-            }
-        }
-        break;
-    }
-    case CLAYVM_OP_CLOSE_UPVALUE: {
-        uint16_t slot = READ_UINT16();
-        {
-            clayvm_upvalue_t **prev = &vm->open_upvalues;
-            clayvm_value_t *slot_ptr = &vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
-            while (*prev) {
-                clayvm_upvalue_t *uv = *prev;
-                if (uv->location >= slot_ptr) {
-                    clayvm_close_upvalue(uv);
-                    *prev = uv->next;
-                } else {
-                    prev = &uv->next;
-                }
-            }
-        }
-        break;
-    }
     case CLAYVM_OP_TRY_BEGIN: {
         int16_t handler_offset = (int16_t)READ_UINT16();
         /* push exception frame */
@@ -2222,15 +2059,6 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
     } else if (strcmp(mnemonic, "SET_LOCAL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL);
         { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-    } else if (strcmp(mnemonic, "GET_UPVALUE") == 0) {
-        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_UPVALUE);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-    } else if (strcmp(mnemonic, "SET_UPVALUE") == 0) {
-        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_UPVALUE);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-    } else if (strcmp(mnemonic, "CLOSE_UPVALUE") == 0) {
-        clayvm_asm_emit_byte(as, CLAYVM_OP_CLOSE_UPVALUE);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "TRY_BEGIN") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_TRY_BEGIN);
         { int val = 0; sscanf(line, " %d", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
@@ -2373,24 +2201,6 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
         break;
     }
     case CLAYVM_OP_SET_LOCAL:
-    {
-        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
-        printf("%u\n", _op0);
-        break;
-    }
-    case CLAYVM_OP_GET_UPVALUE:
-    {
-        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
-        printf("%u\n", _op0);
-        break;
-    }
-    case CLAYVM_OP_SET_UPVALUE:
-    {
-        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
-        printf("%u\n", _op0);
-        break;
-    }
-    case CLAYVM_OP_CLOSE_UPVALUE:
     {
         uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
         printf("%u\n", _op0);
@@ -2558,27 +2368,6 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         break;
     }
     case CLAYVM_OP_SET_LOCAL:
-    {
-        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", _op0);
-        if (n > 0) written += n;
-        break;
-    }
-    case CLAYVM_OP_GET_UPVALUE:
-    {
-        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", _op0);
-        if (n > 0) written += n;
-        break;
-    }
-    case CLAYVM_OP_SET_UPVALUE:
-    {
-        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
-        n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", _op0);
-        if (n > 0) written += n;
-        break;
-    }
-    case CLAYVM_OP_CLOSE_UPVALUE:
     {
         uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
         n = snprintf(buf + written, buf_size - (size_t)written, "%u\n", _op0);
@@ -2968,24 +2757,6 @@ int clayvm_verify(const uint8_t *code, size_t code_len,
             break;
         }
         case CLAYVM_OP_SET_LOCAL: {
-            uint16_t slot = (uint16_t)(code[instr_start + 1] |
-                          (code[instr_start + 2] << 8));
-            (void)slot;
-            break;
-        }
-        case CLAYVM_OP_GET_UPVALUE: {
-            uint16_t index = (uint16_t)(code[instr_start + 1] |
-                          (code[instr_start + 2] << 8));
-            (void)index;
-            break;
-        }
-        case CLAYVM_OP_SET_UPVALUE: {
-            uint16_t index = (uint16_t)(code[instr_start + 1] |
-                          (code[instr_start + 2] << 8));
-            (void)index;
-            break;
-        }
-        case CLAYVM_OP_CLOSE_UPVALUE: {
             uint16_t slot = (uint16_t)(code[instr_start + 1] |
                           (code[instr_start + 2] << 8));
             (void)slot;

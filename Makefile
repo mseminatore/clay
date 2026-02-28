@@ -32,7 +32,7 @@ RUNTIME_OBJS = $(RUNTIME_SRCS:.c=.o)
 
 VM_SRCS = src/vm/generated/vm.c src/vm/generated/native.c \
           src/vm/generated/assembler.c src/vm/generated/disasm.c \
-          src/vm/generated/strings.c src/vm/generated/closures.c \
+          src/vm/generated/strings.c \
           src/vm/generated/bytecode.c src/vm/generated/verify.c \
           src/vm/generated/optimizer.c
 VM_OBJS = $(VM_SRCS:.c=.o)

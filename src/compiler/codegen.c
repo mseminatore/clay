@@ -846,6 +846,11 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
     free(param_names);
 
     collect_method_with_captures(fname, NULL, node, &caps);
+    /* Propagate known slots from enclosing method to block */
+    if (cg->in_method && cg->known_slots) {
+        collected_methods->clone_slots = cg->known_slots;
+        collected_methods->clone_slot_count = cg->known_slot_count;
+    }
 
     char *t = temp_name(cg);
 
@@ -1075,12 +1080,12 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
             char *val = emit_expr(cg, node->as.return_stmt.expr);
             if (val) {
                 emit_indent(cg);
-                fprintf(cg->out, "_result = %s;\n", val);
+                fprintf(cg->out, "__rv = %s;\n", val);
                 free(val);
             }
         }
         emit_indent(cg);
-        fprintf(cg->out, "return _result;\n");
+        fprintf(cg->out, "return __rv;\n");
         return;
     }
 
@@ -1243,7 +1248,7 @@ static void emit_method_bodies(CodeGen *cg) {
                     push_local(cg, param->as.ident.name);
                 }
             }
-            fprintf(cg->out, "    ClayValue _result = CLAY_NIL;\n");
+            fprintf(cg->out, "    ClayValue __rv = CLAY_NIL;\n");
             int saved_indent = cg->indent;
             cg->indent = 1;
             for (int i = 0; i < node->as.method_def.body.count; i++) {
@@ -1267,7 +1272,7 @@ static void emit_method_bodies(CodeGen *cg) {
                             fprintf(cg->out, "ClayValue %s = %s;\n", c_safe_name(stmt->as.assign.name), val);
                             push_local(cg, stmt->as.assign.name);
                         }
-                        fprintf(cg->out, "    _result = %s;\n", val);
+                        fprintf(cg->out, "    __rv = %s;\n", val);
                         free(val);
                     }
                 } else if (stmt->type == NODE_SLOT_ASSIGN ||
@@ -1279,13 +1284,13 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt);
                     if (val) {
                         emit_indent(cg);
-                        fprintf(cg->out, "_result = %s;\n", val);
+                        fprintf(cg->out, "__rv = %s;\n", val);
                         free(val);
                     }
                 }
             }
             cg->indent = saved_indent;
-            fprintf(cg->out, "    return _result;\n");
+            fprintf(cg->out, "    return __rv;\n");
         } else if (node->type == NODE_BLOCK) {
             /* Declare captured variables from env as cell pointers */
             int saved_boxed_count = cg->boxed_count;
@@ -1302,7 +1307,7 @@ static void emit_method_bodies(CodeGen *cg) {
                         c_safe_name(param->as.ident.name), i, i);
                 push_local(cg, param->as.ident.name);
             }
-            fprintf(cg->out, "    ClayValue _result = CLAY_NIL;\n");
+            fprintf(cg->out, "    ClayValue __rv = CLAY_NIL;\n");
             int saved_indent = cg->indent;
             cg->indent = 1;
             for (int i = 0; i < node->as.block.body.count; i++) {
@@ -1311,7 +1316,16 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt->as.assign.value);
                     if (val) {
                         emit_indent(cg);
-                        if (is_boxed(cg, stmt->as.assign.name)) {
+                        if (is_known_slot(cg, stmt->as.assign.name)) {
+                            /* Slot write from block inside method — use _method_self */
+                            if (is_boxed(cg, "_method_self")) {
+                                fprintf(cg->out, "clay_set_slot(CLAY_OBJ(_method_self_cell->value), \"%s\", %s);\n",
+                                        stmt->as.assign.name, val);
+                            } else {
+                                fprintf(cg->out, "clay_set_slot(self, \"%s\", %s);\n",
+                                        stmt->as.assign.name, val);
+                            }
+                        } else if (is_boxed(cg, stmt->as.assign.name)) {
                             fprintf(cg->out, "%s_cell->value = %s;\n", c_safe_name(stmt->as.assign.name), val);
                         } else if (is_local(cg, stmt->as.assign.name)) {
                             fprintf(cg->out, "%s = %s;\n", c_safe_name(stmt->as.assign.name), val);
@@ -1319,7 +1333,7 @@ static void emit_method_bodies(CodeGen *cg) {
                             fprintf(cg->out, "ClayValue %s = %s;\n", c_safe_name(stmt->as.assign.name), val);
                             push_local(cg, stmt->as.assign.name);
                         }
-                        fprintf(cg->out, "    _result = %s;\n", val);
+                        fprintf(cg->out, "    __rv = %s;\n", val);
                         free(val);
                     }
                 } else if (stmt->type == NODE_SLOT_ASSIGN ||
@@ -1331,13 +1345,13 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt);
                     if (val) {
                         emit_indent(cg);
-                        fprintf(cg->out, "_result = %s;\n", val);
+                        fprintf(cg->out, "__rv = %s;\n", val);
                         free(val);
                     }
                 }
             }
             cg->indent = saved_indent;
-            fprintf(cg->out, "    return _result;\n");
+            fprintf(cg->out, "    return __rv;\n");
 
             /* Clear boxed state for this block scope */
             while (cg->boxed_count > saved_boxed_count) {

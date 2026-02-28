@@ -29,8 +29,10 @@ output = result get("output")
 // get array of positional arguments (markdown file paths)
 arr = result get("_positional")
 
+// validate that at least one markdown file path is provided
 (arr length == 0) ifTrue {
     Cli error("No markdown files provided. Please specify at least one file path.") println
+    parser usage
     System exit(1)
 }
 
