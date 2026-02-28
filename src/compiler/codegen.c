@@ -90,6 +90,31 @@ static const char *op_func_suffix(const char *op) {
     return "op";
 }
 
+/* Sanitize Clay identifiers that clash with C keywords */
+static const char *c_safe_name(const char *name) {
+    static const char *c_keywords[] = {
+        "auto", "break", "case", "char", "const", "continue", "default",
+        "do", "double", "else", "enum", "extern", "float", "for", "goto",
+        "if", "int", "long", "register", "return", "short", "signed",
+        "sizeof", "static", "struct", "switch", "typedef", "union",
+        "unsigned", "void", "volatile", "while",
+        /* C99 */
+        "inline", "restrict", "_Bool", "_Complex", "_Imaginary",
+        /* Common MSVC/GCC extensions */
+        "bool", "true", "false", NULL
+    };
+    for (int i = 0; c_keywords[i]; i++) {
+        if (strcmp(name, c_keywords[i]) == 0) {
+            /* Return a prefixed name — caller must free if needed.
+             * We use a static buffer since codegen runs single-threaded. */
+            static char buf[128];
+            snprintf(buf, sizeof(buf), "_cv_%s", name);
+            return buf;
+        }
+    }
+    return name;
+}
+
 /* --- Forward declarations for collecting methods/blocks --- */
 
 /* Capture list for blocks (closure-captured variables) */
@@ -443,6 +468,10 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             /* If it's a local in the enclosing scope, it needs capture */
             if (is_local(cg, name)) {
                 capture_add(caps, name);
+            } else if (is_local(cg, "_method_self") && !capture_has(caps, "_method_self")) {
+                /* Not a local — in a method context this will be a slot read
+                 * from the method's self, so capture _method_self */
+                capture_add(caps, "_method_self");
             }
             break;
         }
@@ -547,12 +576,18 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
     if (is_builtin_global(node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s;\n", t, builtin_c_expr(node->as.ident.name));
     } else if (is_boxed(cg, node->as.ident.name)) {
-        fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, node->as.ident.name);
+        fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, c_safe_name(node->as.ident.name));
     } else if (cg->in_method && !is_local(cg, node->as.ident.name)) {
-        fprintf(cg->out, "ClayValue %s = clay_get_slot(self, \"%s\");\n",
-                t, node->as.ident.name);
+        if (is_boxed(cg, "_method_self")) {
+            /* Inside a block within a method — use the captured method self */
+            fprintf(cg->out, "ClayValue %s = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"%s\");\n",
+                    t, node->as.ident.name);
+        } else {
+            fprintf(cg->out, "ClayValue %s = clay_get_slot(self, \"%s\");\n",
+                    t, node->as.ident.name);
+        }
     } else {
-        fprintf(cg->out, "ClayValue %s = %s;\n", t, node->as.ident.name);
+        fprintf(cg->out, "ClayValue %s = %s;\n", t, c_safe_name(node->as.ident.name));
     }
     return t;
 }
@@ -826,7 +861,7 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
                     /* Capture the method's self (ClayObject* → ClayValue) */
                     fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(CLAY_VAL(self));\n", name);
                 } else {
-                    fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(%s);\n", name, name);
+                    fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(%s);\n", c_safe_name(name), c_safe_name(name));
                 }
                 push_boxed(cg, name);
             }
@@ -836,7 +871,7 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
         fprintf(cg->out, "ClayValue %s_env[] = {", t);
         for (int i = 0; i < md->captures.count; i++) {
             if (i > 0) fprintf(cg->out, ", ");
-            fprintf(cg->out, "(ClayValue)(uintptr_t)%s_cell", md->captures.names[i]);
+            fprintf(cg->out, "(ClayValue)(uintptr_t)%s_cell", c_safe_name(md->captures.names[i]));
         }
         fprintf(cg->out, "};\n");
         emit_indent(cg);
@@ -1013,9 +1048,9 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
         if (!val) return;
         emit_indent(cg);
         if (is_boxed(cg, node->as.assign.name)) {
-            fprintf(cg->out, "%s_cell->value = %s;\n", node->as.assign.name, val);
+            fprintf(cg->out, "%s_cell->value = %s;\n", c_safe_name(node->as.assign.name), val);
         } else {
-            fprintf(cg->out, "%s = %s;\n", node->as.assign.name, val);
+            fprintf(cg->out, "%s = %s;\n", c_safe_name(node->as.assign.name), val);
         }
         /* Auto-set _name on bare clone: X = Y clone */
         if (node->as.assign.value && node->as.assign.value->type == NODE_SEND &&
@@ -1023,10 +1058,10 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
             emit_indent(cg);
             if (is_boxed(cg, node->as.assign.name)) {
                 fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s_cell->value), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
-                        node->as.assign.name, node->as.assign.name);
+                        c_safe_name(node->as.assign.name), node->as.assign.name);
             } else {
                 fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
-                        node->as.assign.name, node->as.assign.name);
+                        c_safe_name(node->as.assign.name), node->as.assign.name);
             }
         }
         free(val);
@@ -1199,12 +1234,12 @@ static void emit_method_bodies(CodeGen *cg) {
                     const char *pname = param->as.assign.name;
                     char *def_val = emit_expr(cg, param->as.assign.value);
                     fprintf(cg->out, "    ClayValue %s = (argc > %d) ? argv[%d] : %s;\n",
-                            pname, i, i, def_val ? def_val : "CLAY_NIL");
+                            c_safe_name(pname), i, i, def_val ? def_val : "CLAY_NIL");
                     push_local(cg, pname);
                     free(def_val);
                 } else {
                     fprintf(cg->out, "    ClayValue %s = (argc > %d) ? argv[%d] : CLAY_NIL;\n",
-                            param->as.ident.name, i, i);
+                            c_safe_name(param->as.ident.name), i, i);
                     push_local(cg, param->as.ident.name);
                 }
             }
@@ -1218,10 +1253,10 @@ static void emit_method_bodies(CodeGen *cg) {
                     if (val) {
                         emit_indent(cg);
                         if (is_boxed(cg, stmt->as.assign.name)) {
-                            fprintf(cg->out, "%s_cell->value = %s;\n", stmt->as.assign.name, val);
+                            fprintf(cg->out, "%s_cell->value = %s;\n", c_safe_name(stmt->as.assign.name), val);
                         } else if (is_method_local(cg, stmt->as.assign.name)) {
                             /* Reassignment to existing method local */
-                            fprintf(cg->out, "%s = %s;\n", stmt->as.assign.name, val);
+                            fprintf(cg->out, "%s = %s;\n", c_safe_name(stmt->as.assign.name), val);
                         } else if (is_known_slot(cg, stmt->as.assign.name) &&
                                    !is_local(cg, stmt->as.assign.name)) {
                             /* Known slot from enclosing clone → write to self */
@@ -1229,7 +1264,7 @@ static void emit_method_bodies(CodeGen *cg) {
                                     stmt->as.assign.name, val);
                         } else {
                             /* New method-local variable */
-                            fprintf(cg->out, "ClayValue %s = %s;\n", stmt->as.assign.name, val);
+                            fprintf(cg->out, "ClayValue %s = %s;\n", c_safe_name(stmt->as.assign.name), val);
                             push_local(cg, stmt->as.assign.name);
                         }
                         fprintf(cg->out, "    _result = %s;\n", val);
@@ -1256,7 +1291,7 @@ static void emit_method_bodies(CodeGen *cg) {
             int saved_boxed_count = cg->boxed_count;
             for (int i = 0; i < cur->captures.count; i++) {
                 fprintf(cg->out, "    ClayCell *%s_cell = (ClayCell *)(uintptr_t)self->as.block.env[%d];\n",
-                        cur->captures.names[i], i);
+                        c_safe_name(cur->captures.names[i]), i);
                 push_local(cg, cur->captures.names[i]);
                 push_boxed(cg, cur->captures.names[i]);
             }
@@ -1264,7 +1299,7 @@ static void emit_method_bodies(CodeGen *cg) {
             for (int i = 0; i < node->as.block.params.count; i++) {
                 AstNode *param = node->as.block.params.items[i];
                 fprintf(cg->out, "    ClayValue %s = (argc > %d) ? argv[%d] : CLAY_NIL;\n",
-                        param->as.ident.name, i, i);
+                        c_safe_name(param->as.ident.name), i, i);
                 push_local(cg, param->as.ident.name);
             }
             fprintf(cg->out, "    ClayValue _result = CLAY_NIL;\n");
@@ -1277,9 +1312,11 @@ static void emit_method_bodies(CodeGen *cg) {
                     if (val) {
                         emit_indent(cg);
                         if (is_boxed(cg, stmt->as.assign.name)) {
-                            fprintf(cg->out, "%s_cell->value = %s;\n", stmt->as.assign.name, val);
+                            fprintf(cg->out, "%s_cell->value = %s;\n", c_safe_name(stmt->as.assign.name), val);
+                        } else if (is_local(cg, stmt->as.assign.name)) {
+                            fprintf(cg->out, "%s = %s;\n", c_safe_name(stmt->as.assign.name), val);
                         } else {
-                            fprintf(cg->out, "ClayValue %s = %s;\n", stmt->as.assign.name, val);
+                            fprintf(cg->out, "ClayValue %s = %s;\n", c_safe_name(stmt->as.assign.name), val);
                             push_local(cg, stmt->as.assign.name);
                         }
                         fprintf(cg->out, "    _result = %s;\n", val);
@@ -1358,7 +1395,9 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->known_slot_count = 0;
 }
 
-/* First pass: collect all variable names from assignments for declaration */
+/* First pass: collect all variable names from assignments and emit as file-scoped statics.
+ * This ensures module-level variables are accessible from static method functions
+ * that capture them via closures. */
 static void collect_vars(AstNode *program, FILE *out) {
     const char *declared[256];
     int decl_count = 0;
@@ -1372,7 +1411,7 @@ static void collect_vars(AstNode *program, FILE *out) {
             }
             if (!found && decl_count < 256) {
                 declared[decl_count++] = stmt->as.assign.name;
-                fprintf(out, "    ClayValue %s = CLAY_NIL;\n", stmt->as.assign.name);
+                fprintf(out, "static ClayValue %s = CLAY_NIL;\n", c_safe_name(stmt->as.assign.name));
             }
         }
     }
@@ -1435,16 +1474,22 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
     }
     fprintf(cg->out, "\n");
 
+    /* Emit file-scoped top-level variables (before method bodies so they're visible) */
+    collect_vars(program, cg->out);
+    fprintf(cg->out, "\n");
+
+    /* Clear boxed state from main body emission before emitting method bodies.
+     * Main body may have boxed variables (e.g., 'output', 'Cli') that should not
+     * leak into unrelated method body scopes. */
+    clear_boxed(cg);
+
     /* Emit method/block bodies */
     emit_method_bodies(cg);
 
     /* Emit main function */
-    fprintf(cg->out, "\nint main(void) {\n");
-    fprintf(cg->out, "    clay_bootstrap();\n\n");
-
-    /* Declare all top-level variables */
-    collect_vars(program, cg->out);
-    fprintf(cg->out, "\n");
+    fprintf(cg->out, "\nint main(int argc, char **argv) {\n");
+    fprintf(cg->out, "    clay_bootstrap();\n");
+    fprintf(cg->out, "    clay_set_args(argc - 1, argv + 1);\n\n");
 
     /* Read back the main code buffer from temp file */
     rewind(main_stream);
