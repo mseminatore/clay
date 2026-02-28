@@ -744,7 +744,7 @@ Fix all refcount bugs, then add `--mem-stats` flag for leak detection.
 
 4. **add-mem-stats** — Add global allocation/deallocation counters in memory.c. Add `--mem-stats` CLI flag that prints object stats on REPL exit.
 
-## Phase 19: Cross-Platform CI
+## Phase 19: Cross-Platform CI ✅
 
 ### Problem
 Clay is developed on Windows but the codebase targets cross-platform (C99, CMake, `#ifdef _WIN32` paths). There is no automated CI to catch platform-specific build failures or test regressions. Breakage on Linux/macOS could go unnoticed.
@@ -916,7 +916,7 @@ Compound assignment is syntactic sugar. `a += b` desugars to `a = a + b` at the 
 - **Precedence** — compound assignment has the same precedence as regular assignment (lowest).
 - **Chaining** — `a += b += c` is not supported (assignment doesn't return a value in statement position). Keep it simple.
 
-## Phase 22: Implicit Self Slot Resolution
+## Phase 22: Implicit Self Slot Resolution ✅
 
 **Goal:** Reconcile a behavioral difference between the C codegen and VM bytecode backends. In C codegen, bare identifiers inside methods fall back to `clay_get_slot(self, "x")` when not found as locals — effectively providing implicit `self`. In the VM backend, bare identifiers fall back to global lookup instead, so `self` must be explicit.
 
@@ -954,7 +954,7 @@ This matches the C codegen behavior and makes Clay feel more natural — you don
 - **No ambiguity** — the lookup order is deterministic: local → upvalue → self slot (in method) → global (outside method).
 - **Write requires explicit self** — `x = 5` inside a method is a local variable assignment, not `self x = 5`. Slot writes always require explicit `self x = expr` to avoid confusion.
 
-## Phase 23: True Lua-Style Upvalues & Closure Memory Fixes
+## Phase 23: True Lua-Style Upvalues & Closure Memory Fixes ✅
 
 **Goal:** Replace the VM's capture-by-value-with-write-back approach with true Lua-style by-reference upvalues, fix cell memory leaks in the C codegen path, and verify the closures.clay test program runs correctly.
 
