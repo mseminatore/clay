@@ -89,7 +89,7 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
         sep = strrchr(exe_path, '\\');
         if (!sep) sep = strrchr(exe_path, '/');
         if (sep) {
-            if (strcmp(sep + 1, "Debug") == 0 || strcmp(sep + 1, "Release") == 0) {
+            if (_stricmp(sep + 1, "Debug") == 0 || _stricmp(sep + 1, "Release") == 0) {
                 *sep = '\0';
                 sep = strrchr(exe_path, '\\');
                 if (!sep) sep = strrchr(exe_path, '/');
@@ -128,7 +128,7 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
         /* Check if parent is "Debug" or "Release" (multi-config) */
         sep = strrchr(exe_path, '/');
         if (sep) {
-            if (strcmp(sep + 1, "Debug") == 0 || strcmp(sep + 1, "Release") == 0) {
+            if (strcasecmp(sep + 1, "Debug") == 0 || strcasecmp(sep + 1, "Release") == 0) {
                 *sep = '\0';
                 sep = strrchr(exe_path, '/');
             }
@@ -143,7 +143,7 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
 /* Compile a C file to an executable. Returns 0 on success. */
 static int compile_c_file(const char *c_file, const char *output_name,
                           const char *clay_dir, int quiet) {
-    char cmd[4096];
+    char cmd[8192];
 #ifdef _WIN32
     {
         char vs_path[512] = "";
@@ -171,7 +171,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         snprintf(cmd, sizeof(cmd),
             "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
             "cl /nologo %s /O2 /GF "
-            "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" "
+            "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" /I\"%s\\deps\\sqlite\" "
             "/D_CRT_SECURE_NO_WARNINGS "
             "/Fo\"%%TEMP%%\\\\\" "
             "\"%s\" "
@@ -185,26 +185,39 @@ static int compile_c_file(const char *c_file, const char *output_name,
             "\"%s\\src\\runtime\\array.c\" "
             "\"%s\\src\\runtime\\error.c\" "
             "\"%s\\src\\runtime\\clay_dict.c\" "
+            "\"%s\\src\\runtime\\range.c\" "
             "\"%s\\src\\runtime\\bootstrap.c\" "
             "\"%s\\src\\runtime\\math.c\" "
             "\"%s\\src\\runtime\\file.c\" "
+            "\"%s\\src\\runtime\\ffi.c\" "
+            "\"%s\\src\\runtime\\date.c\" "
+            "\"%s\\src\\runtime\\http.c\" "
+            "\"%s\\src\\runtime\\regex.c\" "
+            "\"%s\\src\\runtime\\db.c\" "
             "\"%s\\src\\runtime\\intern.c\" "
+            "\"%s\\src\\runtime\\fiber_ctx.c\" "
             "\"%s\\deps\\hash\\hash.c\" "
-            "/Fe:\"%s\" %s\"",
+            "\"%s\\deps\\sqlite\\sqlite3.c\" "
+            "/Fe:\"%s\" "
+            "winhttp.lib ws2_32.lib "
+            "%s\"",
             vs_path,
             quiet ? "/W0" : "/W3",
-            clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir,
             c_file,
             clay_dir, clay_dir, clay_dir, clay_dir,
             clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir, clay_dir,
+            clay_dir, clay_dir, clay_dir,
             output_name,
             quiet ? ">nul 2>&1" : "");
     }
 #else
     snprintf(cmd, sizeof(cmd),
         "cc -std=c99 -O2 %s "
-        "-I\"%s/src/runtime\" -I\"%s/deps/hash\" "
+        "-I\"%s/src/runtime\" -I\"%s/deps/hash\" -I\"%s/deps/sqlite\" "
         "\"%s\" "
         "\"%s/src/runtime/object.c\" "
         "\"%s/src/runtime/memory.c\" "
@@ -216,18 +229,36 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "\"%s/src/runtime/array.c\" "
         "\"%s/src/runtime/error.c\" "
         "\"%s/src/runtime/clay_dict.c\" "
+        "\"%s/src/runtime/range.c\" "
         "\"%s/src/runtime/bootstrap.c\" "
         "\"%s/src/runtime/math.c\" "
         "\"%s/src/runtime/file.c\" "
+        "\"%s/src/runtime/ffi.c\" "
+        "\"%s/src/runtime/date.c\" "
+        "\"%s/src/runtime/http.c\" "
+        "\"%s/src/runtime/regex.c\" "
+        "\"%s/src/runtime/db.c\" "
         "\"%s/src/runtime/intern.c\" "
+        "\"%s/src/runtime/fiber_ctx.c\" "
+#if defined(__x86_64__) || defined(_M_X64)
+        "\"%s/src/runtime/fiber_amd64.S\" "
+#elif defined(__aarch64__)
+        "\"%s/src/runtime/fiber_arm64.S\" "
+#endif
         "\"%s/deps/hash/hash.c\" "
-        "-lm -o \"%s\"",
+        "\"%s/deps/sqlite/sqlite3.c\" "
+        "-lm -ldl -o \"%s\"",
         quiet ? "-w" : "-Wall",
-        clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir,
         c_file,
         clay_dir, clay_dir, clay_dir, clay_dir,
         clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, clay_dir,
+        clay_dir,  /* fiber_ctx.c */
+        clay_dir,  /* fiber asm */
+        clay_dir, clay_dir,
         output_name);
 #endif
     return system(cmd);
