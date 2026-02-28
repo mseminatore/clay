@@ -524,6 +524,12 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
                     is_local(cg, aname)) {
                     capture_add(caps, aname);
                 }
+                /* Slot write in a block inside a method needs _method_self */
+                if (is_known_slot(cg, aname) &&
+                    is_local(cg, "_method_self") &&
+                    !capture_has(caps, "_method_self")) {
+                    capture_add(caps, "_method_self");
+                }
             }
             break;
         case NODE_CLONE:
@@ -573,10 +579,12 @@ static int is_known_slot(CodeGen *cg, const char *name) {
 static char *emit_ident(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
-    if (is_builtin_global(node->as.ident.name)) {
-        fprintf(cg->out, "ClayValue %s = %s;\n", t, builtin_c_expr(node->as.ident.name));
-    } else if (is_boxed(cg, node->as.ident.name)) {
+    if (is_boxed(cg, node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, c_safe_name(node->as.ident.name));
+    } else if (is_local(cg, node->as.ident.name)) {
+        fprintf(cg->out, "ClayValue %s = %s;\n", t, c_safe_name(node->as.ident.name));
+    } else if (is_builtin_global(node->as.ident.name)) {
+        fprintf(cg->out, "ClayValue %s = %s;\n", t, builtin_c_expr(node->as.ident.name));
     } else if (cg->in_method && !is_local(cg, node->as.ident.name)) {
         if (is_boxed(cg, "_method_self")) {
             /* Inside a block within a method — use the captured method self */
@@ -1036,6 +1044,37 @@ static char *emit_expr(CodeGen *cg, AstNode *node) {
         case NODE_DICT_LIT:   return emit_dict_lit(cg, node);
         case NODE_TRY_CATCH:  return emit_try_catch(cg, node);
         case NODE_RAISE:      return emit_raise(cg, node);
+        case NODE_CLONE: {
+            /* Inline clone expression (e.g. Object clone {} inside methods) */
+            char *proto = emit_expr(cg, node->as.clone.proto);
+            if (!proto) return NULL;
+            char *t = temp_name(cg);
+            emit_indent(cg);
+            fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_clone(CLAY_OBJ(%s)));\n", t, proto);
+            free(proto);
+            /* Emit slot/method members on the new clone */
+            for (int i = 0; i < node->as.clone.members.count; i++) {
+                AstNode *member = node->as.clone.members.items[i];
+                if (member->type == NODE_SLOT_DEF) {
+                    char *val = emit_expr(cg, member->as.slot_def.value);
+                    if (val) {
+                        emit_indent(cg);
+                        fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"%s\", %s);\n",
+                                t, member->as.slot_def.name, val);
+                        free(val);
+                    }
+                } else if (member->type == NODE_METHOD_DEF) {
+                    const char *fname = lookup_name(member);
+                    if (fname) {
+                        collect_method(fname, NULL, member);
+                        emit_indent(cg);
+                        fprintf(cg->out, "clay_set_method(CLAY_OBJ(%s), \"%s\", %s);\n",
+                                t, member->as.method_def.name, fname);
+                    }
+                }
+            }
+            return t;
+        }
         default:
             fprintf(stderr, "codegen: unhandled node type %d\n", node->type);
             return NULL;
