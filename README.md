@@ -251,6 +251,27 @@ p x             // => 42
 
 Slot reads walk the prototype chain — if the object doesn't have the slot, its parent is checked, and so on.
 
+### Implicit self in methods
+
+Inside a method body, bare identifiers that aren't local variables automatically resolve to `self` slots. This means you can write:
+
+```clay
+Point = Object clone {
+  x = 0
+  y = 0
+  toString() { "(" + x toString + ", " + y toString + ")" }
+}
+```
+
+The lookup order is: local variable → upvalue (captured variable) → `self` slot → global. Slot *writes* always require explicit `self` to avoid ambiguity with local assignment:
+
+```clay
+Point moveTo(nx, ny) {
+  self x = nx    // explicit self required for writes
+  x              // reads work without self
+}
+```
+
 ### Dynamic Methods
 
 Methods can be added to objects after cloning by assigning a block to a slot. The block is automatically invoked when the slot is accessed via message passing (Io-style):
@@ -334,6 +355,17 @@ greet = { "hello" println }
 greet value
 ```
 
+### Trailing block syntax
+
+When the last argument to a message is a block, you can write it outside the parentheses:
+
+```clay
+arr each { |x| x println }          // instead of arr each({ |x| x println })
+arr map { |x| x * 2 }               // instead of arr map({ |x| x * 2 })
+arr reduce(0) { |acc, x| acc + x }  // block follows the parenthesized args
+(x > 0) ifTrue { "yes" println }    // control flow uses this too
+```
+
 ### Control flow
 
 Booleans are objects. Control flow is message passing with blocks:
@@ -346,11 +378,19 @@ Booleans are objects. Control flow is message passing with blocks:
 (x > 0) ifTrue { "positive" } ifFalse { "non-positive" }
 ```
 
-Blocks capture variables from their enclosing scope (closures):
+Blocks capture variables from their enclosing scope (closures). Captured variables are shared by reference — mutations in one closure are visible to all closures that captured the same variable:
 
 ```clay
 multiplier(factor) {
   { |x| x * factor }   // 'factor' is captured from the method scope
+}
+
+// Shared captures
+makeCounter() {
+  n = 0
+  inc = { n = n + 1; n }
+  dec = { n = n - 1; n }
+  [inc, dec]                // both closures share 'n'
 }
 ```
 
