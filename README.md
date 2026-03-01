@@ -291,12 +291,21 @@ Point = Object clone {
 }
 ```
 
-The lookup order is: local variable → upvalue (captured variable) → `self` slot → global. Slot *writes* always require explicit `self` to avoid ambiguity with local assignment:
+The lookup order is: local variable → upvalue (captured variable) → `self` slot → global. Slot writes also resolve implicitly — if a name matches a slot defined in the enclosing `clone` block, `x = val` writes to the slot (Io-style `updateSlot` semantics):
 
 ```clay
 Point moveTo(nx, ny) {
-  self x = nx    // explicit self required for writes
-  x              // reads work without self
+  x = nx       // writes to slot — no self needed
+  y = ny       // same here
+}
+```
+
+Use explicit `self` when a parameter name shadows a slot name:
+
+```clay
+Point init(x, y) {
+  self x = x   // self needed because parameter 'x' shadows slot 'x'
+  self y = y
 }
 ```
 
