@@ -1165,22 +1165,33 @@ The standard library is available at:
 
 | Sub-brick | Description |
 |-----------|-------------|
-| **clay-test** | Testing framework: `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
-| **clay-collections** | Set, Stack, Queue, Range data structures |
-| **clay-functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
-| **clay-format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
-| **clay-event** | `Emitter` pub/sub pattern: `on`, `off`, `emit`, `once`, `removeAll`, `listenerCount` |
-| **clay-json** | `Json` parse/stringify: recursive-descent parser for JSON strings, `stringify`/`prettyPrint` for serialization |
-| **clay-csv** | `Csv` parse/stringify: `parse` (array of arrays), `parseWithHeader` (array of dicts), `stringify` for CSV generation |
-| **clay-match** | `Match` pattern matching: chainable `when`/`whenType`/`otherwise` with value and predicate matching |
-| **clay-log** | `Log` structured logging: `debug`/`info`/`warn`/`error` levels with timestamps, prefixes, and level filtering |
-| **clay-iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
-| **clay-path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
 | **clay-args** | `ArgParser` CLI parsing: `flag`, `option`, `parse`, `usage` |
-| **clay-template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
+| **clay-base64** | `Base64` encoding/decoding: `encode`, `decode` with standard alphabet and padding |
+| **clay-cache** | `Cache` in-memory LRU/TTL key-value store: `get`, `set`, `has`, `remove`, `clear` |
+| **clay-cli** | ANSI terminal colors and styles for CLI output |
+| **clay-collections** | Set, Stack, Queue, Range data structures |
+| **clay-config** | `Config` INI-style parser: `parse`/`parseFile` into Dict of Dicts, `get` with defaults, `merge` |
+| **clay-csv** | `Csv` parse/stringify: `parse` (array of arrays), `parseWithHeader` (array of dicts), `stringify` for CSV generation |
+| **clay-enum** | `Enum` named constants with integer value mapping |
+| **clay-env** | `Env` environment management: `load` `.env` files, `get` with defaults, `require`, `has` |
+| **clay-event** | `Emitter` pub/sub pattern: `on`, `off`, `emit`, `once`, `removeAll`, `listenerCount` |
+| **clay-format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
+| **clay-functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
 | **clay-http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes with `:param` patterns, `text`/`html`/`json`/`redirect` response helpers |
-| **clay-router** | `Router` URL pattern matching: `add`/`match` with `:param` capture, multi-segment patterns |
+| **clay-iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
+| **clay-json** | `Json` parse/stringify: recursive-descent parser for JSON strings, `stringify`/`prettyPrint` for serialization |
+| **clay-log** | `Log` structured logging: `debug`/`info`/`warn`/`error` levels with timestamps, prefixes, and level filtering |
+| **clay-markdown** | `Markdown` converter: headings, code blocks, tables, lists, blockquotes to HTML |
+| **clay-match** | `Match` pattern matching: chainable `when`/`whenType`/`otherwise` with value and predicate matching |
 | **clay-orm** | `Model` ActiveRecord-style ORM: `define`/`create`/`find`/`all`/`where`/`count`/`update`/`delete` over SQLite |
+| **clay-path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
+| **clay-queue** | `Queue` SQLite-backed persistent job queue with status tracking |
+| **clay-router** | `Router` URL pattern matching: `add`/`match` with `:param` capture, multi-segment patterns |
+| **clay-template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
+| **clay-test** | Testing framework: `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
+| **clay-url** | `Url` parse/build URLs, `encodeComponent`/`decodeComponent`, `parseQuery` for query strings |
+| **clay-uuid** | `Uuid` v4 generation per RFC 4122 |
+| **clay-validate** | Schema validation for Dicts with field rules (required, optional, min, max) |
 
 Install the standard library (includes all sub-bricks):
 
