@@ -34,11 +34,5 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }}
 
-      - name: Install bricks
-        run: |
-          mkdir -p bricks
-          git clone --depth 1 https://github.com/mseminatore/clay-stdlib.git bricks/clay-stdlib
-        shell: bash
-
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -LE bricks

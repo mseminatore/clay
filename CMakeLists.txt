@@ -216,4 +216,5 @@ add_test(NAME clay_test_url COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/te
 add_test(NAME clay_test_config COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_config.clay)
 add_test(NAME clay_test_env COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_env.clay)
 set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_env
-    PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+               LABELS "bricks")
