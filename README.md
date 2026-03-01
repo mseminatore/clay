@@ -28,8 +28,10 @@ clay              # start VM REPL (default)
 | Option | Description |
 |--------|-------------|
 | `-c` | Emit C code only (don't compile to binary) |
-| `-o <name>` | Set output binary name |
+| `--compile` | Compile to native binary via C |
+| `-o <name>` | Set output binary name (implies `--compile`) |
 | `--ast` | Print the AST and exit |
+| `--dap` | Run as a DAP (Debug Adapter Protocol) server |
 | `--vm-repl` | Launch bytecode VM REPL (instant evaluation, default) |
 | `--repl` | Launch classic REPL (compiles to C each input) |
 | `--trace` | VM REPL with bytecode tracing (shows each opcode) |
@@ -134,12 +136,12 @@ The classic REPL (`clay --repl`) accumulates source and recompiles to C on each 
 # Run directly (bytecode VM, default)
 clay hello.clay
 
-# Compile to C and build a native binary
-clay -c hello.clay
+# Compile to native binary
+clay --compile hello.clay
 ./hello
 
-# Inspect the generated C
-clay -c -o hello.c hello.clay
+# Emit C only (inspect the generated code)
+clay -c hello.clay
 cat hello.c
 
 # Dump the AST
@@ -1002,9 +1004,9 @@ db close
 | Prototype | Methods |
 |-----------|---------|
 | Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `getSlot(name)`, `setSlot(name, val)`, `hasMethod(name)`, `setMethod(name, block)`, `doesNotUnderstand(name, args)` |
-| Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
+| Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `abs()`, `toFloat()`, `toInt()`, `toString()`, `println()`, `times(block)` |
 | String | `+`, `==`, `length()`, `at(i)`, `chr(code)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `indexOf(sub)`, `lastIndexOf(sub)`, `repeat(n)`, `padLeft(n, ch)`, `padRight(n, ch)`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
-| Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
+| Array | `at(i)`, `setAt(i, val)`, `append(val)`, `push(val)`, `pop()`, `shift()`, `insert(i, val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `slice(start, end)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue { block }`, `whileFalse { block }` |
 | Boolean | `ifTrue { block }`, `ifFalse { block }`, `not()`, `toString()` |
 | Error | `message()`, `type()`, `line()`, `file()`, `stackTrace()`, `toString()` |
@@ -1019,6 +1021,7 @@ db close
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
 | Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `escape(str)`, `lastInsertId()` |
+| Range | `each(block)`, `map(block)`, `filter(block)`, `contains(val)`, `toArray()`, `size()`, `step(n)`, `reverse()`, `start()`, `end()`, `toString()` |
 
 ## Generated C
 
