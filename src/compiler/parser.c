@@ -850,7 +850,7 @@ static AstNode *parse_statement(Parser *p) {
         return ast_new(NODE_CONTINUE, p->previous.line);
     }
 
-    /* Check for import("path") */
+    /* Check for import("path") [as Name] */
     if (check(p, TOK_IMPORT)) {
         parser_advance(p);
         expect(p, TOK_LPAREN, "Expected '(' after import");
@@ -858,8 +858,15 @@ static AstNode *parse_statement(Parser *p) {
         char *import_path = token_strdup(&p->previous);
         expect(p, TOK_RPAREN, "Expected ')' after import path");
 
+        char *alias = NULL;
+        if (match(p, TOK_AS)) {
+            expect(p, TOK_IDENT, "Expected identifier after 'as'");
+            alias = token_strdup(&p->previous);
+        }
+
         AstNode *node = ast_new(NODE_IMPORT, p->previous.line);
         node->as.import.path = import_path;
+        node->as.import.alias = alias;
         return node;
     }
 
@@ -1086,14 +1093,68 @@ AstNode *parser_parse(Parser *p) {
                 /* Resolve import: parse the file and splice its statements */
                 AstNode *imported = parse_import_file(p, stmt->as.import.path);
                 if (imported && imported->type == NODE_PROGRAM) {
-                    for (int i = 0; i < imported->as.program.stmts.count; i++) {
-                        nodelist_push(&program->as.program.stmts,
-                                      imported->as.program.stmts.items[i]);
+                    if (stmt->as.import.alias) {
+                        /* Namespaced import: import("foo") as Ns
+                         * 1. Execute all imported statements normally (setting globals)
+                         * 2. Create Ns = Object clone {}
+                         * 3. Copy each top-level assignment as a slot: Ns x = x */
+                        int import_line = stmt->line;
+                        char *alias = stmt->as.import.alias;
+
+                        /* Splice all imported statements first (they run normally) */
+                        for (int i = 0; i < imported->as.program.stmts.count; i++) {
+                            nodelist_push(&program->as.program.stmts,
+                                          imported->as.program.stmts.items[i]);
+                        }
+
+                        /* Then create: Alias = Object clone {} */
+                        AstNode *obj_ident = ast_new(NODE_IDENT, import_line);
+                        obj_ident->as.ident.name = strdup("Object");
+                        AstNode *clone = ast_new(NODE_CLONE, import_line);
+                        clone->as.clone.proto = obj_ident;
+                        nodelist_init(&clone->as.clone.members);
+                        AstNode *obj_ident2 = ast_new(NODE_IDENT, import_line);
+                        obj_ident2->as.ident.name = strdup("Object");
+                        AstNode *send = ast_new(NODE_SEND, import_line);
+                        send->as.send.receiver = obj_ident2;
+                        send->as.send.message = strdup("clone");
+                        nodelist_init(&send->as.send.args);
+                        nodelist_push(&send->as.send.args, (AstNode *)clone);
+                        AstNode *ns_assign = ast_new(NODE_ASSIGN, import_line);
+                        ns_assign->as.assign.name = strdup(alias);
+                        ns_assign->as.assign.value = send;
+                        nodelist_push(&program->as.program.stmts, ns_assign);
+
+                        /* Copy each top-level assign as: Alias x = x */
+                        for (int i = 0; i < imported->as.program.stmts.count; i++) {
+                            AstNode *s = imported->as.program.stmts.items[i];
+                            if (s->type == NODE_ASSIGN) {
+                                AstNode *ns_ident = ast_new(NODE_IDENT, s->line);
+                                ns_ident->as.ident.name = strdup(alias);
+                                AstNode *val_ident = ast_new(NODE_IDENT, s->line);
+                                val_ident->as.ident.name = strdup(s->as.assign.name);
+                                AstNode *sa = ast_new(NODE_SLOT_ASSIGN, s->line);
+                                sa->as.slot_assign.receiver = ns_ident;
+                                sa->as.slot_assign.slot_name = strdup(s->as.assign.name);
+                                sa->as.slot_assign.value = val_ident;
+                                nodelist_push(&program->as.program.stmts, sa);
+                            }
+                        }
+
+                        imported->as.program.stmts.items = NULL;
+                        imported->as.program.stmts.count = 0;
+                        ast_free(imported);
+                        stmt->as.import.alias = NULL; /* prevent double free */
+                    } else {
+                        /* Normal import: splice statements directly */
+                        for (int i = 0; i < imported->as.program.stmts.count; i++) {
+                            nodelist_push(&program->as.program.stmts,
+                                          imported->as.program.stmts.items[i]);
+                        }
+                        imported->as.program.stmts.items = NULL;
+                        imported->as.program.stmts.count = 0;
+                        ast_free(imported);
                     }
-                    /* Free the program wrapper but not the statements (they're now ours) */
-                    imported->as.program.stmts.items = NULL;
-                    imported->as.program.stmts.count = 0;
-                    ast_free(imported);
                 }
                 ast_free(stmt); /* free the import node itself */
             } else {

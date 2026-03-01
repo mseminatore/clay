@@ -148,6 +148,7 @@ static TokenType check_keyword(const char *start, int length) {
     if (length == 6 && memcmp(start, "return", 6) == 0) return TOK_RETURN;
     if (length == 5 && memcmp(start, "break", 5) == 0) return TOK_BREAK;
     if (length == 8 && memcmp(start, "continue", 8) == 0) return TOK_CONTINUE;
+    if (length == 2 && memcmp(start, "as", 2) == 0) return TOK_AS;
     return TOK_IDENT;
 }
 

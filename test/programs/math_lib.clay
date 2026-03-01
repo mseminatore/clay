@@ -1,0 +1,6 @@
+// A simple math utility module
+PI = 3.14159
+
+circleArea = { |r| PI * r * r }
+
+double = { |x| x * 2 }

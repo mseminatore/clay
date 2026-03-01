@@ -20,6 +20,7 @@ typedef enum {
     TOK_RETURN,         /* return */
     TOK_BREAK,          /* break */
     TOK_CONTINUE,       /* continue */
+    TOK_AS,             /* as */
 
     /* Punctuation */
     TOK_LPAREN,         /* ( */

@@ -102,7 +102,7 @@ struct AstNode {
         struct { NodeList elements; } array_lit;
 
         /* NODE_IMPORT */
-        struct { char *path; } import;
+        struct { char *path; char *alias; } import;
 
         /* NODE_TRY_CATCH */
         struct {

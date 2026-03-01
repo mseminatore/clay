@@ -142,6 +142,7 @@ void ast_free(AstNode *node) {
             break;
         case NODE_IMPORT:
             free(node->as.import.path);
+            free(node->as.import.alias);
             break;
         case NODE_TRY_CATCH:
             ast_free(node->as.try_catch.try_block);

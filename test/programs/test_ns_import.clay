@@ -1,0 +1,19 @@
+// Test namespaced imports
+import("math_lib.clay") as MathLib
+
+// Access value through namespace
+pi = MathLib PI
+(pi > 3) ifTrue { "PASS: namespaced slot" println } ifFalse { "FAIL: PI" println }
+
+// Invoke block through namespace with args
+result = MathLib double(5)
+(result == 10) ifTrue { "PASS: namespaced block call" println } ifFalse { "FAIL: double(5) got " + result toString println }
+
+// Block that references imported globals
+area = MathLib circleArea(1)
+(area > 3) ifTrue { "PASS: block with closure" println } ifFalse { "FAIL: circleArea got " + area toString println }
+
+// Namespace is independent - mutation doesn't affect global
+MathLib PI = 2.71828
+(MathLib PI > 2.7) ifTrue { "PASS: namespace mutation" println } ifFalse { "FAIL: mutation" println }
+(PI > 3) ifTrue { "PASS: global unaffected" println } ifFalse { "FAIL: global affected" println }
