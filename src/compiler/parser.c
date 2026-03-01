@@ -120,6 +120,25 @@ static void skip_newlines(Parser *p) {
     }
 }
 
+/* Return the operator string if the current token is an overloadable operator,
+ * or NULL if not. Does NOT consume the token. */
+static const char *operator_method_name(Parser *p) {
+    switch (p->current.type) {
+        case TOK_PLUS:       return "+";
+        case TOK_MINUS:      return "-";
+        case TOK_STAR:       return "*";
+        case TOK_SLASH:      return "/";
+        case TOK_PERCENT:    return "%";
+        case TOK_EQUAL:      return "==";
+        case TOK_NOT_EQUAL:  return "!=";
+        case TOK_LESS:       return "<";
+        case TOK_GREATER:    return ">";
+        case TOK_LESS_EQ:    return "<=";
+        case TOK_GREATER_EQ: return ">=";
+        default:             return NULL;
+    }
+}
+
 static char *token_strdup(Token *tok) {
     char *s = (char *)malloc((size_t)tok->length + 1);
     memcpy(s, tok->start, (size_t)tok->length);
@@ -541,13 +560,15 @@ static AstNode *parse_clone_body(Parser *p) {
     skip_newlines(p);
 
     while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
-        if (!check(p, TOK_IDENT)) {
+        /* Accept identifiers or operator tokens as member names */
+        const char *op_name = operator_method_name(p);
+        if (!check(p, TOK_IDENT) && !op_name) {
             parser_error(p, "Expected slot or method name in clone body");
             break;
         }
 
-        parser_advance(p); /* consume the identifier */
-        char *name = token_strdup(&p->previous);
+        parser_advance(p); /* consume the identifier or operator */
+        char *name = op_name ? strdup(op_name) : token_strdup(&p->previous);
         int member_line = p->previous.line;
 
         if (match(p, TOK_ASSIGN)) {

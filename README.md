@@ -180,6 +180,32 @@ Binary operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`) are
 
 Standard math precedence applies.
 
+### Operator overloading
+
+Custom types can define operator methods. Define them inside clone bodies or use `setMethod`:
+
+```clay
+Vec = Object clone {
+  x = 0
+  y = 0
+  init(vx, vy) { self x = vx; self y = vy }
+
+  +(other) { Vec new(x + other x, y + other y) }
+  ==(other) { x == other x && y == other y }
+
+  toString() { "Vec(" + x toString + ", " + y toString + ")" }
+}
+
+v1 = Vec new(1, 2) + Vec new(3, 4)   // Vec(4, 6)
+v1 == Vec new(4, 6)                   // true
+
+// Or use setMethod for external definition
+Vec setMethod("*", { |scalar| Vec new(self x * scalar, self y * scalar) })
+Vec new(2, 3) * 5   // Vec(10, 15)
+```
+
+Overloadable operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`. For built-in numbers, the fast integer/float path is used automatically; the custom method is only called for non-numeric types.
+
 ### Prototypes and cloning
 
 Objects are created by cloning a prototype and defining slots (data) and methods:
@@ -941,7 +967,7 @@ db close
 
 | Prototype | Methods |
 |-----------|---------|
-| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `getSlot(name)`, `hasMethod(name)`, `doesNotUnderstand(name, args)` |
+| Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `getSlot(name)`, `setSlot(name, val)`, `hasMethod(name)`, `setMethod(name, block)`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `toFloat()`, `toInt()`, `toString()`, `println()` |
 | String | `+`, `==`, `length()`, `at(i)`, `chr(code)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `indexOf(sub)`, `lastIndexOf(sub)`, `repeat(n)`, `padLeft(n, ch)`, `padRight(n, ch)`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `append(val)`, `size()`, `length()`, `each(block)`, `map(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |

@@ -219,6 +219,31 @@ static ClayValue object_has_method(ClayObject *self, int argc, ClayValue *argv) 
     return CLAY_BOOL(clay_lookup_method(self, clay_string_data(name_obj)) != NULL);
 }
 
+/* setMethod(name, block): register a block as a proper method.
+ * Uses clay_set_method_ctx so the method takes priority over inherited methods. */
+static ClayValue block_method_trampoline(ClayObject *self, int argc, ClayValue *argv) {
+    /* The block is stored as the method context */
+    ClayObject *block = (ClayObject *)clay_method_context;
+    if (!block || block->type != CLAY_TYPE_BLOCK || !block->as.block.func) return CLAY_NIL;
+    clay_slot_method_self = self;
+    ClayValue result = block->as.block.func(block, argc, argv);
+    clay_slot_method_self = NULL;
+    return result;
+}
+
+static ClayValue object_set_method(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 2 || CLAY_IS_INT(argv[0])) return CLAY_NIL;
+    ClayObject *name_obj = CLAY_OBJ(argv[0]);
+    if (name_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
+    /* Verify second arg is a block */
+    if (CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) return CLAY_NIL;
+    ClayObject *block = CLAY_OBJ(argv[1]);
+    if (block->type != CLAY_TYPE_BLOCK) return CLAY_NIL;
+    clay_retain(block);
+    clay_set_method_ctx(self, clay_string_data(name_obj), block_method_trampoline, block);
+    return argv[1];
+}
+
 static ClayValue object_inspect(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     clay_inspect(self);
@@ -473,6 +498,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Object, "getSlot", object_get_slot);
     clay_set_method(clay_Object, "setSlot", object_set_slot);
     clay_set_method(clay_Object, "hasMethod", object_has_method);
+    clay_set_method(clay_Object, "setMethod", object_set_method);
 
     /* Number prototype */
     clay_Number = clay_object_new();
