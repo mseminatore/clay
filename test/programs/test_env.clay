@@ -1,0 +1,28 @@
+// Test clay-env brick
+import("clay-stdlib/clay-env")
+
+// Test load
+vars = Env load("test/programs/test.env")
+
+(vars get("APP_NAME") == "MyCoolApp") ifTrue { "PASS: APP_NAME" println } ifFalse { ("FAIL: APP_NAME = " + vars get("APP_NAME")) println }
+(vars get("PORT") == "3000") ifTrue { "PASS: PORT" println } ifFalse { ("FAIL: PORT = " + vars get("PORT")) println }
+(vars get("DEBUG") == "true") ifTrue { "PASS: DEBUG" println } ifFalse { ("FAIL: DEBUG = " + vars get("DEBUG")) println }
+
+// Test quoted value stripping
+(vars get("SECRET") == "my-secret-value") ifTrue { "PASS: double quoted" println } ifFalse { ("FAIL: double quoted = " + vars get("SECRET")) println }
+(vars get("QUOTED_SINGLE") == "single-quoted") ifTrue { "PASS: single quoted" println } ifFalse { ("FAIL: single quoted = " + vars get("QUOTED_SINGLE")) println }
+
+// Test Env get with default
+val = Env get("APP_NAME", "default")
+(val == "MyCoolApp") ifTrue { "PASS: get loaded var" println } ifFalse { ("FAIL: get loaded var = " + val) println }
+
+missing = Env get("NONEXISTENT_VAR_XYZ", "fallback")
+(missing == "fallback") ifTrue { "PASS: get default" println } ifFalse { ("FAIL: get default = " + missing) println }
+
+// Test has
+(Env has("APP_NAME") == true) ifTrue { "PASS: has loaded" println } ifFalse { "FAIL: has loaded" println }
+(Env has("NONEXISTENT_VAR_XYZ") == false) ifTrue { "PASS: has missing" println } ifFalse { "FAIL: has missing" println }
+
+// Test all
+allVars = Env all()
+(allVars has("DB_HOST") == true) ifTrue { "PASS: all has DB_HOST" println } ifFalse { "FAIL: all has DB_HOST" println }

@@ -1,0 +1,58 @@
+// Test clay-config brick
+import("clay-stdlib/clay-config")
+
+// Test parse with INI-style input
+input = "[database]
+host = localhost
+port = 5432
+name = myapp
+
+[server]
+host = 0.0.0.0
+port = 8080
+
+# This is a comment
+; This too
+
+[auth]
+secret = \"my-secret-key\"
+timeout = 3600"
+
+cfg = Config parse(input)
+
+// Test section access
+db = cfg get("database")
+(db get("host") == "localhost") ifTrue { "PASS: db host" println } ifFalse { ("FAIL: db host = " + db get("host")) println }
+(db get("port") == "5432") ifTrue { "PASS: db port" println } ifFalse { ("FAIL: db port = " + db get("port")) println }
+(db get("name") == "myapp") ifTrue { "PASS: db name" println } ifFalse { "FAIL: db name" println }
+
+srv = cfg get("server")
+(srv get("host") == "0.0.0.0") ifTrue { "PASS: server host" println } ifFalse { "FAIL: server host" println }
+(srv get("port") == "8080") ifTrue { "PASS: server port" println } ifFalse { "FAIL: server port" println }
+
+// Test quoted value stripping
+auth = cfg get("auth")
+(auth get("secret") == "my-secret-key") ifTrue { "PASS: quoted value" println } ifFalse { ("FAIL: quoted value = " + auth get("secret")) println }
+(auth get("timeout") == "3600") ifTrue { "PASS: timeout" println } ifFalse { "FAIL: timeout" println }
+
+// Test Config get helper with default
+val = Config get(cfg, "database", "host", "127.0.0.1")
+(val == "localhost") ifTrue { "PASS: get existing" println } ifFalse { "FAIL: get existing" println }
+
+missing = Config get(cfg, "database", "missing_key", "default_val")
+(missing == "default_val") ifTrue { "PASS: get default" println } ifFalse { "FAIL: get default" println }
+
+missing_section = Config get(cfg, "nonexistent", "key", "fallback")
+(missing_section == "fallback") ifTrue { "PASS: get missing section" println } ifFalse { "FAIL: get missing section" println }
+
+// Test sections
+secs = Config sections(cfg)
+(secs length() == 4) ifTrue { "PASS: section count" println } ifFalse { ("FAIL: section count = " + secs length() toString) println }
+
+// Test merge
+override = Config parse("[database]
+host = production.db.com
+")
+merged = Config merge(cfg, override)
+(merged get("database") get("host") == "production.db.com") ifTrue { "PASS: merge override" println } ifFalse { "FAIL: merge override" println }
+(merged get("database") get("port") == "5432") ifTrue { "PASS: merge preserve" println } ifFalse { "FAIL: merge preserve" println }

@@ -211,3 +211,8 @@ add_test(NAME clay_test_enum COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/t
 add_test(NAME clay_test_op_overload COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_op_overload.clay)
 add_test(NAME clay_test_ns_import COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_ns_import.clay)
 add_test(NAME clay_test_destructure COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_destructure.clay)
+add_test(NAME clay_test_base64 COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_base64.clay)
+add_test(NAME clay_test_url COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_url.clay)
+add_test(NAME clay_test_config COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_config.clay)
+add_test(NAME clay_test_env COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_env.clay)
+set_tests_properties(clay_test_env PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

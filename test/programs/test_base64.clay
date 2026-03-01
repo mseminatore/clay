@@ -1,0 +1,36 @@
+// Test clay-base64 brick
+import("clay-stdlib/clay-base64")
+
+// Test encoding
+result = Base64 encode("Hello, World!")
+(result == "SGVsbG8sIFdvcmxkIQ==") ifTrue { "PASS: encode Hello, World!" println } ifFalse { ("FAIL: encode got " + result) println }
+
+// Test decoding
+decoded = Base64 decode("SGVsbG8sIFdvcmxkIQ==")
+(decoded == "Hello, World!") ifTrue { "PASS: decode Hello, World!" println } ifFalse { ("FAIL: decode got " + decoded) println }
+
+// Test roundtrip
+original = "Clay is awesome"
+(Base64 decode(Base64 encode(original)) == original) ifTrue { "PASS: roundtrip" println } ifFalse { "FAIL: roundtrip" println }
+
+// Test empty string
+(Base64 encode("") == "") ifTrue { "PASS: encode empty" println } ifFalse { "FAIL: encode empty" println }
+(Base64 decode("") == "") ifTrue { "PASS: decode empty" println } ifFalse { "FAIL: decode empty" println }
+
+// Test single char (padding)
+r1 = Base64 encode("A")
+(r1 == "QQ==") ifTrue { "PASS: encode A" println } ifFalse { ("FAIL: encode A got " + r1) println }
+
+// Test two chars (padding)
+r2 = Base64 encode("AB")
+(r2 == "QUI=") ifTrue { "PASS: encode AB" println } ifFalse { ("FAIL: encode AB got " + r2) println }
+
+// Test three chars (no padding)
+r3 = Base64 encode("ABC")
+(r3 == "QUJD") ifTrue { "PASS: encode ABC" println } ifFalse { ("FAIL: encode ABC got " + r3) println }
+
+// Test decode single char
+(Base64 decode("QQ==") == "A") ifTrue { "PASS: decode A" println } ifFalse { "FAIL: decode A" println }
+
+// Test decode two chars
+(Base64 decode("QUI=") == "AB") ifTrue { "PASS: decode AB" println } ifFalse { "FAIL: decode AB" println }
