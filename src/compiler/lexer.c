@@ -249,7 +249,7 @@ Token lexer_next(Lexer *lexer) {
             return error_token(lexer, "Unexpected character '&' (did you mean '&&'?)");
         case '?':
             if (match(lexer, '?')) return make_token(lexer, TOK_NULLCOALESCE, start, 2);
-            return error_token(lexer, "Unexpected character '?' (did you mean '??'?)");
+            return error_token(lexer, "Unexpected character '?' (did you mean '?\?'?)");
         default:
             return error_token(lexer, "Unexpected character");
     }

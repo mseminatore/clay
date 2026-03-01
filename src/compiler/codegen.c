@@ -451,6 +451,7 @@ static int name_in_list(const char *name, char **list, int count) {
 
 static void scan_free_vars(AstNode *node, char **block_params, int param_count,
                            CaptureList *caps, CodeGen *cg);
+static int is_known_slot(CodeGen *cg, const char *name);
 
 static void scan_free_vars_list(NodeList *list, char **block_params, int param_count,
                                 CaptureList *caps, CodeGen *cg) {

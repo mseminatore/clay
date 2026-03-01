@@ -1089,7 +1089,8 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
             if (sep) {
                 *sep = '\0';
                 for (int up = 0; up < 3 && ndirs < 8; up++) {
-                    snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "%s/bricks", dir);
+                    snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "%.*s/bricks",
+                             (int)(BRICK_MAX_PATH - 8), dir);
                     sep = strrchr(dir, '/');
                     bsep = strrchr(dir, '\\');
                     if (bsep && (!sep || bsep > sep)) sep = bsep;
@@ -1100,12 +1101,12 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
         }
 
         for (int d = 0; d < ndirs && !resolved; d++) {
-            char manifest_path[BRICK_MAX_PATH];
+            char manifest_path[BRICK_MAX_PATH * 2];
             snprintf(manifest_path, sizeof(manifest_path), "%s/%s/brick.json",
                      try_dirs[d], import_path);
             BrickManifest bm;
             if (brick_parse(manifest_path, &bm) == 0 && bm.main_file[0]) {
-                char brick_main[BRICK_MAX_PATH];
+                char brick_main[BRICK_MAX_PATH * 2];
                 snprintf(brick_main, sizeof(brick_main), "%s/%s/%s",
                          try_dirs[d], import_path, bm.main_file);
                 struct stat st;
@@ -1115,7 +1116,7 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
             }
             /* Fallback: bricks/<path>/src/main.clay */
             if (!resolved) {
-                char fallback[BRICK_MAX_PATH];
+                char fallback[BRICK_MAX_PATH * 2];
                 snprintf(fallback, sizeof(fallback), "%s/%s/src/main.clay",
                          try_dirs[d], import_path);
                 struct stat st;
