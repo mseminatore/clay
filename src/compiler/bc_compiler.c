@@ -1676,6 +1676,14 @@ static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
                 !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
                 bc_add_local(bc, name);
             }
+        } else if (stmt && stmt->type == NODE_DESTRUCTURE) {
+            for (int j = 0; j < stmt->as.destructure.targets.count; j++) {
+                const char *name = stmt->as.destructure.targets.items[j]->as.ident.name;
+                if (!is_builtin_global(name) && !bc_is_user_global(name) &&
+                    !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
+                    bc_add_local(bc, name);
+                }
+            }
         }
     }
 }
@@ -1987,6 +1995,11 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             }
             break;
         }
+
+        /* NODE_DESTRUCTURE is desugared by the parser into NODE_ASSIGN + NODE_SEND
+         * chains, so it should never reach this point. */
+        case NODE_DESTRUCTURE:
+            break;
 
         case NODE_SEND: {
             /* Push receiver */

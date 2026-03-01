@@ -1,0 +1,42 @@
+// Test array destructuring assignment
+
+// Basic destructuring
+arr = [10, 20, 30]
+[a, b, c] = arr
+(a == 10) ifTrue { "PASS: first element" println } ifFalse { "FAIL: a=" + a toString println }
+(b == 20) ifTrue { "PASS: second element" println } ifFalse { "FAIL: b=" + b toString println }
+(c == 30) ifTrue { "PASS: third element" println } ifFalse { "FAIL: c=" + c toString println }
+
+// Destructuring with expression RHS
+[x, y] = [100, 200]
+(x == 100) ifTrue { "PASS: inline array" println } ifFalse { "FAIL: x=" + x toString println }
+(y == 200) ifTrue { "PASS: inline array 2" println } ifFalse { "FAIL: y=" + y toString println }
+
+// Destructuring with mixed types
+[name, age] = ["Alice", 30]
+(name == "Alice") ifTrue { "PASS: string element" println } ifFalse { "FAIL: name=" + name toString println }
+(age == 30) ifTrue { "PASS: int element" println } ifFalse { "FAIL: age=" + age toString println }
+
+// Fewer targets than elements (extra elements ignored)
+[first, second] = [1, 2, 3, 4, 5]
+(first == 1) ifTrue { "PASS: fewer targets" println } ifFalse { "FAIL: first=" + first toString println }
+(second == 2) ifTrue { "PASS: fewer targets 2" println } ifFalse { "FAIL: second=" + second toString println }
+
+// Destructuring return value from method
+Point = Object clone {
+  px = 0
+  py = 0
+  new(ax, ay) { p = Point clone; p px = ax; p py = ay; p }
+  toArray() { [px, py] }
+}
+
+pt = Point new(42, 99)
+[mx, my] = pt toArray
+(mx == 42) ifTrue { "PASS: method return" println } ifFalse { "FAIL: mx=" + mx toString println }
+(my == 99) ifTrue { "PASS: method return 2" println } ifFalse { "FAIL: my=" + my toString println }
+
+// Destructuring inside a block
+swap = { |pair| [sa, sb] = pair; [sb, sa] }
+result = swap value([3, 7])
+(result at(0) == 7) ifTrue { "PASS: block destructure" println } ifFalse { "FAIL: swap[0]=" + result at(0) toString println }
+(result at(1) == 3) ifTrue { "PASS: block destructure 2" println } ifFalse { "FAIL: swap[1]=" + result at(1) toString println }

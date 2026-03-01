@@ -189,6 +189,38 @@ static AstNode *parse_expression(Parser *p);
 static AstNode *parse_statement(Parser *p);
 static AstNode *parse_block(Parser *p);
 
+/* Expand NODE_DESTRUCTURE into multiple assignments.
+ * [a, b] = expr  →  __destr_src = expr; a = __destr_src at(0); b = __destr_src at(1)
+ * Appends the expanded statements to 'list' and frees the original node. */
+static void desugar_destructure(AstNode *stmt, NodeList *list) {
+    int line = stmt->line;
+    /* __destr_src = value */
+    AstNode *tmp = ast_new(NODE_ASSIGN, line);
+    tmp->as.assign.name = strdup("__destr_src");
+    tmp->as.assign.value = stmt->as.destructure.value;
+    stmt->as.destructure.value = NULL;
+    nodelist_push(list, tmp);
+    /* target_i = __destr_src at(i) */
+    for (int i = 0; i < stmt->as.destructure.targets.count; i++) {
+        char *tname = stmt->as.destructure.targets.items[i]->as.ident.name;
+        AstNode *src = ast_new(NODE_IDENT, line);
+        src->as.ident.name = strdup("__destr_src");
+        AstNode *idx = ast_new(NODE_INT_LIT, line);
+        idx->as.int_lit.value = (long)i;
+        AstNode *at = ast_new(NODE_SEND, line);
+        at->as.send.receiver = src;
+        at->as.send.message = strdup("at");
+        at->as.send.is_super = 0;
+        nodelist_init(&at->as.send.args);
+        nodelist_push(&at->as.send.args, idx);
+        AstNode *assign = ast_new(NODE_ASSIGN, line);
+        assign->as.assign.name = strdup(tname);
+        assign->as.assign.value = at;
+        nodelist_push(list, assign);
+    }
+    ast_free(stmt);
+}
+
 /* --- Primary --- */
 
 static AstNode *parse_primary(Parser *p) {
@@ -540,7 +572,13 @@ static AstNode *parse_block(Parser *p) {
     /* Parse body */
     while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
         AstNode *stmt = parse_statement(p);
-        if (stmt) nodelist_push(&node->as.block.body, stmt);
+        if (stmt) {
+            if (stmt->type == NODE_DESTRUCTURE) {
+                desugar_destructure(stmt, &node->as.block.body);
+            } else {
+                nodelist_push(&node->as.block.body, stmt);
+            }
+        }
         skip_newlines(p);
     }
 
@@ -624,7 +662,13 @@ static AstNode *parse_clone_body(Parser *p) {
             skip_newlines(p);
             while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
                 AstNode *stmt = parse_statement(p);
-                if (stmt) nodelist_push(&method->as.method_def.body, stmt);
+                if (stmt) {
+                    if (stmt->type == NODE_DESTRUCTURE) {
+                        desugar_destructure(stmt, &method->as.method_def.body);
+                    } else {
+                        nodelist_push(&method->as.method_def.body, stmt);
+                    }
+                }
                 skip_newlines(p);
             }
             expect(p, TOK_RBRACE, "Expected '}'");
@@ -911,6 +955,47 @@ static AstNode *parse_statement(Parser *p) {
         p->current = saved_current;
     }
 
+    /* Check for destructuring: [a, b, c] = expr */
+    if (check(p, TOK_LBRACKET)) {
+        Lexer saved_lexer = p->lexer;
+        Token saved_current = p->current;
+        int destr_line = p->current.line;
+
+        parser_advance(p); /* consume [ */
+        /* Try parsing comma-separated identifiers */
+        int is_destructure = 0;
+        NodeList targets;
+        nodelist_init(&targets);
+        if (check(p, TOK_IDENT)) {
+            AstNode *t = ast_new(NODE_IDENT, p->current.line);
+            t->as.ident.name = token_strdup(&p->current);
+            nodelist_push(&targets, t);
+            parser_advance(p);
+            while (match(p, TOK_COMMA)) {
+                if (!check(p, TOK_IDENT)) break;
+                AstNode *t2 = ast_new(NODE_IDENT, p->current.line);
+                t2->as.ident.name = token_strdup(&p->current);
+                nodelist_push(&targets, t2);
+                parser_advance(p);
+            }
+            if (match(p, TOK_RBRACKET) && check(p, TOK_ASSIGN)) {
+                is_destructure = 1;
+            }
+        }
+        if (is_destructure) {
+            parser_advance(p); /* consume = */
+            AstNode *node = ast_new(NODE_DESTRUCTURE, destr_line);
+            node->as.destructure.targets = targets;
+            node->as.destructure.value = parse_expression(p);
+            return node;
+        }
+        /* Not destructuring — backtrack and free temp nodes */
+        for (int i = 0; i < targets.count; i++) ast_free(targets.items[i]);
+        free(targets.items);
+        p->lexer = saved_lexer;
+        p->current = saved_current;
+    }
+
     /* Parse as expression, then check for slot assignment pattern:
      * If result is a zero-arg send (e.g. p x) followed by =, it's slot assignment */
     AstNode *expr = parse_expression(p);
@@ -1157,6 +1242,8 @@ AstNode *parser_parse(Parser *p) {
                     }
                 }
                 ast_free(stmt); /* free the import node itself */
+            } else if (stmt->type == NODE_DESTRUCTURE) {
+                desugar_destructure(stmt, &program->as.program.stmts);
             } else {
                 nodelist_push(&program->as.program.stmts, stmt);
             }

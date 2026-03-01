@@ -303,6 +303,9 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             for (int i = 0; i < node->as.dict_lit.values.count; i++)
                 prewalk_assign_names(node->as.dict_lit.values.items[i], parent_name);
             break;
+        case NODE_DESTRUCTURE:
+            prewalk_assign_names(node->as.destructure.value, parent_name);
+            break;
         default:
             break;
     }
@@ -1112,6 +1115,30 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
         return;
     }
 
+    /* Destructuring: [a, b, c] = expr */
+    if (node->type == NODE_DESTRUCTURE) {
+        emit_line(cg, node->line);
+        char *src = emit_expr(cg, node->as.destructure.value);
+        if (!src) return;
+        /* Store source in a temp to avoid re-evaluation */
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue __destr_src = %s;\n", src);
+        for (int i = 0; i < node->as.destructure.targets.count; i++) {
+            const char *tname = node->as.destructure.targets.items[i]->as.ident.name;
+            emit_indent(cg);
+            fprintf(cg->out, "{ ClayValue __idx = CLAY_INT(%d); ", i);
+            if (is_boxed(cg, tname)) {
+                fprintf(cg->out, "%s_cell->value = clay_send_val(__destr_src, \"at\", 1, &__idx); }\n",
+                        c_safe_name(tname));
+            } else {
+                fprintf(cg->out, "%s = clay_send_val(__destr_src, \"at\", 1, &__idx); }\n",
+                        c_safe_name(tname));
+            }
+        }
+        free(src);
+        return;
+    }
+
     /* Return: emit expression and early return from method/block */
     if (node->type == NODE_RETURN) {
         emit_line(cg, node->line);
@@ -1317,7 +1344,8 @@ static void emit_method_bodies(CodeGen *cg) {
                 } else if (stmt->type == NODE_SLOT_ASSIGN ||
                            stmt->type == NODE_RETURN ||
                            stmt->type == NODE_BREAK ||
-                           stmt->type == NODE_CONTINUE) {
+                           stmt->type == NODE_CONTINUE ||
+                           stmt->type == NODE_DESTRUCTURE) {
                     emit_stmt(cg, stmt);
                 } else {
                     char *val = emit_expr(cg, stmt);
@@ -1378,7 +1406,8 @@ static void emit_method_bodies(CodeGen *cg) {
                 } else if (stmt->type == NODE_SLOT_ASSIGN ||
                            stmt->type == NODE_RETURN ||
                            stmt->type == NODE_BREAK ||
-                           stmt->type == NODE_CONTINUE) {
+                           stmt->type == NODE_CONTINUE ||
+                           stmt->type == NODE_DESTRUCTURE) {
                     emit_stmt(cg, stmt);
                 } else {
                     char *val = emit_expr(cg, stmt);
@@ -1466,6 +1495,18 @@ static void collect_vars(AstNode *program, FILE *out) {
                 declared[decl_count++] = stmt->as.assign.name;
                 fprintf(out, "static ClayValue %s = CLAY_NIL;\n", c_safe_name(stmt->as.assign.name));
             }
+        } else if (stmt->type == NODE_DESTRUCTURE) {
+            for (int j = 0; j < stmt->as.destructure.targets.count; j++) {
+                const char *name = stmt->as.destructure.targets.items[j]->as.ident.name;
+                int found = 0;
+                for (int k = 0; k < decl_count; k++) {
+                    if (strcmp(declared[k], name) == 0) { found = 1; break; }
+                }
+                if (!found && decl_count < 256) {
+                    declared[decl_count++] = name;
+                    fprintf(out, "static ClayValue %s = CLAY_NIL;\n", c_safe_name(name));
+                }
+            }
         }
     }
 }
@@ -1482,6 +1523,11 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
         AstNode *stmt = program->as.program.stmts.items[i];
         if (stmt->type == NODE_ASSIGN && !is_local(cg, stmt->as.assign.name)) {
             push_local(cg, stmt->as.assign.name);
+        } else if (stmt->type == NODE_DESTRUCTURE) {
+            for (int j = 0; j < stmt->as.destructure.targets.count; j++) {
+                const char *name = stmt->as.destructure.targets.items[j]->as.ident.name;
+                if (!is_local(cg, name)) push_local(cg, name);
+            }
         }
     }
 

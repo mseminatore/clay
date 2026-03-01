@@ -23,7 +23,8 @@ typedef enum {
     NODE_RETURN,        /* return expr */
     NODE_BREAK,         /* break */
     NODE_CONTINUE,      /* continue */
-    NODE_DICT_LIT       /* #{key: val, ...} */
+    NODE_DICT_LIT,      /* #{key: val, ...} */
+    NODE_DESTRUCTURE    /* [a, b, c] = expr */
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -129,6 +130,12 @@ struct AstNode {
             NodeList keys;    /* list of NODE_STRING_LIT for key names */
             NodeList values;  /* list of expressions for values */
         } dict_lit;
+
+        /* NODE_DESTRUCTURE: [a, b, c] = expr */
+        struct {
+            NodeList targets;   /* list of NODE_IDENT target names */
+            AstNode *value;     /* RHS expression */
+        } destructure;
 
         /* NODE_PROGRAM */
         struct { NodeList stmts; } program;

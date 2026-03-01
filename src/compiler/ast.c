@@ -64,6 +64,10 @@ AstNode *ast_clone(AstNode *node) {
             nodelist_clone(&c->as.dict_lit.keys, &node->as.dict_lit.keys);
             nodelist_clone(&c->as.dict_lit.values, &node->as.dict_lit.values);
             break;
+        case NODE_DESTRUCTURE:
+            nodelist_clone(&c->as.destructure.targets, &node->as.destructure.targets);
+            c->as.destructure.value = ast_clone(node->as.destructure.value);
+            break;
         default:
             /* Remaining node types not expected as compound assignment receivers */
             break;
@@ -163,6 +167,10 @@ void ast_free(AstNode *node) {
         case NODE_DICT_LIT:
             nodelist_free(&node->as.dict_lit.keys);
             nodelist_free(&node->as.dict_lit.values);
+            break;
+        case NODE_DESTRUCTURE:
+            nodelist_free(&node->as.destructure.targets);
+            ast_free(node->as.destructure.value);
             break;
         case NODE_BREAK:
         case NODE_CONTINUE:
@@ -273,6 +281,13 @@ void ast_print(AstNode *node, int indent) {
                 ast_print(node->as.dict_lit.keys.items[i], indent + 1);
                 ast_print(node->as.dict_lit.values.items[i], indent + 2);
             }
+            break;
+        case NODE_DESTRUCTURE:
+            printf("Destructure(targets=%d)\n", node->as.destructure.targets.count);
+            for (int i = 0; i < node->as.destructure.targets.count; i++)
+                ast_print(node->as.destructure.targets.items[i], indent + 1);
+            print_indent(indent + 1); printf("= ");
+            ast_print(node->as.destructure.value, indent + 2);
             break;
         case NODE_PROGRAM:
             printf("Program(stmts=%d)\n", node->as.program.stmts.count);

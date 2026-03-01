@@ -210,3 +210,4 @@ add_test(NAME clay_test_range_slice COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE
 add_test(NAME clay_test_enum COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_enum.clay)
 add_test(NAME clay_test_op_overload COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_op_overload.clay)
 add_test(NAME clay_test_ns_import COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_ns_import.clay)
+add_test(NAME clay_test_destructure COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_destructure.clay)

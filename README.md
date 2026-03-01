@@ -458,6 +458,40 @@ import("my-brick")         // brick import (see Bricks below)
 
 Imports are resolved at parse time. Duplicate imports of the same file are silently skipped. Brick imports (no extension, no path separator) resolve via the `bricks/` directory.
 
+### Namespaced imports
+
+Add `as Name` to scope all imported definitions under a namespace object:
+
+```clay
+import("math.clay") as Math
+
+Math PI println           // access values
+Math circleArea(2)        // call blocks with args
+Math PI = 2.71828         // mutations are local to the namespace
+```
+
+The imported code executes normally (setting globals), then a namespace object is created with copies of each top-level assignment. The namespace is independent — mutating it does not affect the originals.
+
+### Destructuring assignment
+
+Unpack arrays into multiple variables in a single statement:
+
+```clay
+[a, b, c] = [10, 20, 30]
+a println   // 10
+b println   // 20
+
+// Works with any expression that returns an array
+[x, y] = point toArray
+[first, second] = someArray
+
+// Inside blocks and methods too
+swap = { |pair| [a, b] = pair; [b, a] }
+swap value([1, 2])   // [2, 1]
+```
+
+Extra array elements are ignored when there are fewer targets than elements.
+
 ### Unary minus
 
 Negative numbers work naturally:
