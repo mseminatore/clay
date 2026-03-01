@@ -27,6 +27,7 @@ __declspec(dllimport) int __stdcall GetConsoleMode(HANDLE, DWORD *);
 __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
 #else
 #include <unistd.h>
+#include <strings.h>
 #endif
 
 #include "crossline.h"
