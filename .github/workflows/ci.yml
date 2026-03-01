@@ -36,15 +36,9 @@ jobs:
 
       - name: Install bricks
         run: |
-          cmake --build build --config ${{ matrix.build_type }} --target clay_compiler
-          ./build/clay bricks install
+          mkdir -p bricks
+          git clone --depth 1 https://github.com/mseminatore/clay-stdlib.git bricks/clay-stdlib
         shell: bash
-        if: runner.os != 'Windows'
-
-      - name: Install bricks (Windows)
-        run: |
-          ./build/Debug/clay.exe bricks install
-        if: runner.os == 'Windows'
 
       - name: Test
         run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure

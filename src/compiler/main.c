@@ -27,8 +27,19 @@ __declspec(dllimport) int __stdcall GetConsoleMode(HANDLE, DWORD *);
 __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
 #else
 #include <unistd.h>
-#include <strings.h>
 #endif
+
+/* Portable case-insensitive compare (avoids strcasecmp portability issues) */
+static int ci_streq(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca += 32;
+        if (cb >= 'A' && cb <= 'Z') cb += 32;
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
 
 #include "crossline.h"
 #include "lexer.h"
@@ -129,7 +140,7 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
         /* Check if parent is "Debug" or "Release" (multi-config) */
         sep = strrchr(exe_path, '/');
         if (sep) {
-            if (strcasecmp(sep + 1, "Debug") == 0 || strcasecmp(sep + 1, "Release") == 0) {
+            if (ci_streq(sep + 1, "Debug") || ci_streq(sep + 1, "Release")) {
                 *sep = '\0';
                 sep = strrchr(exe_path, '/');
             }
