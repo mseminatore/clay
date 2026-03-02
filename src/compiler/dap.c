@@ -293,8 +293,10 @@ static char *dap_format_clay_value(ClayValue cv) {
         if (!obj) return strdup("nil");
         /* Use type-specific formatting to avoid method dispatch issues */
         switch (obj->type) {
-            case CLAY_TYPE_STRING:
-                return strdup(clay_string_data(obj));
+            case CLAY_TYPE_STRING: {
+                const char *s = clay_string_data(obj);
+                return strdup(s ? s : "");
+            }
             case CLAY_TYPE_FLOAT: {
                 snprintf(buf, sizeof(buf), "%g", obj->as.number_float.value);
                 return strdup(buf);
@@ -607,7 +609,8 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             dap_send(resp);
         } else if (strcmp(command, "variables") == 0) {
             cJSON *args = cJSON_GetObjectItem(msg, "arguments");
-            int varRef = cJSON_GetObjectItem(args, "variablesReference")->valueint;
+            cJSON *varRef_item = args ? cJSON_GetObjectItem(args, "variablesReference") : NULL;
+            int varRef = varRef_item ? varRef_item->valueint : 0;
 
             cJSON *resp = dap_base_response(msg, 1);
             cJSON *body = cJSON_AddObjectToObject(resp, "body");
