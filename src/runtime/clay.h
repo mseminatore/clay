@@ -238,7 +238,7 @@ void        clay_inspect(ClayObject *obj);
 /* --- Error handling (setjmp/longjmp) --- */
 #include <setjmp.h>
 
-#define CLAY_MAX_TRY_DEPTH 64
+#define CLAY_MAX_TRY_DEPTH 256
 
 typedef struct {
     jmp_buf frames[CLAY_MAX_TRY_DEPTH];

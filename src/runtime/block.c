@@ -68,7 +68,12 @@ static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
         if (!CLAY_IS_TRUTHY(cond)) break;
-        if (clay_try_push() == 0) {
+        int tp = clay_try_push();
+        if (tp == -1) {
+            clay_raise(CLAY_VAL(clay_error_new("try depth exceeded in whileTrue", "RuntimeError")));
+            return CLAY_NIL;
+        }
+        if (tp == 0) {
             result = body->as.block.func(body, 0, NULL);
             clay_try_pop();
         } else {
@@ -98,7 +103,12 @@ static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
         if (CLAY_IS_TRUTHY(cond)) break;
-        if (clay_try_push() == 0) {
+        int tp = clay_try_push();
+        if (tp == -1) {
+            clay_raise(CLAY_VAL(clay_error_new("try depth exceeded in whileFalse", "RuntimeError")));
+            return CLAY_NIL;
+        }
+        if (tp == 0) {
             result = body->as.block.func(body, 0, NULL);
             clay_try_pop();
         } else {

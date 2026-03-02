@@ -89,7 +89,12 @@ static ClayValue array_each(ClayObject *self, int argc, ClayValue *argv) {
 
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
-        if (clay_try_push() == 0) {
+        int tp = clay_try_push();
+        if (tp == -1) {
+            clay_raise(CLAY_VAL(clay_error_new("try depth exceeded in forEach", "RuntimeError")));
+            return CLAY_NIL;
+        }
+        if (tp == 0) {
             clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
             clay_try_pop();
         } else {
