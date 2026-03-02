@@ -26,39 +26,78 @@ void clay_method_cache_clear(void) {
     memset(method_cache, 0, sizeof(method_cache));
 }
 
-/* Lookup returning full ClayMethod* (walks prototype chain) */
-static ClayMethod *lookup_method_full(ClayObject *obj, const char *name) {
+/* Lookup returning full ClayMethod* (walks prototype chain).
+   If 'defining_out' is non-NULL, stores the prototype where the method was found. */
+static ClayMethod *lookup_method_full(ClayObject *obj, const char *name,
+                                      HashTable **defining_out) {
     ClayObject *cur = obj;
     while (cur) {
         if (cur->methods) {
             ht_value_t val;
             if (ht_lookup(cur->methods, name, &val)) {
+                if (defining_out) *defining_out = cur->methods;
                 return (ClayMethod *)val;
             }
         }
         cur = cur->parent;
     }
+    if (defining_out) *defining_out = NULL;
     return NULL;
 }
 
-/* Cached method lookup — checks cache first, falls back to chain walk */
+/* Hash helper — uses object identity (methods ptr or obj ptr) for cache index */
+static inline unsigned int cache_hash(uintptr_t key1, uintptr_t key2) {
+    uintptr_t h = (key1 >> 3) ^ (key2 >> 1);
+    h *= 0x9E3779B9u;
+    return (unsigned int)(h >> 16) & METHOD_CACHE_MASK;
+}
+
+/* Cached method lookup — checks cache first, falls back to chain walk.
+   Two-level cache: first checks receiver's own methods table, then
+   checks the defining prototype's table (shared across siblings). */
 static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
-    /* Multiplicative hash mixing — strip low zero bits from aligned pointers,
-       then multiply by golden-ratio constant for good distribution */
-    uintptr_t h = ((uintptr_t)obj->methods >> 3) ^ ((uintptr_t)selector >> 1);
-    h *= 0x9E3779B9u;  /* golden ratio * 2^32 */
-    unsigned int idx = (unsigned int)(h >> 16) & METHOD_CACHE_MASK;
+    /* Use obj pointer itself when methods is NULL to avoid hash collisions */
+    uintptr_t recv_key = obj->methods ? (uintptr_t)obj->methods : (uintptr_t)obj;
+    unsigned int idx = cache_hash(recv_key, (uintptr_t)selector);
     MethodCacheEntry *entry = &method_cache[idx];
 
-    if (entry->methods == obj->methods && entry->selector == selector) {
+    if (entry->methods == (HashTable *)recv_key && entry->selector == selector) {
         return entry->method;
     }
 
-    ClayMethod *m = lookup_method_full(obj, selector);
+    /* Shortcut: check parent's cache before full chain walk */
+    if (obj->parent) {
+        uintptr_t parent_key = obj->parent->methods
+            ? (uintptr_t)obj->parent->methods : (uintptr_t)obj->parent;
+        unsigned int pidx = cache_hash(parent_key, (uintptr_t)selector);
+        MethodCacheEntry *pentry = &method_cache[pidx];
+        if (pentry->methods == (HashTable *)parent_key &&
+            pentry->selector == selector && pentry->method) {
+            /* Found in parent's cache — also populate receiver's entry */
+            entry->methods  = (HashTable *)recv_key;
+            entry->selector = selector;
+            entry->method   = pentry->method;
+            return pentry->method;
+        }
+    }
+
+    /* Full prototype chain walk */
+    HashTable *defining = NULL;
+    ClayMethod *m = lookup_method_full(obj, selector, &defining);
     if (m) {
-        entry->methods  = obj->methods;
+        /* Cache under receiver's key */
+        entry->methods  = (HashTable *)recv_key;
         entry->selector = selector;
         entry->method   = m;
+
+        /* Also cache under defining prototype's key (shared by siblings) */
+        if (defining && defining != obj->methods) {
+            unsigned int didx = cache_hash((uintptr_t)defining, (uintptr_t)selector);
+            MethodCacheEntry *dentry = &method_cache[didx];
+            dentry->methods  = defining;
+            dentry->selector = selector;
+            dentry->method   = m;
+        }
     }
     return m;
 }
@@ -167,7 +206,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     }
 
     /* Try doesNotUnderstand */
-    ClayMethod *dnu = lookup_method_full(obj, "doesNotUnderstand");
+    ClayMethod *dnu = lookup_method_full(obj, "doesNotUnderstand", NULL);
     if (dnu) {
         ClayObject *sel_str = clay_string_new(selector);
         ClayObject *args_arr = clay_array_new();
@@ -196,7 +235,7 @@ ClayValue clay_send_super(ClayValue receiver, ClayObject *defining_obj,
     /* Start method lookup from the parent of the defining prototype */
     ClayObject *start = defining_obj ? defining_obj->parent : NULL;
     if (start) {
-        ClayMethod *m = lookup_method_full(start, selector);
+        ClayMethod *m = lookup_method_full(start, selector, NULL);
         if (m) {
             ClayObject *self = CLAY_OBJ(receiver);
             ClayValue result = invoke_method(m, self, argc, argv);
