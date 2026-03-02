@@ -3,7 +3,8 @@
 // Demonstrates: prototype chains, closures, recursion, Dict, error handling,
 // operator overloading (toString), string parsing, implicit self, blocks.
 //
-// Usage:  clay scheme.clay
+// Usage:  clay scheme.clay          # interactive REPL
+//         clay scheme.clay --test   # run test suite
 //
 // Implements: define, lambda, if, cond, quote, set!, begin, let, and, or,
 //   arithmetic, comparisons, list ops, type predicates, map, filter, apply.
@@ -990,14 +991,22 @@ scmRun = { |code, env|
 }
 
 // ============================================================
-//  Test harness & demo programs
+//  Mode selection: --test runs the test suite, otherwise REPL
 // ============================================================
+
+_mode = "repl"
+_args = System args
+_args each { |a|
+  (a == "--test") ifTrue { _mode = "test" }
+}
 
 ("=== Mini Scheme Interpreter ===") println
 ("Written in Clay — " + "prototype-based OO meets functional programming") println
 "" println
 
 env = scmEnv
+
+(_mode == "test") ifTrue {
 
 passed = 0
 failed = 0
@@ -1157,3 +1166,35 @@ assert_scm value("(apply + '(1 2 3))", "6", "apply")
 // === Results ===
 "" println
 (passed toString + " tests passed, " + failed toString + " failed") println
+
+} // end --test mode
+
+// ============================================================
+//  Interactive REPL
+// ============================================================
+
+(_mode == "repl") ifTrue {
+  "Type Scheme expressions, or 'quit' to exit." println
+  "" println
+  _replDone = false
+  { _replDone == false } whileTrue {
+    input = Console prompt("scheme> ")
+    (input == nil) ifTrue { _replDone = true }
+    (_replDone == false) ifTrue {
+      (input == "quit" || input == "exit" || input == "") ifTrue {
+        _replDone = true
+      } ifFalse {
+        try {
+          result = scmRun value(input, env)
+          (result != nil) ifTrue {
+            result toString println
+          } ifFalse {
+            "()" println
+          }
+        } catch { |e|
+          ("Error: " + e message) println
+        }
+      }
+    }
+  }
+}

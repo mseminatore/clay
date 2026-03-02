@@ -8,6 +8,8 @@
 #include "vm.h"
 #include "hash.h"
 
+extern ClayObject *clay_range_new(intptr_t start, intptr_t end, intptr_t step);
+
 /* External test modules */
 extern void test_lexer(void);
 extern void test_parser(void);
@@ -1524,6 +1526,199 @@ static void test_new_methods(void) {
     clay_release(counter);
 }
 
+static void test_range(void) {
+    SUITE("Range");
+
+    COMMENT("range creation and size...");
+    ClayObject *r = clay_range_new(1, 5, 1);
+    ClayValue v = clay_send(r, "size", 0, NULL);
+    TEST(clay_to_int(v) == 5);
+
+    COMMENT("range start and end...");
+    v = clay_send(r, "start", 0, NULL);
+    TEST(clay_to_int(v) == 1);
+    v = clay_send(r, "end", 0, NULL);
+    TEST(clay_to_int(v) == 5);
+
+    COMMENT("range contains...");
+    ClayValue arg = clay_int(3);
+    v = clay_send(r, "contains", 1, &arg);
+    TEST(!CLAY_IS_NIL(v) && v != CLAY_FALSE);
+    arg = clay_int(6);
+    v = clay_send(r, "contains", 1, &arg);
+    TEST(v == CLAY_FALSE);
+    arg = clay_int(0);
+    v = clay_send(r, "contains", 1, &arg);
+    TEST(v == CLAY_FALSE);
+
+    COMMENT("range toArray...");
+    v = clay_send(r, "toArray", 0, NULL);
+    ClayObject *arr = CLAY_OBJ(v);
+    TEST(clay_array_size(arr) == 5);
+    TEST(clay_to_int(clay_array_at(arr, 0)) == 1);
+    TEST(clay_to_int(clay_array_at(arr, 4)) == 5);
+    clay_release(arr);
+
+    COMMENT("range toString...");
+    v = clay_send(r, "toString", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(v)), "1..5") == 0);
+    clay_release(CLAY_OBJ(v));
+
+    COMMENT("range step...");
+    arg = clay_int(2);
+    v = clay_send(r, "step", 1, &arg);
+    ClayObject *stepped = CLAY_OBJ(v);
+    ClayValue sa = clay_send(stepped, "toArray", 0, NULL);
+    ClayObject *sarr = CLAY_OBJ(sa);
+    TEST(clay_array_size(sarr) == 3); /* 1, 3, 5 */
+    TEST(clay_to_int(clay_array_at(sarr, 0)) == 1);
+    TEST(clay_to_int(clay_array_at(sarr, 1)) == 3);
+    TEST(clay_to_int(clay_array_at(sarr, 2)) == 5);
+    clay_release(sarr);
+    clay_release(stepped);
+
+    COMMENT("range reverse...");
+    v = clay_send(r, "reverse", 0, NULL);
+    ClayObject *rev = CLAY_OBJ(v);
+    ClayValue ra = clay_send(rev, "toArray", 0, NULL);
+    ClayObject *rarr = CLAY_OBJ(ra);
+    TEST(clay_array_size(rarr) == 5);
+    TEST(clay_to_int(clay_array_at(rarr, 0)) == 5);
+    TEST(clay_to_int(clay_array_at(rarr, 4)) == 1);
+    clay_release(rarr);
+    clay_release(rev);
+
+    clay_release(r);
+}
+
+static void test_error_edge_cases(void) {
+    SUITE("Error Edge Cases");
+
+    COMMENT("raise inside catch re-raises to outer...");
+    ClayValue outer = CLAY_NIL;
+    ClayTryFrame _tf_outer;
+    if (clay_try_push(&_tf_outer) == 0) {
+        ClayTryFrame _tf_inner;
+        if (clay_try_push(&_tf_inner) == 0) {
+            clay_raise(CLAY_VAL(clay_error_new("first", "RuntimeError")));
+            clay_try_pop();
+        } else {
+            /* Catch first error, then raise a new one */
+            clay_raise(CLAY_VAL(clay_error_new("second", "RuntimeError")));
+        }
+        clay_try_pop();
+    } else {
+        outer = clay_error_stack.current_error;
+    }
+    TEST(!CLAY_IS_NIL(outer));
+    ClayValue omsg = clay_send_val(outer, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(omsg)), "second") == 0);
+    clay_release(CLAY_OBJ(omsg));
+
+    COMMENT("deeply nested try/catch (5 levels)...");
+    int deepest_caught = 0;
+    ClayTryFrame _tf1, _tf2, _tf3, _tf4, _tf5;
+    if (clay_try_push(&_tf1) == 0) {
+        if (clay_try_push(&_tf2) == 0) {
+            if (clay_try_push(&_tf3) == 0) {
+                if (clay_try_push(&_tf4) == 0) {
+                    if (clay_try_push(&_tf5) == 0) {
+                        clay_raise(CLAY_VAL(clay_error_new("deep", "RuntimeError")));
+                        clay_try_pop();
+                    } else {
+                        deepest_caught = 5;
+                    }
+                    clay_try_pop();
+                } else {
+                    deepest_caught = 4;
+                }
+                clay_try_pop();
+            } else {
+                deepest_caught = 3;
+            }
+            clay_try_pop();
+        } else {
+            deepest_caught = 2;
+        }
+        clay_try_pop();
+    } else {
+        deepest_caught = 1;
+    }
+    TEST(deepest_caught == 5);
+    ClayValue dmsg = clay_send_val(clay_error_stack.current_error, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(dmsg)), "deep") == 0);
+    clay_release(CLAY_OBJ(dmsg));
+
+    COMMENT("normal path pops correctly...");
+    int reached_end = 0;
+    ClayTryFrame _tf_normal;
+    if (clay_try_push(&_tf_normal) == 0) {
+        /* No exception — just pop and continue */
+        clay_try_pop();
+        reached_end = 1;
+    } else {
+        reached_end = -1;
+    }
+    TEST(reached_end == 1);
+
+    COMMENT("different error types propagate correctly...");
+    ClayValue err_val = CLAY_NIL;
+    ClayTryFrame _tf_type;
+    if (clay_try_push(&_tf_type) == 0) {
+        clay_raise(CLAY_VAL(clay_error_new("nil deref", "NilError")));
+        clay_try_pop();
+    } else {
+        err_val = clay_error_stack.current_error;
+    }
+    ClayValue etype = clay_send_val(err_val, "type", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(etype)), "NilError") == 0);
+    clay_release(CLAY_OBJ(etype));
+}
+
+static void test_try_frame_stress(void) {
+    SUITE("Try Frame Stress");
+
+    COMMENT("100 sequential push/pop cycles...");
+    for (int i = 0; i < 100; i++) {
+        ClayTryFrame tf;
+        if (clay_try_push(&tf) == 0) {
+            clay_try_pop();
+        }
+    }
+    TEST(clay_error_stack.head == NULL);
+
+    COMMENT("sequential raise/catch cycles...");
+    for (int i = 0; i < 50; i++) {
+        ClayTryFrame tf;
+        if (clay_try_push(&tf) == 0) {
+            clay_raise(CLAY_VAL(clay_error_new("cycle", "RuntimeError")));
+            clay_try_pop();
+        } else {
+            /* caught — continue to next iteration */
+        }
+    }
+    ClayValue cmsg = clay_send_val(clay_error_stack.current_error, "message", 0, NULL);
+    TEST(strcmp(clay_string_data(CLAY_OBJ(cmsg)), "cycle") == 0);
+    clay_release(CLAY_OBJ(cmsg));
+    TEST(clay_error_stack.head == NULL);
+
+    COMMENT("10 concurrent nested frames...");
+    ClayTryFrame f0, f1, f2, f3, f4, f5, f6, f7, f8, f9;
+    ClayTryFrame *fa[] = {&f0,&f1,&f2,&f3,&f4,&f5,&f6,&f7,&f8,&f9};
+    int pushed = 0;
+    for (int i = 0; i < 10; i++) {
+        if (clay_try_push(fa[i]) == 0) {
+            pushed++;
+        } else {
+            break;
+        }
+    }
+    TEST(pushed == 10);
+    TEST(clay_error_stack.head == &f9);
+    for (int i = 0; i < 10; i++) clay_try_pop();
+    TEST(clay_error_stack.head == NULL);
+}
+
 void test_main(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -1559,6 +1754,9 @@ void test_main(int argc, char *argv[]) {
     test_super_dispatch();
     test_memory_leaks();
     test_new_methods();
+    test_range();
+    test_error_edge_cases();
+    test_try_frame_stress();
     /* test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures(); */

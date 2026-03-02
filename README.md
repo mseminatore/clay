@@ -152,6 +152,23 @@ cat hello.c
 clay --ast hello.clay
 ```
 
+#### Mini Scheme interpreter
+
+A full Scheme (R5RS subset) interpreter is included as `examples/scheme.clay` — roughly 1,000 lines of Clay demonstrating prototype chains, closures, deep recursion, Dict, error handling, and string parsing.
+
+```sh
+clay examples/scheme.clay              # interactive REPL
+clay examples/scheme.clay -- --test    # run the 57-test suite
+```
+
+```
+scheme> (define (fib n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))
+scheme> (fib 10)
+55
+scheme> (map (lambda (x) (* x x)) '(1 2 3 4 5))
+(1 4 9 16 25)
+```
+
 ## Language
 
 ### Everything is an object
@@ -702,7 +719,7 @@ d clear                     // remove all entries
 
 ### Error handling
 
-Clay provides `try`/`catch`/`finally` blocks and `raise` for error handling:
+Clay provides `try`/`catch`/`finally` blocks and `raise` for error handling. Try/catch frames use a dynamic linked list (no fixed depth limit), so deeply nested loops and recursive code work without hitting an artificial ceiling:
 
 ```clay
 // Catch errors
@@ -1071,6 +1088,10 @@ The generated C includes `#line` directives mapping back to the `.clay` source, 
 **C compile mode** (`clay -c file.clay`): generates human-readable C with `#line` directives, invokes the system C compiler, and links the Clay runtime as a static library.
 
 **VM REPL mode** (`clay` or `clay --vm-repl`): interactive REPL that compiles expressions to bytecode and evaluates them instantly.
+
+**DAP mode** (`clay --dap`): runs as a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) server for VS Code and other DAP-compatible editors. Supports breakpoints, stepping, variable inspection, and output capture.
+
+**Method cache**: message dispatch caches resolved methods per (receiver-prototype, selector) pair, avoiding repeated prototype-chain walks. The cache is automatically invalidated when methods are added or changed.
 
 ## Bricks (Package Manager)
 
