@@ -1,0 +1,1159 @@
+// scheme.clay — A Mini Scheme (R5RS subset) interpreter written in Clay
+//
+// Demonstrates: prototype chains, closures, recursion, Dict, error handling,
+// operator overloading (toString), string parsing, implicit self, blocks.
+//
+// Usage:  clay scheme.clay
+//
+// Implements: define, lambda, if, cond, quote, set!, begin, let, and, or,
+//   arithmetic, comparisons, list ops, type predicates, map, filter, apply.
+
+// ============================================================
+//  S-expression types — prototype hierarchy
+// ============================================================
+
+SExpr = Object clone {
+  stype = "nil"
+  toString() { "()" }
+}
+
+SNil = SExpr clone {
+  stype = "nil"
+  toString() { "()" }
+}
+
+SNum = SExpr clone {
+  stype = "number"
+  val = 0
+  toString() { val toString }
+}
+
+SFloat = SExpr clone {
+  stype = "float"
+  val = 0.0
+  toString() { val toString }
+}
+
+SSym = SExpr clone {
+  stype = "symbol"
+  name = ""
+  toString() { name }
+}
+
+SStr = SExpr clone {
+  stype = "string"
+  val = ""
+  toString() { "\"" + val + "\"" }
+}
+
+SBool = SExpr clone {
+  stype = "boolean"
+  val = false
+  toString() {
+    result = "#f"
+    (val == true) ifTrue { result = "#t" }
+    result
+  }
+}
+
+SPair = SExpr clone {
+  stype = "pair"
+  car = nil
+  cdr = nil
+  toString() {
+    s = "(" + car toString
+    rest = cdr
+    done = false
+    { done == false } whileTrue {
+      (rest == nil) ifTrue {
+        done = true
+      } ifFalse {
+        isList = false
+        (rest stype == "pair") ifTrue { isList = true }
+        (isList == true) ifTrue {
+          s = s + " " + rest car toString
+          rest = rest cdr
+        } ifFalse {
+          s = s + " . " + rest toString
+          done = true
+        }
+      }
+    }
+    s + ")"
+  }
+}
+
+SLambda = SExpr clone {
+  stype = "lambda"
+  params = nil
+  body = nil
+  env = nil
+  isBuiltin = false
+  builtinName = ""
+  toString() {
+    result = "<lambda>"
+    (isBuiltin == true) ifTrue { result = "<builtin:" + builtinName + ">" }
+    result
+  }
+}
+
+// Global dict for builtin functions (blocks auto-invoke when stored in slots)
+builtinFns = Dict clone
+
+// Constructors
+mkNum = { |n| SNum clone { val = n } }
+mkFloat = { |n| SFloat clone { val = n } }
+mkSym = { |s| SSym clone { name = s } }
+mkStr = { |s| SStr clone { val = s } }
+mkBool = { |b| SBool clone { val = b } }
+mkPair = { |a, d| SPair clone { car = a; cdr = d } }
+
+SCM_TRUE = mkBool value(true)
+SCM_FALSE = mkBool value(false)
+
+// List helpers
+mkList = { |arr|
+  result = nil
+  i = arr size - 1
+  { i >= 0 } whileTrue {
+    result = mkPair value(arr at(i), result)
+    i = i - 1
+  }
+  result
+}
+
+listToArray = { |lst|
+  arr = []
+  cur = lst
+  done = false
+  { done == false } whileTrue {
+    (cur == nil) ifTrue {
+      done = true
+    } ifFalse {
+      arr append(cur car)
+      cur = cur cdr
+    }
+  }
+  arr
+}
+
+listLength = { |lst|
+  n = 0
+  cur = lst
+  { cur != nil && cur stype == "pair" } whileTrue {
+    n = n + 1
+    cur = cur cdr
+  }
+  n
+}
+
+// ============================================================
+//  Lexer — tokenizes Scheme source into token arrays
+// ============================================================
+
+Token = Object clone {
+  ttype = "eof"
+  tval = ""
+  toString() { "<" + ttype + ":" + tval + ">" }
+}
+
+mkToken = { |typ, val| Token clone { ttype = typ; tval = val } }
+
+tokenize = { |input|
+  tokens = []
+  pos = 0
+  len = input length
+
+  { pos < len } whileTrue {
+    ch = input at(pos)
+
+    // Skip whitespace
+    (ch == " " || ch == "\n" || ch == "\r" || ch == "\t") ifTrue {
+      pos = pos + 1
+    } ifFalse {
+      // Skip line comments
+      (ch == ";") ifTrue {
+        { pos < len && input at(pos) != "\n" } whileTrue { pos = pos + 1 }
+      } ifFalse {
+        // Parentheses
+        (ch == "(") ifTrue {
+          tokens append(mkToken value("lparen", "("))
+          pos = pos + 1
+        } ifFalse {
+          (ch == ")") ifTrue {
+            tokens append(mkToken value("rparen", ")"))
+            pos = pos + 1
+          } ifFalse {
+            // Quote shorthand
+            (ch == "'") ifTrue {
+              tokens append(mkToken value("quote", "'"))
+              pos = pos + 1
+            } ifFalse {
+              // String literal
+              (ch == "\"") ifTrue {
+                pos = pos + 1
+                s = ""
+                strDone = false
+                { strDone == false && pos < len } whileTrue {
+                  c = input at(pos)
+                  (c == "\"") ifTrue {
+                    strDone = true
+                  } ifFalse {
+                    (c == "\\") ifTrue {
+                      pos = pos + 1
+                      (pos < len) ifTrue {
+                        esc = input at(pos)
+                        (esc == "n") ifTrue { s = s + "\n" } ifFalse {
+                          (esc == "t") ifTrue { s = s + "\t" } ifFalse {
+                            s = s + esc
+                          }
+                        }
+                      }
+                    } ifFalse {
+                      s = s + c
+                    }
+                  }
+                  pos = pos + 1
+                }
+                tokens append(mkToken value("string", s))
+              } ifFalse {
+                // Number or symbol
+                start = pos
+                isNum = false
+                DIGITS = "0123456789"
+                // Check if starts with digit or negative number
+                (ch == "-") ifTrue {
+                  // Peek ahead — if next char is digit, it's a negative number
+                  (pos + 1 < len) ifTrue {
+                    nxt = input at(pos + 1)
+                    (DIGITS contains(nxt)) ifTrue { isNum = true }
+                  }
+                }
+                (DIGITS contains(ch)) ifTrue { isNum = true }
+
+                (isNum == true) ifTrue {
+                  hasDot = false
+                  { pos < len } whileTrue {
+                    c = input at(pos)
+                    isDigit = false
+                    (DIGITS contains(c)) ifTrue { isDigit = true }
+                    (c == "-" && pos == start) ifTrue { isDigit = true }
+                    (c == ".") ifTrue { isDigit = true; hasDot = true }
+                    (isDigit == true) ifTrue {
+                      pos = pos + 1
+                    } ifFalse {
+                      break
+                    }
+                  }
+                  numStr = input slice(start, pos)
+                  (hasDot == true) ifTrue {
+                    tokens append(mkToken value("float", numStr))
+                  } ifFalse {
+                    tokens append(mkToken value("number", numStr))
+                  }
+                } ifFalse {
+                  // Symbol — read until delimiter
+                  { pos < len } whileTrue {
+                    c = input at(pos)
+                    (c == " " || c == "\n" || c == "\r" || c == "\t" ||
+                     c == "(" || c == ")" || c == "\"" || c == ";") ifTrue {
+                      break
+                    } ifFalse {
+                      pos = pos + 1
+                    }
+                  }
+                  sym = input slice(start, pos)
+                  // Check for booleans
+                  (sym == "#t" || sym == "#true") ifTrue {
+                    tokens append(mkToken value("true", "#t"))
+                  } ifFalse {
+                    (sym == "#f" || sym == "#false") ifTrue {
+                      tokens append(mkToken value("false", "#f"))
+                    } ifFalse {
+                      tokens append(mkToken value("symbol", sym))
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  tokens append(mkToken value("eof", ""))
+  tokens
+}
+
+// ============================================================
+//  Reader — parses tokens into S-expressions
+// ============================================================
+
+Reader = Object clone {
+  tokens = nil
+  pos = 0
+
+  peek() { tokens at(pos) }
+  advance() { t = tokens at(pos); pos = pos + 1; t }
+
+  read() {
+    tok = self advance
+    result = nil
+
+    (tok ttype == "number") ifTrue {
+      result = mkNum value(tok tval toInt)
+    }
+    (tok ttype == "float") ifTrue {
+      result = mkFloat value(tok tval toFloat)
+    }
+    (tok ttype == "string") ifTrue {
+      result = mkStr value(tok tval)
+    }
+    (tok ttype == "symbol") ifTrue {
+      result = mkSym value(tok tval)
+    }
+    (tok ttype == "true") ifTrue {
+      result = SCM_TRUE
+    }
+    (tok ttype == "false") ifTrue {
+      result = SCM_FALSE
+    }
+    (tok ttype == "quote") ifTrue {
+      inner = self read
+      result = mkPair value(mkSym value("quote"), mkPair value(inner, nil))
+    }
+    (tok ttype == "lparen") ifTrue {
+      // Check for empty list
+      (self peek ttype == "rparen") ifTrue {
+        self advance
+        result = nil
+      } ifFalse {
+        result = self readList
+      }
+    }
+    (tok ttype == "eof") ifTrue {
+      result = nil
+    }
+
+    result
+  }
+
+  readList() {
+    items = []
+    done = false
+    { done == false } whileTrue {
+      (self peek ttype == "rparen") ifTrue {
+        self advance
+        done = true
+      } ifFalse {
+        (self peek ttype == "eof") ifTrue {
+          raise("Unexpected end of input in list")
+        }
+        items append(self read)
+      }
+    }
+    mkList value(items)
+  }
+}
+
+// Parse a string into an S-expression
+scmParse = { |input|
+  tokens = tokenize value(input)
+  reader = Reader clone { tokens = tokens; pos = 0 }
+  reader read
+}
+
+// Parse all expressions from input
+scmParseAll = { |input|
+  tokens = tokenize value(input)
+  reader = Reader clone { tokens = tokens; pos = 0 }
+  exprs = []
+  { reader peek ttype != "eof" } whileTrue {
+    exprs append(reader read)
+  }
+  exprs
+}
+
+// ============================================================
+//  Environment — lexical scope with parent chain
+// ============================================================
+
+Env = Object clone {
+  bindings = nil
+  parentEnv = nil
+
+  init() {
+    bindings = Dict new
+  }
+
+  get(name) {
+    result = nil
+    found = false
+    (bindings has(name)) ifTrue {
+      result = bindings get(name)
+      found = true
+    } ifFalse {
+      (parentEnv != nil) ifTrue {
+        result = parentEnv get(name)
+        found = true
+      }
+    }
+    (found == false) ifTrue {
+      raise("Undefined variable: " + name)
+    }
+    result
+  }
+
+  define(name, val) {
+    bindings set(name, val)
+  }
+
+  setVar(name, val) {
+    (bindings has(name)) ifTrue {
+      bindings set(name, val)
+    } ifFalse {
+      (parentEnv != nil) ifTrue {
+        parentEnv setVar(name, val)
+      } ifFalse {
+        raise("Cannot set! undefined variable: " + name)
+      }
+    }
+  }
+
+  extend(params, args) {
+    child = Env clone
+    child parentEnv = self
+    child init
+    p = params
+    a = args
+    { p != nil && p stype == "pair" } whileTrue {
+      (a != nil && a stype == "pair") ifTrue {
+        child define(p car name, a car)
+        a = a cdr
+      } ifFalse {
+        child define(p car name, nil)
+      }
+      p = p cdr
+    }
+    child
+  }
+}
+
+// ============================================================
+//  Evaluator
+// ============================================================
+
+// Helper: is this a truthy Scheme value? (#f and nil are falsy, everything else truthy)
+scmTruthy = { |val|
+  result = true
+  (val == nil) ifTrue { result = false }
+  (val != nil && val stype == "boolean" && val val == false) ifTrue { result = false }
+  result
+}
+
+// Forward declaration pattern — use a mutable slot
+scmEval = nil
+
+scmEvalBody = { |expr, env|
+  t = expr stype
+  result = nil
+
+  // Self-evaluating types
+  (t == "number" || t == "float" || t == "string" || t == "boolean") ifTrue {
+    result = expr
+  }
+
+  // Nil
+  (t == "nil" && expr == nil) ifTrue {
+    result = nil
+  }
+
+  // Symbol — variable lookup
+  (t == "symbol") ifTrue {
+    result = env get(expr name)
+  }
+
+  // List — special form or procedure call
+  (t == "pair") ifTrue {
+    head = expr car
+
+    isSpecial = false
+
+    // Check for special forms (head is a symbol)
+    (head != nil && head stype == "symbol") ifTrue {
+      form = head name
+
+      // quote
+      (form == "quote") ifTrue {
+        isSpecial = true
+        result = expr cdr car
+      }
+
+      // define
+      (form == "define") ifTrue {
+        isSpecial = true
+        target = expr cdr car
+        // (define (f x y) body...) sugar
+        (target stype == "pair") ifTrue {
+          fname = target car name
+          fparams = target cdr
+          body = expr cdr cdr
+          // Wrap in begin if multiple body forms
+          bodyExpr = nil
+          (body cdr == nil) ifTrue {
+            bodyExpr = body car
+          } ifFalse {
+            bodyExpr = mkPair value(mkSym value("begin"), body)
+          }
+          lam = SLambda clone { params = fparams; body = bodyExpr; env = env }
+          env define(fname, lam)
+          result = nil
+        } ifFalse {
+          val = scmEval value(expr cdr cdr car, env)
+          env define(target name, val)
+          result = nil
+        }
+      }
+
+      // set!
+      (form == "set!") ifTrue {
+        isSpecial = true
+        val = scmEval value(expr cdr cdr car, env)
+        env setVar(expr cdr car name, val)
+        result = nil
+      }
+
+      // if
+      (form == "if") ifTrue {
+        isSpecial = true
+        cond = scmEval value(expr cdr car, env)
+        (scmTruthy value(cond)) ifTrue {
+          result = scmEval value(expr cdr cdr car, env)
+        } ifFalse {
+          (expr cdr cdr cdr != nil) ifTrue {
+            result = scmEval value(expr cdr cdr cdr car, env)
+          }
+        }
+      }
+
+      // cond
+      (form == "cond") ifTrue {
+        isSpecial = true
+        clauses = expr cdr
+        condDone = false
+        { condDone == false && clauses != nil && clauses stype == "pair" } whileTrue {
+          clause = clauses car
+          test = clause car
+          // (else ...) clause
+          (test stype == "symbol" && test name == "else") ifTrue {
+            result = scmEval value(clause cdr car, env)
+            condDone = true
+          } ifFalse {
+            val = scmEval value(test, env)
+            (scmTruthy value(val)) ifTrue {
+              result = scmEval value(clause cdr car, env)
+              condDone = true
+            }
+          }
+          clauses = clauses cdr
+        }
+      }
+
+      // lambda
+      (form == "lambda") ifTrue {
+        isSpecial = true
+        params = expr cdr car
+        body = expr cdr cdr
+        bodyExpr = nil
+        (body cdr == nil) ifTrue {
+          bodyExpr = body car
+        } ifFalse {
+          bodyExpr = mkPair value(mkSym value("begin"), body)
+        }
+        result = SLambda clone { params = params; body = bodyExpr; env = env }
+      }
+
+      // begin
+      (form == "begin") ifTrue {
+        isSpecial = true
+        body = expr cdr
+        { body != nil && body stype == "pair" } whileTrue {
+          result = scmEval value(body car, env)
+          body = body cdr
+        }
+      }
+
+      // let
+      (form == "let") ifTrue {
+        isSpecial = true
+        binds = expr cdr car
+        body = expr cdr cdr
+        letEnv = Env clone
+        letEnv parentEnv = env
+        letEnv init
+        { binds != nil && binds stype == "pair" } whileTrue {
+          binding = binds car
+          bname = binding car name
+          bval = scmEval value(binding cdr car, env)
+          letEnv define(bname, bval)
+          binds = binds cdr
+        }
+        { body != nil && body stype == "pair" } whileTrue {
+          result = scmEval value(body car, letEnv)
+          body = body cdr
+        }
+      }
+
+      // and
+      (form == "and") ifTrue {
+        isSpecial = true
+        args = expr cdr
+        result = SCM_TRUE
+        andDone = false
+        { andDone == false && args != nil && args stype == "pair" } whileTrue {
+          result = scmEval value(args car, env)
+          (scmTruthy value(result) == false) ifTrue { andDone = true }
+          args = args cdr
+        }
+      }
+
+      // or
+      (form == "or") ifTrue {
+        isSpecial = true
+        args = expr cdr
+        result = SCM_FALSE
+        orDone = false
+        { orDone == false && args != nil && args stype == "pair" } whileTrue {
+          result = scmEval value(args car, env)
+          (scmTruthy value(result)) ifTrue { orDone = true }
+          args = args cdr
+        }
+      }
+    }
+
+    // Procedure call
+    (isSpecial == false) ifTrue {
+      proc = scmEval value(head, env)
+      // Evaluate arguments
+      argsList = nil
+      argsArr = []
+      argExprs = expr cdr
+      _argsDone = false
+      (argExprs == nil) ifTrue { _argsDone = true }
+      { _argsDone == false } whileTrue {
+        (argExprs stype != "pair") ifTrue {
+          _argsDone = true
+        } ifFalse {
+          argsArr append(scmEval value(argExprs car, env))
+          argExprs = argExprs cdr
+          (argExprs == nil) ifTrue { _argsDone = true }
+        }
+      }
+      argsList = mkList value(argsArr)
+
+      (proc stype != "lambda") ifTrue {
+        raise("Not a procedure: " + proc toString)
+      }
+
+      // Builtin
+      (proc isBuiltin == true) ifTrue {
+        result = builtinFns get(proc builtinName) value(argsList)
+      } ifFalse {
+        // User lambda
+        callEnv = proc env extend(proc params, argsList)
+        result = scmEval value(proc body, callEnv)
+      }
+    }
+  }
+
+  result
+}
+
+// Wire up the forward reference
+scmEval = scmEvalBody
+
+// ============================================================
+//  Built-in procedures
+// ============================================================
+
+mkBuiltin = { |name, fn|
+  builtinFns set(name, fn)
+  b = SLambda clone
+  b isBuiltin = true
+  b builtinName = name
+  b
+}
+
+numVal = { |x|
+  result = 0
+  (x stype == "number") ifTrue { result = x val }
+  (x stype == "float") ifTrue { result = x val }
+  result
+}
+
+installBuiltins = { |env|
+  // Arithmetic
+  env define("+", mkBuiltin value("+", { |args|
+    sum = 0
+    cur = args
+    { cur != nil && cur stype == "pair" } whileTrue {
+      sum = sum + numVal value(cur car)
+      cur = cur cdr
+    }
+    mkNum value(sum)
+  }))
+
+  env define("-", mkBuiltin value("-", { |args|
+    (args == nil) ifTrue { raise("- requires at least 1 argument") }
+    (args cdr == nil) ifTrue {
+      mkNum value(0 - numVal value(args car))
+    } ifFalse {
+      result = numVal value(args car)
+      cur = args cdr
+      { cur != nil && cur stype == "pair" } whileTrue {
+        result = result - numVal value(cur car)
+        cur = cur cdr
+      }
+      mkNum value(result)
+    }
+  }))
+
+  env define("*", mkBuiltin value("*", { |args|
+    product = 1
+    cur = args
+    { cur != nil && cur stype == "pair" } whileTrue {
+      product = product * numVal value(cur car)
+      cur = cur cdr
+    }
+    mkNum value(product)
+  }))
+
+  env define("/", mkBuiltin value("/", { |args|
+    (args == nil || args cdr == nil) ifTrue { raise("/ requires at least 2 arguments") }
+    result = numVal value(args car)
+    cur = args cdr
+    { cur != nil && cur stype == "pair" } whileTrue {
+      result = result / numVal value(cur car)
+      cur = cur cdr
+    }
+    mkNum value(result)
+  }))
+
+  env define("modulo", mkBuiltin value("modulo", { |args|
+    mkNum value(numVal value(args car) % numVal value(args cdr car))
+  }))
+
+  env define("abs", mkBuiltin value("abs", { |args|
+    n = numVal value(args car)
+    (n < 0) ifTrue { n = 0 - n }
+    mkNum value(n)
+  }))
+
+  // Comparisons
+  env define("=", mkBuiltin value("=", { |args|
+    (numVal value(args car) == numVal value(args cdr car)) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("<", mkBuiltin value("<", { |args|
+    (numVal value(args car) < numVal value(args cdr car)) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define(">", mkBuiltin value(">", { |args|
+    (numVal value(args car) > numVal value(args cdr car)) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("<=", mkBuiltin value("<=", { |args|
+    (numVal value(args car) <= numVal value(args cdr car)) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define(">=", mkBuiltin value(">=", { |args|
+    (numVal value(args car) >= numVal value(args cdr car)) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+
+  // List operations
+  env define("cons", mkBuiltin value("cons", { |args|
+    mkPair value(args car, args cdr car)
+  }))
+  env define("car", mkBuiltin value("car", { |args|
+    args car car
+  }))
+  env define("cdr", mkBuiltin value("cdr", { |args|
+    args car cdr
+  }))
+  env define("list", mkBuiltin value("list", { |args| args }))
+  env define("append", mkBuiltin value("append", { |args|
+    (args == nil || args car == nil) ifTrue {
+      result = nil
+      (args != nil && args cdr != nil) ifTrue { result = args cdr car }
+      result
+    } ifFalse {
+      // Collect all elements from first list, then append second
+      arr = listToArray value(args car)
+      rest = nil
+      (args cdr != nil) ifTrue { rest = args cdr car }
+      i = arr size - 1
+      { i >= 0 } whileTrue {
+        rest = mkPair value(arr at(i), rest)
+        i = i - 1
+      }
+      rest
+    }
+  }))
+  env define("length", mkBuiltin value("length", { |args|
+    mkNum value(listLength value(args car))
+  }))
+
+  // Type predicates
+  env define("null?", mkBuiltin value("null?", { |args|
+    (args car == nil) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("pair?", mkBuiltin value("pair?", { |args|
+    (args car != nil && args car stype == "pair") ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("number?", mkBuiltin value("number?", { |args|
+    t = args car stype
+    (t == "number" || t == "float") ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("string?", mkBuiltin value("string?", { |args|
+    (args car != nil && args car stype == "string") ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("symbol?", mkBuiltin value("symbol?", { |args|
+    (args car != nil && args car stype == "symbol") ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("boolean?", mkBuiltin value("boolean?", { |args|
+    (args car != nil && args car stype == "boolean") ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("procedure?", mkBuiltin value("procedure?", { |args|
+    (args car != nil && args car stype == "lambda") ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+
+  // Equality
+  env define("eq?", mkBuiltin value("eq?", { |args|
+    a = args car
+    b = args cdr car
+    eq = false
+    (a == nil && b == nil) ifTrue { eq = true }
+    (a != nil && b != nil) ifTrue {
+      (a stype == "number" && b stype == "number" && a val == b val) ifTrue { eq = true }
+      (a stype == "symbol" && b stype == "symbol" && a name == b name) ifTrue { eq = true }
+      (a stype == "boolean" && b stype == "boolean" && a val == b val) ifTrue { eq = true }
+      (a stype == "string" && b stype == "string" && a val == b val) ifTrue { eq = true }
+    }
+    (eq == true) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+  env define("equal?", mkBuiltin value("equal?", { |args|
+    // For simplicity, same as eq? (deep equality would need recursion)
+    a = args car
+    b = args cdr car
+    (a toString == b toString) ifTrue { SCM_TRUE } ifFalse { SCM_FALSE }
+  }))
+
+  // Logic
+  env define("not", mkBuiltin value("not", { |args|
+    (scmTruthy value(args car)) ifTrue { SCM_FALSE } ifFalse { SCM_TRUE }
+  }))
+
+  // I/O
+  env define("display", mkBuiltin value("display", { |args|
+    val = args car
+    (val != nil && val stype == "string") ifTrue {
+      val val print
+    } ifFalse {
+      (val == nil) ifTrue { "()" print } ifFalse { val toString print }
+    }
+    nil
+  }))
+  env define("newline", mkBuiltin value("newline", { |args|
+    "" println
+    nil
+  }))
+  env define("print", mkBuiltin value("print", { |args|
+    val = args car
+    (val == nil) ifTrue { "()" print } ifFalse { val toString print }
+    nil
+  }))
+
+  // String operations
+  env define("string-length", mkBuiltin value("string-length", { |args|
+    mkNum value(args car val length)
+  }))
+  env define("string-append", mkBuiltin value("string-append", { |args|
+    s = ""
+    cur = args
+    { cur != nil && cur stype == "pair" } whileTrue {
+      s = s + cur car val
+      cur = cur cdr
+    }
+    mkStr value(s)
+  }))
+  env define("number->string", mkBuiltin value("number->string", { |args|
+    mkStr value(numVal value(args car) toString)
+  }))
+  env define("string->number", mkBuiltin value("string->number", { |args|
+    mkNum value(args car val toInt)
+  }))
+
+  // Higher-order
+  env define("map", mkBuiltin value("map", { |args|
+    fn = args car
+    lst = args cdr car
+    result = []
+    { lst != nil && lst stype == "pair" } whileTrue {
+      argList = mkPair value(lst car, nil)
+      (fn isBuiltin == true) ifTrue {
+        result append(builtinFns get(fn builtinName) value(argList))
+      } ifFalse {
+        callEnv = fn env extend(fn params, argList)
+        result append(scmEval value(fn body, callEnv))
+      }
+      lst = lst cdr
+    }
+    mkList value(result)
+  }))
+
+  env define("filter", mkBuiltin value("filter", { |args|
+    fn = args car
+    lst = args cdr car
+    result = []
+    { lst != nil && lst stype == "pair" } whileTrue {
+      argList = mkPair value(lst car, nil)
+      testResult = nil
+      (fn isBuiltin == true) ifTrue {
+        testResult = builtinFns get(fn builtinName) value(argList)
+      } ifFalse {
+        callEnv = fn env extend(fn params, argList)
+        testResult = scmEval value(fn body, callEnv)
+      }
+      (scmTruthy value(testResult)) ifTrue {
+        result append(lst car)
+      }
+      lst = lst cdr
+    }
+    mkList value(result)
+  }))
+
+  env define("apply", mkBuiltin value("apply", { |args|
+    fn = args car
+    argList = args cdr car
+    (fn isBuiltin == true) ifTrue {
+      builtinFns get(fn builtinName) value(argList)
+    } ifFalse {
+      callEnv = fn env extend(fn params, argList)
+      scmEval value(fn body, callEnv)
+    }
+  }))
+
+  env define("for-each", mkBuiltin value("for-each", { |args|
+    fn = args car
+    lst = args cdr car
+    { lst != nil && lst stype == "pair" } whileTrue {
+      argList = mkPair value(lst car, nil)
+      (fn isBuiltin == true) ifTrue {
+        builtinFns get(fn builtinName) value(argList)
+      } ifFalse {
+        callEnv = fn env extend(fn params, argList)
+        scmEval value(fn body, callEnv)
+      }
+      lst = lst cdr
+    }
+    nil
+  }))
+
+  env define("min", mkBuiltin value("min", { |args|
+    a = numVal value(args car)
+    b = numVal value(args cdr car)
+    (a < b) ifTrue { mkNum value(a) } ifFalse { mkNum value(b) }
+  }))
+
+  env define("max", mkBuiltin value("max", { |args|
+    a = numVal value(args car)
+    b = numVal value(args cdr car)
+    (a > b) ifTrue { mkNum value(a) } ifFalse { mkNum value(b) }
+  }))
+}
+
+// ============================================================
+//  High-level interface
+// ============================================================
+
+// Create a fresh Scheme environment
+_env = Env clone
+_env init
+installBuiltins value(_env)
+scmEnv = _env
+
+// Evaluate a string of Scheme code in an environment
+scmRun = { |code, env|
+  exprs = scmParseAll value(code)
+  result = nil
+  exprs each { |expr|
+    result = scmEval value(expr, env)
+  }
+  result
+}
+
+// ============================================================
+//  Test harness & demo programs
+// ============================================================
+
+("=== Mini Scheme Interpreter ===") println
+("Written in Clay — " + "prototype-based OO meets functional programming") println
+"" println
+
+env = scmEnv
+
+passed = 0
+failed = 0
+
+assert_scm = { |code, expected, desc|
+  result = scmRun value(code, env)
+  actual = nil
+  (result == nil) ifTrue { actual = "()" } ifFalse { actual = result toString }
+  (actual == expected) ifTrue {
+    passed = passed + 1
+  } ifFalse {
+    ("FAIL: " + desc) println
+    ("  expected: " + expected) println
+    ("  actual:   " + actual) println
+    failed = failed + 1
+  }
+}
+
+// --- Arithmetic ---
+assert_scm value("(+ 1 2 3)", "6", "addition")
+assert_scm value("(- 10 3)", "7", "subtraction")
+assert_scm value("(* 4 5)", "20", "multiplication")
+assert_scm value("(/ 20 4)", "5", "division")
+assert_scm value("(modulo 17 5)", "2", "modulo")
+assert_scm value("(abs -7)", "7", "abs negative")
+assert_scm value("(+ (* 3 4) (- 10 5))", "17", "nested arithmetic")
+
+// --- Comparisons ---
+assert_scm value("(= 5 5)", "#t", "equal numbers")
+assert_scm value("(< 3 5)", "#t", "less than")
+assert_scm value("(> 3 5)", "#f", "not greater")
+assert_scm value("(<= 5 5)", "#t", "less or equal")
+
+// --- Booleans and logic ---
+assert_scm value("(and #t #t)", "#t", "and true")
+assert_scm value("(and #t #f)", "#f", "and false")
+assert_scm value("(or #f #t)", "#t", "or true")
+assert_scm value("(not #f)", "#t", "not false")
+
+// --- Define and variables ---
+assert_scm value("(define x 42) x", "42", "define and lookup")
+assert_scm value("(define y (+ x 8)) y", "50", "define with expression")
+
+// --- Lambda and closures ---
+assert_scm value("(define double (lambda (n) (* n 2))) (double 21)", "42", "lambda call")
+assert_scm value("(define add (lambda (a b) (+ a b))) (add 3 4)", "7", "two-arg lambda")
+
+// --- Define function sugar ---
+assert_scm value("(define (square x) (* x x)) (square 7)", "49", "define function sugar")
+
+// --- If ---
+assert_scm value("(if (> 3 2) 10 20)", "10", "if true branch")
+assert_scm value("(if (> 2 3) 10 20)", "20", "if false branch")
+
+// --- Cond ---
+assert_scm value("(cond ((= 1 2) 10) ((= 1 1) 20) (else 30))", "20", "cond second clause")
+
+// --- Let ---
+assert_scm value("(let ((a 10) (b 20)) (+ a b))", "30", "let binding")
+
+// --- Quote and lists ---
+assert_scm value("(quote (1 2 3))", "(1 2 3)", "quote list")
+assert_scm value("'(a b c)", "(a b c)", "quote shorthand")
+assert_scm value("(car '(1 2 3))", "1", "car")
+assert_scm value("(cdr '(1 2 3))", "(2 3)", "cdr")
+assert_scm value("(cons 1 '(2 3))", "(1 2 3)", "cons")
+assert_scm value("(null? '())", "#t", "null? empty")
+assert_scm value("(null? '(1))", "#f", "null? non-empty")
+assert_scm value("(length '(a b c d))", "4", "length")
+
+// --- Type predicates ---
+assert_scm value("(number? 42)", "#t", "number? true")
+assert_scm value("(string? \"hello\")", "#t", "string? true")
+assert_scm value("(pair? '(1 2))", "#t", "pair? true")
+assert_scm value("(boolean? #t)", "#t", "boolean? true")
+assert_scm value("(procedure? car)", "#t", "procedure? true")
+
+// --- Strings ---
+assert_scm value("(string-length \"hello\")", "5", "string-length")
+assert_scm value("(string-append \"hello\" \" \" \"world\")", "\"hello world\"", "string-append")
+
+// --- Higher-order functions ---
+assert_scm value("(define (inc x) (+ x 1)) (map inc '(1 2 3))", "(2 3 4)", "map")
+assert_scm value("(define (even? x) (= (modulo x 2) 0)) (filter even? '(1 2 3 4 5 6))", "(2 4 6)", "filter")
+
+// --- Recursive fibonacci ---
+scmRun value("
+  (define (fib n)
+    (if (<= n 1)
+      n
+      (+ (fib (- n 1)) (fib (- n 2)))))
+", env)
+assert_scm value("(fib 0)", "0", "fib(0)")
+assert_scm value("(fib 1)", "1", "fib(1)")
+assert_scm value("(fib 10)", "55", "fib(10)")
+
+// --- Factorial ---
+scmRun value("
+  (define (factorial n)
+    (if (= n 0)
+      1
+      (* n (factorial (- n 1)))))
+", env)
+assert_scm value("(factorial 10)", "3628800", "factorial(10)")
+
+// --- Closure counter (lexical scoping proof) ---
+scmRun value("
+  (define (make-counter)
+    (let ((count 0))
+      (lambda ()
+        (set! count (+ count 1))
+        count)))
+  (define c1 (make-counter))
+  (define c2 (make-counter))
+", env)
+assert_scm value("(c1)", "1", "counter c1 first call")
+assert_scm value("(c1)", "2", "counter c1 second call")
+assert_scm value("(c2)", "1", "counter c2 independent")
+assert_scm value("(c1)", "3", "counter c1 third call")
+
+// --- Accumulate / fold ---
+scmRun value("
+  (define (fold-left f init lst)
+    (if (null? lst)
+      init
+      (fold-left f (f init (car lst)) (cdr lst))))
+", env)
+assert_scm value("(fold-left + 0 '(1 2 3 4 5))", "15", "fold-left sum")
+assert_scm value("(fold-left * 1 '(1 2 3 4 5))", "120", "fold-left product")
+
+// --- List reversal ---
+scmRun value("
+  (define (reverse lst)
+    (fold-left (lambda (acc x) (cons x acc)) '() lst))
+", env)
+assert_scm value("(reverse '(1 2 3 4 5))", "(5 4 3 2 1)", "reverse")
+
+// --- Begin / sequencing ---
+assert_scm value("(begin (define seq-val 0) (set! seq-val 99) seq-val)", "99", "begin sequencing")
+
+// --- Nested closures ---
+scmRun value("
+  (define (adder n)
+    (lambda (x) (+ n x)))
+  (define add5 (adder 5))
+  (define add10 (adder 10))
+", env)
+assert_scm value("(add5 3)", "8", "closure adder(5)(3)")
+assert_scm value("(add10 3)", "13", "closure adder(10)(3)")
+
+// --- Map with lambda ---
+assert_scm value("(map (lambda (x) (* x x)) '(1 2 3 4 5))", "(1 4 9 16 25)", "map with inline lambda")
+
+// --- Apply ---
+assert_scm value("(apply + '(1 2 3))", "6", "apply")
+
+// === Results ===
+"" println
+(passed toString + " tests passed, " + failed toString + " failed") println
