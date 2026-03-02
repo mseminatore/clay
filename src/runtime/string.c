@@ -21,6 +21,18 @@ ClayObject *clay_string_new_len(const char *str, size_t len) {
     return obj;
 }
 
+/* Allocate a string object with an uninitialized buffer of given length.
+ * Caller must fill data and NUL-terminate before use. */
+static ClayObject *string_new_prealloc(size_t len) {
+    ClayObject *obj = clay_object_new();
+    obj->type = CLAY_TYPE_STRING;
+    obj->parent = clay_String;
+    if (clay_String) clay_retain(clay_String);
+    obj->as.string.data = (char *)malloc(len + 1);
+    obj->as.string.length = len;
+    return obj;
+}
+
 const char *clay_string_data(ClayObject *obj) {
     if (obj && obj->type == CLAY_TYPE_STRING) {
         return obj->as.string.data;
@@ -66,24 +78,20 @@ static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_VAL(clay_retain(self));
 
     /* Convert argument to string via toString */
-    ClayValue other_val;
     if (CLAY_IS_INT(argv[0])) {
-        /* Send toString to a temporary number wrapper - for now, format directly */
         char buf[32];
         snprintf(buf, sizeof(buf), "%ld", (long)clay_to_int(argv[0]));
-        ClayObject *result = clay_string_new(buf);
-        size_t new_len = self->as.string.length + strlen(buf);
-        char *new_data = (char *)malloc(new_len + 1);
-        memcpy(new_data, self->as.string.data, self->as.string.length);
-        memcpy(new_data + self->as.string.length, buf, strlen(buf));
-        new_data[new_len] = '\0';
-        clay_release(result);
-        ClayObject *s = clay_string_new_len(new_data, new_len);
-        free(new_data);
-        return CLAY_VAL(s);
+        size_t buf_len = strlen(buf);
+        size_t new_len = self->as.string.length + buf_len;
+        ClayObject *result = string_new_prealloc(new_len);
+        memcpy(result->as.string.data, self->as.string.data, self->as.string.length);
+        memcpy(result->as.string.data + self->as.string.length, buf, buf_len);
+        result->as.string.data[new_len] = '\0';
+        return CLAY_VAL(result);
     }
 
     ClayObject *other;
+    ClayValue other_val;
     if (CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
         other_val = clay_send(CLAY_OBJ(argv[0]), "toString", 0, NULL);
         other = CLAY_OBJ(other_val);
@@ -93,13 +101,10 @@ static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
     }
 
     size_t new_len = self->as.string.length + other->as.string.length;
-    char *new_data = (char *)malloc(new_len + 1);
-    memcpy(new_data, self->as.string.data, self->as.string.length);
-    memcpy(new_data + self->as.string.length, other->as.string.data, other->as.string.length);
-    new_data[new_len] = '\0';
-
-    ClayObject *result = clay_string_new_len(new_data, new_len);
-    free(new_data);
+    ClayObject *result = string_new_prealloc(new_len);
+    memcpy(result->as.string.data, self->as.string.data, self->as.string.length);
+    memcpy(result->as.string.data + self->as.string.length, other->as.string.data, other->as.string.length);
+    result->as.string.data[new_len] = '\0';
     clay_release(CLAY_OBJ(other_val));
     return CLAY_VAL(result);
 }
@@ -219,10 +224,13 @@ static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
     char *buf = (char *)malloc(new_len + 1);
     char *out = buf;
     p = self->as.string.data;
+    const char *end = self->as.string.data + self->as.string.length;
     while (1) {
         const char *found = strstr(p, old_str->as.string.data);
         if (!found) {
-            strcpy(out, p);
+            size_t tail = (size_t)(end - p);
+            memcpy(out, p, tail);
+            out += tail;
             break;
         }
         memcpy(out, p, (size_t)(found - p));
@@ -269,25 +277,21 @@ static ClayValue string_trim(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_upper(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    char *buf = (char *)malloc(self->as.string.length + 1);
+    ClayObject *result = string_new_prealloc(self->as.string.length);
     for (size_t i = 0; i < self->as.string.length; i++) {
-        buf[i] = (char)toupper((unsigned char)self->as.string.data[i]);
+        result->as.string.data[i] = (char)toupper((unsigned char)self->as.string.data[i]);
     }
-    buf[self->as.string.length] = '\0';
-    ClayObject *result = clay_string_new_len(buf, self->as.string.length);
-    free(buf);
+    result->as.string.data[self->as.string.length] = '\0';
     return CLAY_VAL(result);
 }
 
 static ClayValue string_lower(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    char *buf = (char *)malloc(self->as.string.length + 1);
+    ClayObject *result = string_new_prealloc(self->as.string.length);
     for (size_t i = 0; i < self->as.string.length; i++) {
-        buf[i] = (char)tolower((unsigned char)self->as.string.data[i]);
+        result->as.string.data[i] = (char)tolower((unsigned char)self->as.string.data[i]);
     }
-    buf[self->as.string.length] = '\0';
-    ClayObject *result = clay_string_new_len(buf, self->as.string.length);
-    free(buf);
+    result->as.string.data[self->as.string.length] = '\0';
     return CLAY_VAL(result);
 }
 
@@ -308,13 +312,11 @@ static ClayValue string_endsWith(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_reverse(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    char *buf = (char *)malloc(self->as.string.length + 1);
+    ClayObject *result = string_new_prealloc(self->as.string.length);
     for (size_t i = 0; i < self->as.string.length; i++) {
-        buf[i] = self->as.string.data[self->as.string.length - 1 - i];
+        result->as.string.data[i] = self->as.string.data[self->as.string.length - 1 - i];
     }
-    buf[self->as.string.length] = '\0';
-    ClayObject *result = clay_string_new_len(buf, self->as.string.length);
-    free(buf);
+    result->as.string.data[self->as.string.length] = '\0';
     return CLAY_VAL(result);
 }
 
@@ -357,7 +359,7 @@ static ClayValue string_lastIndexOf(ClayObject *self, int argc, ClayValue *argv)
     const char *p = self->as.string.data;
     while ((p = strstr(p, sub->as.string.data)) != NULL) {
         last = p;
-        p++;
+        p += sub->as.string.length;
     }
     if (!last) return clay_int(-1);
     return clay_int((intptr_t)(last - self->as.string.data));
@@ -368,15 +370,13 @@ static ClayValue string_repeat(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t n = clay_to_int(argv[0]);
     if (n <= 0) return CLAY_VAL(clay_string_new(""));
     size_t total = self->as.string.length * (size_t)n;
-    char *buf = (char *)malloc(total + 1);
-    char *p = buf;
+    ClayObject *result = string_new_prealloc(total);
+    char *p = result->as.string.data;
     for (intptr_t i = 0; i < n; i++) {
         memcpy(p, self->as.string.data, self->as.string.length);
         p += self->as.string.length;
     }
-    buf[total] = '\0';
-    ClayObject *result = clay_string_new_len(buf, total);
-    free(buf);
+    result->as.string.data[total] = '\0';
     return CLAY_VAL(result);
 }
 
@@ -391,12 +391,10 @@ static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
             pad = ps->as.string.data[0];
     }
     size_t pad_count = (size_t)width - self->as.string.length;
-    char *buf = (char *)malloc((size_t)width + 1);
-    memset(buf, pad, pad_count);
-    memcpy(buf + pad_count, self->as.string.data, self->as.string.length);
-    buf[width] = '\0';
-    ClayObject *result = clay_string_new_len(buf, (size_t)width);
-    free(buf);
+    ClayObject *result = string_new_prealloc((size_t)width);
+    memset(result->as.string.data, pad, pad_count);
+    memcpy(result->as.string.data + pad_count, self->as.string.data, self->as.string.length);
+    result->as.string.data[width] = '\0';
     return CLAY_VAL(result);
 }
 
@@ -411,12 +409,10 @@ static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
             pad = ps->as.string.data[0];
     }
     size_t pad_count = (size_t)width - self->as.string.length;
-    char *buf = (char *)malloc((size_t)width + 1);
-    memcpy(buf, self->as.string.data, self->as.string.length);
-    memset(buf + self->as.string.length, pad, pad_count);
-    buf[width] = '\0';
-    ClayObject *result = clay_string_new_len(buf, (size_t)width);
-    free(buf);
+    ClayObject *result = string_new_prealloc((size_t)width);
+    memcpy(result->as.string.data, self->as.string.data, self->as.string.length);
+    memset(result->as.string.data + self->as.string.length, pad, pad_count);
+    result->as.string.data[width] = '\0';
     return CLAY_VAL(result);
 }
 
