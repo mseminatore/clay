@@ -961,9 +961,11 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
         finally_block = emit_expr(cg, node->as.try_catch.finally_block);
     }
 
-    /* Push error frame and test setjmp */
+    /* Declare try frame and push error frame */
     emit_indent(cg);
-    fprintf(cg->out, "if (clay_try_push() == 0) {\n");
+    fprintf(cg->out, "ClayTryFrame _try_%s;\n", t);
+    emit_indent(cg);
+    fprintf(cg->out, "if (clay_try_push(&_try_%s) == 0) {\n", t);
     cg->indent++;
 
     /* Execute try block */

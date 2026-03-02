@@ -4,7 +4,7 @@
 #include "clay.h"
 
 /* Global error stack */
-ClayErrorStack clay_error_stack = { .depth = 0, .current_error = 0 };
+ClayErrorStack clay_error_stack = { .head = NULL, .current_error = 0 };
 
 /* Source location tracking */
 int clay_source_line = 0;
@@ -58,10 +58,11 @@ ClayObject *clay_error_new(const char *message, const char *type) {
 
 /* Raise an error: longjmp to nearest try frame, or abort */
 void clay_raise(ClayValue error) {
-    if (clay_error_stack.depth > 0) {
+    if (clay_error_stack.head != NULL) {
         clay_error_stack.current_error = error;
-        clay_error_stack.depth--;
-        longjmp(clay_error_stack.frames[clay_error_stack.depth], 1);
+        ClayTryFrame *frame = clay_error_stack.head;
+        clay_error_stack.head = frame->prev;
+        longjmp(frame->buf, 1);
     }
     /* No try frame — print and abort */
     if (CLAY_IS_PTR(error) && !CLAY_IS_NIL(error)) {

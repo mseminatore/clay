@@ -1087,7 +1087,8 @@ int dap_run(const char *filename) {
     int exit_code = 0;
     vm.sp = 0;
 
-    int caught = clay_try_push();
+    ClayTryFrame _tf;
+    int caught = clay_try_push(&_tf);
     if (caught != 0) {
         /* Exception occurred */
         ClayValue err = clay_error_stack.current_error;

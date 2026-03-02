@@ -129,7 +129,8 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     ClayValue raised_err = CLAY_NIL;
     int had_exception = 0;
 
-    if (clay_try_push() == 0) {
+    ClayTryFrame _tf;
+    if (clay_try_push(&_tf) == 0) {
         while (g_vm->running && g_vm->ip < g_vm->code_len) {
             if (chunk->line_map && g_vm->ip < chunk->len) {
                 clay_source_line = chunk->line_map[g_vm->ip];
@@ -223,6 +224,9 @@ typedef struct {
     size_t vm_ip;
     int vm_exception_count;
 
+    /* Saved error stack head — isolate try frames per fiber */
+    ClayTryFrame *saved_error_head;
+
 #ifdef _WIN32
     LPVOID os_fiber;            /* Windows fiber handle */
     LPVOID caller_fiber;        /* caller's fiber handle (set by resume) */
@@ -251,15 +255,19 @@ static FiberContext *get_fiber_ctx(ClayObject *self) {
 #ifdef _WIN32
 static VOID CALLBACK fiber_entry_win(LPVOID param) {
     FiberContext *ctx = (FiberContext *)param;
+    clay_error_stack.head = NULL;  /* fiber starts with clean error stack */
     ctx->result = ctx->block->as.block.func(ctx->block, 0, NULL);
     ctx->status = 2;
+    ctx->saved_error_head = clay_error_stack.head;
     SwitchToFiber(ctx->caller_fiber);
 }
 #else
 static void fiber_entry_unix(void *param) {
     FiberContext *ctx = (FiberContext *)param;
+    clay_error_stack.head = NULL;  /* fiber starts with clean error stack */
     ctx->result = ctx->block->as.block.func(ctx->block, 0, NULL);
     ctx->status = 2;
+    ctx->saved_error_head = clay_error_stack.head;
     clay_fiber_swap(&ctx->fiber_regs, &ctx->caller_regs);
 }
 #endif
@@ -271,6 +279,7 @@ static ClayValue fiber_yield(ClayObject *self, int argc, ClayValue *argv) {
     FiberContext *ctx = g_current_fiber;
     ctx->yield_value = (argc > 0) ? argv[0] : CLAY_NIL;
     ctx->status = 1;
+    ctx->saved_error_head = clay_error_stack.head;
 #ifdef _WIN32
     SwitchToFiber(ctx->caller_fiber);
 #else
@@ -366,6 +375,10 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
     FiberContext *prev = g_current_fiber;
     g_current_fiber = ctx;
 
+    /* Save caller's error stack head and swap in fiber's */
+    ClayTryFrame *caller_error_head = clay_error_stack.head;
+    clay_error_stack.head = ctx->saved_error_head;
+
     /* Switch to fiber's C stack */
 #ifdef _WIN32
     ctx->caller_fiber = GetCurrentFiber();
@@ -376,6 +389,7 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
 
     /* Back here after yield() or completion */
     g_current_fiber = prev;
+    clay_error_stack.head = caller_error_head;
 
     /* Save fiber's VM state (stack/frames may have been reallocated) */
     ctx->vm_stack          = g_vm->stack;
@@ -1027,7 +1041,8 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     int saved_running = vm->running;
     int saved_frame_count = vm->frame_count;
 
-    if (clay_try_push() == 0) {
+    ClayTryFrame _tf;
+    if (clay_try_push(&_tf) == 0) {
         ClayValue result = clay_send_val(try_block, "value", 0, NULL);
         clay_try_pop();
         vm->code = saved_code;

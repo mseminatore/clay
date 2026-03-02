@@ -532,7 +532,8 @@ static void test_error_handling(void) {
 
     COMMENT("try/catch with raise...");
     ClayValue result = CLAY_NIL;
-    if (clay_try_push() == 0) {
+    ClayTryFrame _tf1;
+    if (clay_try_push(&_tf1) == 0) {
         clay_raise(CLAY_VAL(clay_error_new("caught me", "RuntimeError")));
         clay_try_pop();
         result = CLAY_VAL(clay_string_new("not reached"));
@@ -546,7 +547,8 @@ static void test_error_handling(void) {
 
     COMMENT("try/catch with div by zero...");
     ClayValue result2 = CLAY_NIL;
-    if (clay_try_push() == 0) {
+    ClayTryFrame _tf2;
+    if (clay_try_push(&_tf2) == 0) {
         /* Trigger division by zero through dispatch */
         ClayObject *ten = clay_clone(clay_Number);
         clay_set_slot(ten, "_value", clay_int(10));
@@ -565,9 +567,11 @@ static void test_error_handling(void) {
 
     COMMENT("nested try/catch...");
     ClayValue outer = CLAY_NIL;
-    if (clay_try_push() == 0) {
+    ClayTryFrame _tf3;
+    if (clay_try_push(&_tf3) == 0) {
         ClayValue inner = CLAY_NIL;
-        if (clay_try_push() == 0) {
+        ClayTryFrame _tf4;
+        if (clay_try_push(&_tf4) == 0) {
             clay_raise(CLAY_VAL(clay_error_new("inner error", "RuntimeError")));
             clay_try_pop();
         } else {
@@ -584,7 +588,8 @@ static void test_error_handling(void) {
 
     COMMENT("method not found raises error...");
     ClayValue result3 = CLAY_NIL;
-    if (clay_try_push() == 0) {
+    ClayTryFrame _tf5;
+    if (clay_try_push(&_tf5) == 0) {
         clay_send_val(clay_int(42), "nonexistent", 0, NULL);
         clay_try_pop();
     } else {

@@ -224,12 +224,8 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue result = CLAY_NIL;
     for (intptr_t i = 0; i < n; i++) {
         ClayValue arg = clay_int(i);
-        int tp = clay_try_push();
-        if (tp == -1) {
-            clay_raise(CLAY_VAL(clay_error_new("try depth exceeded in times", "RuntimeError")));
-            return CLAY_NIL;
-        }
-        if (tp == 0) {
+        ClayTryFrame _tf;
+        if (clay_try_push(&_tf) == 0) {
             result = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
             clay_try_pop();
         } else {

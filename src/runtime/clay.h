@@ -238,20 +238,26 @@ void        clay_inspect(ClayObject *obj);
 /* --- Error handling (setjmp/longjmp) --- */
 #include <setjmp.h>
 
-#define CLAY_MAX_TRY_DEPTH 256
+/* Try/catch frames — linked list on the C stack (no fixed limit) */
+typedef struct ClayTryFrame {
+    jmp_buf buf;
+    struct ClayTryFrame *prev;
+} ClayTryFrame;
 
 typedef struct {
-    jmp_buf frames[CLAY_MAX_TRY_DEPTH];
-    int depth;
-    ClayValue current_error; /* the error being raised */
+    ClayTryFrame *head;          /* linked list of active try frames */
+    ClayValue current_error;     /* the error being raised */
 } ClayErrorStack;
 
 extern ClayErrorStack clay_error_stack;
 
-/* Push/pop try frames */
-#define clay_try_push() (clay_error_stack.depth < CLAY_MAX_TRY_DEPTH ? \
-    setjmp(clay_error_stack.frames[clay_error_stack.depth++]) : -1)
-#define clay_try_pop() (clay_error_stack.depth--)
+/* Push/pop try frames — caller must declare a local ClayTryFrame variable */
+#define clay_try_push(frame) \
+    ((frame)->prev = clay_error_stack.head, \
+     clay_error_stack.head = (frame), \
+     setjmp((frame)->buf))
+#define clay_try_pop() \
+    (clay_error_stack.head = clay_error_stack.head->prev)
 
 /* Raise an error — longjmps to nearest try frame, or aborts */
 void clay_raise(ClayValue error);

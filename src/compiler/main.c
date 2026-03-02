@@ -275,7 +275,8 @@ static int compile_c_file(const char *c_file, const char *output_name,
 #endif
     return system(cmd);
 }
-
+
+
 /* --- REPL --- */
 
 static void clay_completion(const char *buf, crossline_completions_t *pComp) {
@@ -737,7 +738,8 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
 
         /* Execute with error recovery */
         vm.sp = 0;
-        int caught = clay_try_push();
+        ClayTryFrame _tf;
+        int caught = clay_try_push(&_tf);
         if (caught != 0) {
             /* An error was raised during execution */
             ClayValue err = clay_error_stack.current_error;
@@ -853,7 +855,8 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 
     int exit_code = 0;
     vm.sp = 0;
-    int caught = clay_try_push();
+    ClayTryFrame _tf;
+    int caught = clay_try_push(&_tf);
     if (caught != 0) {
         ClayValue err = clay_error_stack.current_error;
         if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
