@@ -43,8 +43,11 @@ static ClayMethod *lookup_method_full(ClayObject *obj, const char *name) {
 
 /* Cached method lookup — checks cache first, falls back to chain walk */
 static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
-    unsigned int idx = ((unsigned int)(uintptr_t)obj->methods ^
-                        (unsigned int)(uintptr_t)selector) & METHOD_CACHE_MASK;
+    /* Multiplicative hash mixing — strip low zero bits from aligned pointers,
+       then multiply by golden-ratio constant for good distribution */
+    uintptr_t h = ((uintptr_t)obj->methods >> 3) ^ ((uintptr_t)selector >> 1);
+    h *= 0x9E3779B9u;  /* golden ratio * 2^32 */
+    unsigned int idx = (unsigned int)(h >> 16) & METHOD_CACHE_MASK;
     MethodCacheEntry *entry = &method_cache[idx];
 
     if (entry->methods == obj->methods && entry->selector == selector) {
