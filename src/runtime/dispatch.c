@@ -65,8 +65,9 @@ static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
         return entry->method;
     }
 
-    /* Shortcut: check parent's cache before full chain walk */
-    if (obj->parent) {
+    /* Shortcut: check parent's cache before full chain walk.
+       Only safe when receiver has no local methods (can't override parent). */
+    if (!obj->methods && obj->parent) {
         uintptr_t parent_key = obj->parent->methods
             ? (uintptr_t)obj->parent->methods : (uintptr_t)obj->parent;
         unsigned int pidx = cache_hash(parent_key, (uintptr_t)selector);
