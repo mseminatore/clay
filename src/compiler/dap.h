@@ -16,6 +16,9 @@
 
 typedef struct {
     int lines[DAP_MAX_BREAKPOINTS];
+    char *conditions[DAP_MAX_BREAKPOINTS];  /* optional condition expressions */
+    int hit_targets[DAP_MAX_BREAKPOINTS];   /* 0 = no hit count, >0 = stop on Nth hit */
+    int hit_counts[DAP_MAX_BREAKPOINTS];    /* current hit counts */
     int count;
 } DapBreakpointSet;
 
@@ -44,6 +47,7 @@ typedef struct {
     int step_line;         /* line we stepped from (for "next") */
     int step_depth;        /* trace depth when step started */
     int last_stopped_line; /* line where we last stopped (avoid re-triggering) */
+    int pause_requested;   /* set by "pause" request, checked by step callback */
     const char *source;    /* source text */
     const char *source_file;
     void *bc;              /* BcCompiler* */

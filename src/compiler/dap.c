@@ -16,17 +16,22 @@
 #ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
+/* Declare only what we need from Windows API to avoid windows.h conflicts */
+typedef void *HANDLE;
+typedef unsigned long DWORD;
+#define STD_INPUT_HANDLE ((DWORD)-10)
+#define INVALID_HANDLE_VALUE ((HANDLE)(long long)-1)
+__declspec(dllimport) HANDLE __stdcall GetStdHandle(DWORD nStdHandle);
+__declspec(dllimport) int __stdcall PeekNamedPipe(HANDLE hNamedPipe,
+    void *lpBuffer, DWORD nBufferSize, DWORD *lpBytesRead,
+    DWORD *lpTotalBytesAvail, DWORD *lpBytesLeftThisMessage);
 #else
 #include <unistd.h>
+#include <sys/select.h>
 #endif
 
 #ifdef _MSC_VER
 #define strdup _strdup
-#endif
-
-#ifdef _WIN32
-#include <io.h>
-#include <fcntl.h>
 #endif
 
 #include "cJSON.h"
@@ -39,6 +44,9 @@
 
 /* Forward declarations for bc_compiler conversion helpers */
 ClayValue vm_to_clay(clayvm_value_t v);
+
+/* Forward declaration for use in dap_poll_messages */
+static int dap_handle_request(cJSON *msg);
 
 /* ------------------------------------------------------------------ */
 /*  DAP global state                                                   */
@@ -181,10 +189,85 @@ static char *dap_get_source_line(const char *src, int line_num) {
 /*  Breakpoint management                                              */
 /* ------------------------------------------------------------------ */
 
+/* Evaluate a simple expression: supports global variable lookup and dot-notation
+   for slot access (e.g., "obj.slot.nested"). Returns the value and sets *found=1,
+   or returns CLAY_NIL with *found=0. */
+static ClayValue dap_evaluate_expr(const char *expr, int *found) {
+    *found = 0;
+    if (!expr || !expr[0]) return CLAY_NIL;
+
+    clayvm_vm_t *dvm = (clayvm_vm_t *)g_dap.vm;
+    if (!dvm || !dvm->globals) return CLAY_NIL;
+
+    /* Copy expr so we can tokenize on '.' */
+    char buf[256];
+    size_t elen = strlen(expr);
+    if (elen >= sizeof(buf)) return CLAY_NIL;
+    memcpy(buf, expr, elen + 1);
+
+    /* Split on first '.' */
+    char *dot = strchr(buf, '.');
+    if (dot) *dot = '\0';
+
+    /* Look up root variable in globals */
+    HashTable *globals = (HashTable *)dvm->globals;
+    ht_value_t val;
+    if (!globals->table || !ht_lookup(globals, buf, &val))
+        return CLAY_NIL;
+
+    clayvm_value_t *vp = (clayvm_value_t *)val;
+    ClayValue cv = vm_to_clay(*vp);
+    *found = 1;
+
+    /* Walk dot-separated slot chain */
+    char *rest = dot ? dot + 1 : NULL;
+    while (rest && *rest) {
+        char *next_dot = strchr(rest, '.');
+        if (next_dot) *next_dot = '\0';
+
+        if (CLAY_IS_NIL(cv) || CLAY_IS_INT(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE) {
+            *found = 0; return CLAY_NIL;
+        }
+        ClayObject *obj = CLAY_OBJ(cv);
+        if (!obj || !obj->slots) { *found = 0; return CLAY_NIL; }
+
+        if (clay_has_slot(obj, rest)) {
+            cv = clay_get_slot(obj, rest);
+        } else {
+            *found = 0; return CLAY_NIL;
+        }
+
+        rest = next_dot ? next_dot + 1 : NULL;
+    }
+
+    return cv;
+}
+
+/* Check if a breakpoint condition is truthy */
+static int dap_condition_truthy(const char *condition) {
+    if (!condition || !condition[0]) return 1; /* no condition = always stop */
+    int found = 0;
+    ClayValue cv = dap_evaluate_expr(condition, &found);
+    if (!found) return 0; /* unknown variable = don't stop */
+    return CLAY_IS_TRUTHY(cv);
+}
+
 static int dap_has_breakpoint(int line) {
     for (int s = 0; s < g_dap.source_count; s++) {
         for (int i = 0; i < g_dap.sources[s].bp.count; i++) {
-            if (g_dap.sources[s].bp.lines[i] == line) return 1;
+            if (g_dap.sources[s].bp.lines[i] == line) {
+                /* Check hit count */
+                g_dap.sources[s].bp.hit_counts[i]++;
+                if (g_dap.sources[s].bp.hit_targets[i] > 0 &&
+                    g_dap.sources[s].bp.hit_counts[i] < g_dap.sources[s].bp.hit_targets[i]) {
+                    continue; /* haven't reached target count yet */
+                }
+                /* Check condition */
+                if (!dap_condition_truthy(g_dap.sources[s].bp.conditions[i])) {
+                    continue;
+                }
+                return 1;
+            }
         }
     }
     return 0;
@@ -284,6 +367,59 @@ static int dap_var_ref_for(ClayValue cv) {
     return 0;
 }
 
+/* Check if stdin has data available (non-blocking) */
+static int dap_stdin_has_data(void) {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    DWORD avail = 0;
+    if (PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL)) return avail > 0;
+    return 0;
+#else
+    fd_set fds;
+    struct timeval tv = {0, 0};
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0;
+#endif
+}
+
+/* Poll for DAP messages during execution (called every N instructions).
+   Handles "pause" and "disconnect" requests without blocking. */
+static void dap_poll_messages(void) {
+    while (dap_stdin_has_data()) {
+        cJSON *msg = dap_read();
+        if (!msg) break;
+        cJSON *type_item = cJSON_GetObjectItem(msg, "type");
+        if (!type_item || !type_item->valuestring ||
+            strcmp(type_item->valuestring, "request") != 0) {
+            cJSON_Delete(msg); continue;
+        }
+        cJSON *cmd_item = cJSON_GetObjectItem(msg, "command");
+        if (!cmd_item || !cmd_item->valuestring) { cJSON_Delete(msg); continue; }
+        const char *cmd = cmd_item->valuestring;
+
+        if (strcmp(cmd, "pause") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+            g_dap.pause_requested = 1;
+        } else if (strcmp(cmd, "disconnect") == 0) {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+            g_dap.terminate = 1;
+        } else if (strcmp(cmd, "setBreakpoints") == 0) {
+            /* Allow setting breakpoints while running */
+            dap_handle_request(msg);
+        } else {
+            cJSON *resp = dap_base_response(msg, 1);
+            dap_send(resp);
+        }
+        cJSON_Delete(msg);
+    }
+}
+
+static int g_dap_poll_counter = 0;
+
 /* ------------------------------------------------------------------ */
 /*  Step callback — fires at each VM instruction                       */
 /* ------------------------------------------------------------------ */
@@ -292,6 +428,13 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
     clayvm_vm_t *vm = (clayvm_vm_t *)vm_ptr;
     BcCompiler *bc = (BcCompiler *)g_dap.bc;
     if (!bc) return;
+
+    /* Poll for DAP messages every 1024 instructions (for pause support) */
+    if (++g_dap_poll_counter >= 1024) {
+        g_dap_poll_counter = 0;
+        dap_poll_messages();
+        if (g_dap.terminate) { vm->running = 0; return; }
+    }
 
     /* Determine the correct source line from the active code's line_map.
      * When executing main code, vm->code == bc->code and we use bc->line_map.
@@ -312,7 +455,12 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
     int should_stop = 0;
     const char *reason = NULL;
 
-    if (g_dap.step_mode == 1) {
+    /* Check pause request first (works regardless of step mode) */
+    if (g_dap.pause_requested) {
+        g_dap.pause_requested = 0;
+        should_stop = 1;
+        reason = "pause";
+    } else if (g_dap.step_mode == 1) {
         /* Step Next — stop when line changes at same or shallower depth */
         if (line != g_dap.step_line && clay_call_trace.depth <= g_dap.step_depth) {
             should_stop = 1;
@@ -578,14 +726,28 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             cJSON *rbps = cJSON_AddArrayToObject(rbody, "breakpoints");
 
             if (si >= 0) {
+                /* Free old conditions */
+                for (int i = 0; i < g_dap.sources[si].bp.count; i++)
+                    free(g_dap.sources[si].bp.conditions[i]);
                 g_dap.sources[si].bp.count = 0;
                 int count = breakpoints ? cJSON_GetArraySize(breakpoints) : 0;
                 for (int i = 0; i < count && i < DAP_MAX_BREAKPOINTS; i++) {
                     cJSON *bp = cJSON_GetArrayItem(breakpoints, i);
                     cJSON *line_item = bp ? cJSON_GetObjectItem(bp, "line") : NULL;
                     if (!line_item) continue;
+                    int idx = g_dap.sources[si].bp.count;
                     int bpline = line_item->valueint;
-                    g_dap.sources[si].bp.lines[g_dap.sources[si].bp.count++] = bpline;
+                    g_dap.sources[si].bp.lines[idx] = bpline;
+                    /* Condition */
+                    cJSON *cond = bp ? cJSON_GetObjectItem(bp, "condition") : NULL;
+                    g_dap.sources[si].bp.conditions[idx] = (cond && cond->valuestring && cond->valuestring[0])
+                        ? strdup(cond->valuestring) : NULL;
+                    /* Hit count */
+                    cJSON *hitCond = bp ? cJSON_GetObjectItem(bp, "hitCondition") : NULL;
+                    g_dap.sources[si].bp.hit_targets[idx] = (hitCond && hitCond->valuestring)
+                        ? atoi(hitCond->valuestring) : 0;
+                    g_dap.sources[si].bp.hit_counts[idx] = 0;
+                    g_dap.sources[si].bp.count++;
 
                     cJSON *rbp = cJSON_CreateObject();
                     cJSON_AddBoolToObject(rbp, "verified", 1);
@@ -595,7 +757,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             }
             dap_send(resp);
         } else if (strcmp(command, "evaluate") == 0) {
-            /* Evaluate — look up a global variable by name */
+            /* Evaluate — supports globals and dot-notation (obj.slot.nested) */
             cJSON *args = cJSON_GetObjectItem(msg, "arguments");
             const char *expr = NULL;
             cJSON *expr_item = cJSON_GetObjectItem(args, "expression");
@@ -605,22 +767,14 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             cJSON *body = cJSON_AddObjectToObject(resp, "body");
 
             int found = 0;
-            clayvm_vm_t *dvm = (clayvm_vm_t *)g_dap.vm;
-            if (expr && dvm && dvm->globals) {
-                HashTable *globals = (HashTable *)dvm->globals;
-                ht_value_t val;
-                if (globals->table && ht_lookup(globals, expr, &val)) {
-                    clayvm_value_t *vp = (clayvm_value_t *)val;
-                    ClayValue cv = vm_to_clay(*vp);
-                    char *formatted = dap_format_clay_value(cv);
-                    cJSON_AddStringToObject(body, "result", formatted);
-                    cJSON_AddStringToObject(body, "type", dap_type_name(cv));
-                    cJSON_AddNumberToObject(body, "variablesReference", dap_var_ref_for(cv));
-                    free(formatted);
-                    found = 1;
-                }
-            }
-            if (!found) {
+            ClayValue cv = dap_evaluate_expr(expr, &found);
+            if (found) {
+                char *formatted = dap_format_clay_value(cv);
+                cJSON_AddStringToObject(body, "result", formatted);
+                cJSON_AddStringToObject(body, "type", dap_type_name(cv));
+                cJSON_AddNumberToObject(body, "variablesReference", dap_var_ref_for(cv));
+                free(formatted);
+            } else {
                 cJSON_AddStringToObject(body, "result", "<not found>");
                 cJSON_AddNumberToObject(body, "variablesReference", 0);
             }
@@ -677,6 +831,9 @@ static int dap_handle_request(cJSON *msg) {
         cJSON_AddBoolToObject(body, "supportsGotoTargetsRequest", 0);
         cJSON_AddBoolToObject(body, "supportsExceptionInfoRequest", 0);
         cJSON_AddBoolToObject(body, "supportsTerminateRequest", 1);
+        cJSON_AddBoolToObject(body, "supportsConditionalBreakpoints", 1);
+        cJSON_AddBoolToObject(body, "supportsHitConditionalBreakpoints", 1);
+        cJSON_AddBoolToObject(body, "supportsEvaluateForHovers", 1);
         dap_send(resp);
 
         /* Send initialized event */
@@ -718,18 +875,32 @@ static int dap_handle_request(cJSON *msg) {
         cJSON *rbps = cJSON_AddArrayToObject(body, "breakpoints");
 
         if (si >= 0) {
+            /* Free old conditions */
+            for (int i = 0; i < g_dap.sources[si].bp.count; i++)
+                free(g_dap.sources[si].bp.conditions[i]);
             g_dap.sources[si].bp.count = 0;
             int count = breakpoints ? cJSON_GetArraySize(breakpoints) : 0;
             for (int i = 0; i < count && i < DAP_MAX_BREAKPOINTS; i++) {
                 cJSON *bp = cJSON_GetArrayItem(breakpoints, i);
                 cJSON *line_item = bp ? cJSON_GetObjectItem(bp, "line") : NULL;
                 if (!line_item) continue;
-                int line = line_item->valueint;
-                g_dap.sources[si].bp.lines[g_dap.sources[si].bp.count++] = line;
+                int idx = g_dap.sources[si].bp.count;
+                int bpline = line_item->valueint;
+                g_dap.sources[si].bp.lines[idx] = bpline;
+                /* Condition */
+                cJSON *cond = bp ? cJSON_GetObjectItem(bp, "condition") : NULL;
+                g_dap.sources[si].bp.conditions[idx] = (cond && cond->valuestring && cond->valuestring[0])
+                    ? strdup(cond->valuestring) : NULL;
+                /* Hit count */
+                cJSON *hitCond = bp ? cJSON_GetObjectItem(bp, "hitCondition") : NULL;
+                g_dap.sources[si].bp.hit_targets[idx] = (hitCond && hitCond->valuestring)
+                    ? atoi(hitCond->valuestring) : 0;
+                g_dap.sources[si].bp.hit_counts[idx] = 0;
+                g_dap.sources[si].bp.count++;
 
                 cJSON *rbp = cJSON_CreateObject();
                 cJSON_AddBoolToObject(rbp, "verified", 1);
-                cJSON_AddNumberToObject(rbp, "line", line);
+                cJSON_AddNumberToObject(rbp, "line", bpline);
                 cJSON_AddItemToArray(rbps, rbp);
             }
         }
@@ -1041,6 +1212,8 @@ int dap_run(const char *filename) {
 
     for (int i = 0; i < g_dap.source_count; i++) {
         free(g_dap.sources[i].file);
+        for (int j = 0; j < g_dap.sources[i].bp.count; j++)
+            free(g_dap.sources[i].bp.conditions[j]);
     }
 
     if (g_dap_out) { fclose(g_dap_out); g_dap_out = NULL; }
