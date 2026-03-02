@@ -1,0 +1,29 @@
+// destructure_demo.clay — Array unpacking with [a, b, c] = expr
+
+// Basic destructuring
+[x, y, z] = [10, 20, 30]
+("x=" + x toString + " y=" + y toString + " z=" + z toString) println
+
+// Swap two values
+a = 1
+b = 2
+[a, b] = [b, a]
+("After swap: a=" + a toString + " b=" + b toString) println
+
+// Destructure from function return
+minmax = { |arr|
+  [arr min, arr max]
+}
+[lo, hi] = minmax value([5, 3, 8, 1, 9])
+("min=" + lo toString + " max=" + hi toString) println
+
+// Extra elements are ignored
+[first, second] = [100, 200, 300, 400]
+("first=" + first toString + " second=" + second toString) println
+
+// Works inside blocks
+pairs = [[1, 2], [3, 4], [5, 6]]
+pairs each { |pair|
+  [a, b] = pair
+  (a toString + " + " + b toString + " = " + (a + b) toString) println
+}

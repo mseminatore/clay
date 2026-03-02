@@ -107,8 +107,12 @@ Step commands: `n` = next line, `c` = continue, `s` = show stack, `q` = quit.
 **VS Code Debugging** (`--dap`) provides a full Debug Adapter Protocol server for VS Code:
 
 - Set breakpoints by clicking in the gutter
+- **Conditional breakpoints** — right-click a breakpoint, set a condition expression (e.g., `x > 10` or `name`)
+- **Hit count breakpoints** — break only on the Nth hit (right-click → Edit Hit Count)
 - Step through code line by line (Next, Step In, Step Out)
-- Inspect global variables in the Variables panel
+- **Pause** running programs with the pause button
+- **Watch expressions** — evaluate variables and dot-notation (e.g., `obj.slot.nested`) in the debug console and on hover
+- Inspect global variables in the Variables panel (expand objects and arrays)
 - View the call stack
 - Pause on exceptions
 

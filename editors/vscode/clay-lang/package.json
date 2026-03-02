@@ -73,15 +73,6 @@
             }
           }
         },
-        "initialConfigurations": [
-          {
-            "type": "clay",
-            "request": "launch",
-            "name": "Debug Clay Program",
-            "program": "${file}",
-            "clayPath": "clay"
-          }
-        ],
         "configurationSnippets": [
           {
             "label": "Clay: Launch",
@@ -94,7 +85,21 @@
               "clayPath": "clay"
             }
           }
-        ]
+        ],
+        "initialConfigurations": [
+          {
+            "type": "clay",
+            "request": "launch",
+            "name": "Debug Clay Program",
+            "program": "${file}",
+            "clayPath": "clay"
+          }
+        ],
+        "capabilities": {
+          "supportsConditionalBreakpoints": true,
+          "supportsHitConditionalBreakpoints": true,
+          "supportsEvaluateForHovers": true
+        }
       }
     ]
   },

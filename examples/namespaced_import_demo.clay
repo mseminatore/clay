@@ -1,0 +1,21 @@
+// namespaced_import_demo.clay — Scoped imports with `as`
+//
+// When you write:
+//   import("math_lib.clay") as Math
+//
+// All top-level definitions from math_lib.clay are scoped
+// under the Math namespace object. This prevents name collisions
+// when importing multiple modules.
+
+import("../test/programs/math_lib.clay") as Math
+
+// Access imported values through the namespace
+("PI = " + Math PI toString) println
+
+// Call imported functions
+area = Math circleArea(5)
+("Circle area (r=5): " + area toString) println
+
+// Namespaces are independent objects — mutations are local
+Math PI = 3
+("Modified PI = " + Math PI toString) println

@@ -1,0 +1,31 @@
+// operator_overload_demo.clay — Custom operators on user-defined types
+
+Vec2 = Object clone {
+  x = 0
+  y = 0
+  init(vx, vy) { x = vx; y = vy }
+
+  +(other) { Vec2 new(x + other x, y + other y) }
+  -(other) { Vec2 new(x - other x, y - other y) }
+  *(scalar) { Vec2 new(x * scalar, y * scalar) }
+  ==(other) { x == other x && y == other y }
+  !=(other) { (self == other) == false }
+
+  length() { Math sqrt(x * x + y * y) }
+  toString() { "Vec2(" + x toString + ", " + y toString + ")" }
+}
+
+a = Vec2 new(3, 4)
+b = Vec2 new(1, 2)
+
+// Arithmetic
+(a + b) println        // Vec2(4, 6)
+(a - b) println        // Vec2(2, 2)
+(a * 2) println        // Vec2(6, 8)
+
+// Comparison
+(a == Vec2 new(3, 4)) println   // true
+(a != b) println                // true
+
+// Method calls still work
+a length println       // 5
