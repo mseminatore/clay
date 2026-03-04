@@ -161,6 +161,13 @@ void clay_method_cache_clear(void);
 ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);
 
+/* Release a ClayValue if it's a heap-allocated object (safe no-op for ints, nil, booleans) */
+static inline void clay_release_val(ClayValue v) {
+    if (!CLAY_IS_INT(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE) {
+        clay_release(CLAY_OBJ(v));
+    }
+}
+
 /* Memory diagnostics counters */
 extern size_t clay_alloc_count;
 extern size_t clay_dealloc_count;

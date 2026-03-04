@@ -21,6 +21,9 @@ typedef struct {
     const char *super_proto; /* variable name of defining prototype (for super) */
     const char **known_slots; /* slot names from enclosing clone (Io-style assignment) */
     int known_slot_count;
+    char **owned_temps;  /* temps holding owned references (need release) */
+    int owned_temp_count;
+    int owned_temp_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen *cg, FILE *out, const char *source_file);
