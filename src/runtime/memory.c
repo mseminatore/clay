@@ -83,6 +83,7 @@ static void clay_dealloc(ClayObject *obj) {
 
     /* Free method keys and method structs */
     if (obj->methods) {
+        clay_method_cache_invalidate(obj->methods);
         size_t pos = 0;
         ht_key_t key;
         ht_value_t val;

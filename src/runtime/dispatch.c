@@ -26,6 +26,15 @@ void clay_method_cache_clear(void) {
     memset(method_cache, 0, sizeof(method_cache));
 }
 
+void clay_method_cache_invalidate(void *methods_ptr) {
+    HashTable *target = (HashTable *)methods_ptr;
+    for (int i = 0; i < METHOD_CACHE_SIZE; i++) {
+        if (method_cache[i].methods == target) {
+            method_cache[i].methods = NULL;
+        }
+    }
+}
+
 /* Lookup returning full ClayMethod* (walks prototype chain).
    If 'defining_out' is non-NULL, stores the prototype where the method was found. */
 static ClayMethod *lookup_method_full(ClayObject *obj, const char *name,

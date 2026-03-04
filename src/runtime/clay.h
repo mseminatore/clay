@@ -165,6 +165,7 @@ const char *clay_intern(const char *name);
 
 /* --- Method cache --- */
 void clay_method_cache_clear(void);
+void clay_method_cache_invalidate(void *methods_ptr);
 
 /* --- Memory management --- */
 ClayObject *clay_retain(ClayObject *obj);
