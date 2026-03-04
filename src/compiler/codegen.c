@@ -353,8 +353,8 @@ static char *emit_int_lit(CodeGen *cg, AstNode *node) {
 static char *emit_float_lit(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
-    fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_float_new(%gf));\n", t, node->as.float_lit.value);
-    push_owned_temp(cg, t);
+    /* Tagged float — no heap allocation, not an owned temp */
+    fprintf(cg->out, "ClayValue %s = clay_float_tag(%gf);\n", t, node->as.float_lit.value);
     return t;
 }
 
@@ -846,6 +846,40 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         fprintf(cg->out, "%s = CLAY_BOOL(clay_to_int(%s) <= clay_to_int(%s));\n", t, left, right);
     } else if (strcmp(op, ">=") == 0) {
         fprintf(cg->out, "%s = CLAY_BOOL(clay_to_int(%s) >= clay_to_int(%s));\n", t, left, right);
+    } else {
+        fprintf(cg->out, "%s = clay_send_val(%s, \"%s\", 1, (ClayValue[]){%s});\n",
+                t, left, op, right);
+    }
+
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "} else if (CLAY_IS_TAGGED_FLOAT(%s) || CLAY_IS_TAGGED_FLOAT(%s)) {\n", left, right);
+    cg->indent++;
+    emit_indent(cg);
+
+    /* Direct float operations for common cases */
+    if (strcmp(op, "+") == 0) {
+        fprintf(cg->out, "%s = clay_float_tag(clay_to_float(%s) + clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, "-") == 0) {
+        fprintf(cg->out, "%s = clay_float_tag(clay_to_float(%s) - clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, "*") == 0) {
+        fprintf(cg->out, "%s = clay_float_tag(clay_to_float(%s) * clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, "/") == 0) {
+        fprintf(cg->out, "{ float _div = clay_to_float(%s); if (_div == 0.0f) clay_raise(CLAY_VAL(clay_error_new(\"division by zero\", \"DivisionByZero\")));\n", right);
+        emit_indent(cg);
+        fprintf(cg->out, "%s = clay_float_tag(clay_to_float(%s) / _div); }\n", t, left);
+    } else if (strcmp(op, "==") == 0) {
+        fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) == clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, "!=") == 0) {
+        fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) != clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, "<") == 0) {
+        fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) < clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, ">") == 0) {
+        fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) > clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, "<=") == 0) {
+        fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) <= clay_to_float(%s));\n", t, left, right);
+    } else if (strcmp(op, ">=") == 0) {
+        fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) >= clay_to_float(%s));\n", t, left, right);
     } else {
         fprintf(cg->out, "%s = clay_send_val(%s, \"%s\", 1, (ClayValue[]){%s});\n",
                 t, left, op, right);

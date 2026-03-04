@@ -103,7 +103,7 @@ static ClayValue db_query(ClayObject *self, int argc, ClayValue *argv) {
                     val = clay_int(sqlite3_column_int64(stmt, i));
                     break;
                 case SQLITE_FLOAT:
-                    val = CLAY_VAL(clay_float_new(sqlite3_column_double(stmt, i)));
+                    val = clay_float_tag((float)sqlite3_column_double(stmt, i));
                     break;
                 case SQLITE_TEXT:
                     val = CLAY_VAL(clay_string_new(

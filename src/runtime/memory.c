@@ -113,7 +113,7 @@ static void clay_dealloc(ClayObject *obj) {
             if (obj->as.block.env) {
                 for (int i = 0; i < obj->as.block.env_size; i++) {
                     ClayValue cv = obj->as.block.env[i];
-                    if (CLAY_IS_INT(cv) || CLAY_IS_NIL(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE) {
+                    if (CLAY_IS_INT(cv) || CLAY_IS_TAGGED_FLOAT(cv) || CLAY_IS_NIL(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE) {
                         continue; /* tagged int, nil, or bool — nothing to free */
                     }
                     if (obj->as.block.env_are_cells) {

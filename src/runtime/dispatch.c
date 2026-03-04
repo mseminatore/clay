@@ -138,7 +138,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
                 return receiver;
             }
             /* Retain result before releasing wrapper (result may reference wrapper) */
-            if (!CLAY_IS_NIL(result) && !CLAY_IS_INT(result) &&
+            if (!CLAY_IS_NIL(result) && CLAY_IS_PTR(result) &&
                 result != CLAY_TRUE && result != CLAY_FALSE) {
                 clay_retain(CLAY_OBJ(result));
                 clay_release(wrapper);
@@ -151,6 +151,36 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         }
         char buf[128];
         snprintf(buf, sizeof(buf), "integer does not understand '%s'", selector);
+        clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
+        clay_trace_pop();
+        return CLAY_NIL;
+    }
+
+    /* Handle tagged float receivers — same wrapper approach as ints */
+    if (CLAY_IS_TAGGED_FLOAT(receiver)) {
+        ClayMethod *m = cached_lookup_method(clay_Number, selector);
+        if (m) {
+            ClayObject *wrapper = clay_clone(clay_Number);
+            clay_set_slot(wrapper, "_value", receiver);
+            ClayValue result = invoke_method(m, wrapper, argc, argv);
+            if (result == CLAY_VAL(wrapper)) {
+                clay_release(wrapper);
+                clay_trace_pop();
+                return receiver;
+            }
+            if (!CLAY_IS_NIL(result) && CLAY_IS_PTR(result) &&
+                result != CLAY_TRUE && result != CLAY_FALSE) {
+                clay_retain(CLAY_OBJ(result));
+                clay_release(wrapper);
+                clay_release(CLAY_OBJ(result));
+            } else {
+                clay_release(wrapper);
+            }
+            clay_trace_pop();
+            return result;
+        }
+        char buf[128];
+        snprintf(buf, sizeof(buf), "float does not understand '%s'", selector);
         clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
         clay_trace_pop();
         return CLAY_NIL;
@@ -189,7 +219,7 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
      * Otherwise return the slot value (only for zero-arg sends). */
     if (clay_has_slot(obj, selector)) {
         ClayValue slot_val = clay_get_slot(obj, selector);
-        if (!CLAY_IS_NIL(slot_val) && !CLAY_IS_INT(slot_val) &&
+        if (!CLAY_IS_NIL(slot_val) && CLAY_IS_PTR(slot_val) &&
             slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
             ClayObject *slot_obj = CLAY_OBJ(slot_val);
             if (slot_obj && slot_obj->type == CLAY_TYPE_BLOCK && slot_obj->as.block.func) {

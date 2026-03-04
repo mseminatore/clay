@@ -21,11 +21,11 @@ static ClayValue math_abs(ClayObject *self, int argc, ClayValue *argv) {
         intptr_t v = clay_to_int(argv[0]);
         return clay_int(v < 0 ? -v : v);
     }
-    return CLAY_VAL(clay_float_new(fabsf(clay_to_float(argv[0]))));
+    return clay_float_tag(fabsf(clay_to_float(argv[0])));
 }
 
 static ClayValue math_sqrt(ClayObject *self, int argc, ClayValue *argv) {
-    return CLAY_VAL(clay_float_new(sqrtf(get_float_arg(self, argc, argv))));
+    return clay_float_tag(sqrtf(get_float_arg(self, argc, argv)));
 }
 
 static ClayValue math_pow(ClayObject *self, int argc, ClayValue *argv) {
@@ -38,7 +38,7 @@ static ClayValue math_pow(ClayObject *self, int argc, ClayValue *argv) {
     if (CLAY_IS_INT(argv[0]) && CLAY_IS_INT(argv[1]) && result == (float)(intptr_t)result) {
         return clay_int((intptr_t)result);
     }
-    return CLAY_VAL(clay_float_new(result));
+    return clay_float_tag(result);
 }
 
 static ClayValue math_min(ClayObject *self, int argc, ClayValue *argv) {
@@ -49,7 +49,7 @@ static ClayValue math_min(ClayObject *self, int argc, ClayValue *argv) {
         return clay_int(a < b ? a : b);
     }
     float a = clay_to_float(argv[0]), b = clay_to_float(argv[1]);
-    return CLAY_VAL(clay_float_new(a < b ? a : b));
+    return clay_float_tag(a < b ? a : b);
 }
 
 static ClayValue math_max(ClayObject *self, int argc, ClayValue *argv) {
@@ -60,7 +60,7 @@ static ClayValue math_max(ClayObject *self, int argc, ClayValue *argv) {
         return clay_int(a > b ? a : b);
     }
     float a = clay_to_float(argv[0]), b = clay_to_float(argv[1]);
-    return CLAY_VAL(clay_float_new(a > b ? a : b));
+    return clay_float_tag(a > b ? a : b);
 }
 
 static ClayValue math_floor(ClayObject *self, int argc, ClayValue *argv) {
@@ -76,11 +76,11 @@ static ClayValue math_round(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue math_sin(ClayObject *self, int argc, ClayValue *argv) {
-    return CLAY_VAL(clay_float_new(sinf(get_float_arg(self, argc, argv))));
+    return clay_float_tag(sinf(get_float_arg(self, argc, argv)));
 }
 
 static ClayValue math_cos(ClayObject *self, int argc, ClayValue *argv) {
-    return CLAY_VAL(clay_float_new(cosf(get_float_arg(self, argc, argv))));
+    return clay_float_tag(cosf(get_float_arg(self, argc, argv)));
 }
 
 static ClayValue math_random(ClayObject *self, int argc, ClayValue *argv) {
@@ -89,7 +89,7 @@ static ClayValue math_random(ClayObject *self, int argc, ClayValue *argv) {
         srand((unsigned int)time(NULL));
         g_random_seeded = 1;
     }
-    return CLAY_VAL(clay_float_new((float)rand() / (float)RAND_MAX));
+    return clay_float_tag((float)rand() / (float)RAND_MAX);
 }
 
 void clay_math_init(ClayObject *proto) {
@@ -106,6 +106,6 @@ void clay_math_init(ClayObject *proto) {
     clay_set_method(proto, "random", math_random);
 
     /* Constants as slots */
-    clay_set_slot(proto, "pi", CLAY_VAL(clay_float_new(3.14159265f)));
-    clay_set_slot(proto, "e",  CLAY_VAL(clay_float_new(2.71828183f)));
+    clay_set_slot(proto, "pi", clay_float_tag(3.14159265f));
+    clay_set_slot(proto, "e",  clay_float_tag(2.71828183f));
 }

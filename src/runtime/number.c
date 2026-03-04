@@ -1,26 +1,26 @@
 /*
  * number.c - Number methods (integers and floats)
  *
- * Integers are tagged values (low bit = 1), not ClayObject pointers.
- * Floats are ClayObject with type CLAY_TYPE_FLOAT.
+ * Integers are tagged values: (v & 3) == 1, value in upper bits.
+ * Floats are tagged values: (v & 3) == 3, IEEE 754 bits in upper word.
  * These methods are registered on the Number prototype and
- * dispatched when clay_send detects a tagged int receiver.
- * The "self" pointer won't be a real object for ints -
- * we handle this in dispatch.c by creating a wrapper.
+ * dispatched when clay_send detects a tagged int/float receiver.
+ * The "self" pointer is a wrapper clone with _value slot for tagged dispatch.
  */
 #include "clay.h"
 
-/* Float constructor and accessor */
+/* Float constructor — returns tagged float (no heap allocation) */
 ClayObject *clay_float_new(float v) {
-    ClayObject *obj = clay_clone(clay_Number);
-    obj->type = CLAY_TYPE_FLOAT;
-    obj->as.number_float.value = v;
-    return obj;
+    /* Legacy API returns ClayObject*, but we cast the tagged value.
+     * Callers typically wrap with CLAY_VAL() anyway. */
+    return (ClayObject *)(uintptr_t)clay_float_tag(v);
 }
 
 float clay_to_float(ClayValue v) {
+    if (CLAY_IS_TAGGED_FLOAT(v)) return clay_float_untag(v);
     if (CLAY_IS_INT(v)) return (float)clay_to_int(v);
-    if (CLAY_IS_FLOAT(v)) return CLAY_OBJ(v)->as.number_float.value;
+    if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && CLAY_OBJ(v)->type == CLAY_TYPE_FLOAT)
+        return CLAY_OBJ(v)->as.number_float.value;
     return 0.0f;
 }
 
@@ -30,17 +30,22 @@ float clay_to_float(ClayValue v) {
 static intptr_t self_int_value(ClayObject *self) {
     if (self->type == CLAY_TYPE_FLOAT) return (intptr_t)self->as.number_float.value;
     ClayValue v = clay_get_slot(self, "_value");
+    if (CLAY_IS_TAGGED_FLOAT(v)) return (intptr_t)clay_float_untag(v);
     return clay_to_int(v);
 }
 
 static float self_float_value(ClayObject *self) {
     if (self->type == CLAY_TYPE_FLOAT) return self->as.number_float.value;
     ClayValue v = clay_get_slot(self, "_value");
+    if (CLAY_IS_TAGGED_FLOAT(v)) return clay_float_untag(v);
     return (float)clay_to_int(v);
 }
 
 static int is_float_arg(ClayObject *self, int argc, ClayValue *argv) {
     if (self->type == CLAY_TYPE_FLOAT) return 1;
+    /* Check _value slot for tagged float */
+    ClayValue sv = clay_get_slot(self, "_value");
+    if (CLAY_IS_TAGGED_FLOAT(sv)) return 1;
     if (argc > 0 && CLAY_IS_FLOAT(argv[0])) return 1;
     return 0;
 }
@@ -53,7 +58,7 @@ static float arg_float_value(int argc, ClayValue *argv) {
 static ClayValue number_add(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(self_int_value(self));
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_VAL(clay_float_new(self_float_value(self) + arg_float_value(argc, argv)));
+        return clay_float_tag(self_float_value(self) + arg_float_value(argc, argv));
     }
     intptr_t a = self_int_value(self);
     intptr_t b;
@@ -68,7 +73,7 @@ static ClayValue number_add(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue number_sub(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(-self_int_value(self));
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_VAL(clay_float_new(self_float_value(self) - arg_float_value(argc, argv)));
+        return clay_float_tag(self_float_value(self) - arg_float_value(argc, argv));
     }
     intptr_t a = self_int_value(self);
     intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
@@ -78,7 +83,7 @@ static ClayValue number_sub(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue number_mul(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(0);
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_VAL(clay_float_new(self_float_value(self) * arg_float_value(argc, argv)));
+        return clay_float_tag(self_float_value(self) * arg_float_value(argc, argv));
     }
     intptr_t a = self_int_value(self);
     intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
@@ -90,7 +95,7 @@ static ClayValue number_div(ClayObject *self, int argc, ClayValue *argv) {
     if (is_float_arg(self, argc, argv)) {
         float b = arg_float_value(argc, argv);
         if (b == 0.0f) clay_raise(CLAY_VAL(clay_error_new("division by zero", "DivisionByZero")));
-        return CLAY_VAL(clay_float_new(self_float_value(self) / b));
+        return clay_float_tag(self_float_value(self) / b);
     }
     intptr_t a = self_int_value(self);
     intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
@@ -174,8 +179,8 @@ static ClayValue number_neq(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue number_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char buf[64];
-    if (self->type == CLAY_TYPE_FLOAT) {
-        snprintf(buf, sizeof(buf), "%g", self->as.number_float.value);
+    if (is_float_arg(self, 0, NULL)) {
+        snprintf(buf, sizeof(buf), "%g", self_float_value(self));
     } else {
         snprintf(buf, sizeof(buf), "%ld", (long)self_int_value(self));
     }
@@ -185,8 +190,8 @@ static ClayValue number_toString(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue number_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char buf[64];
-    if (self->type == CLAY_TYPE_FLOAT) {
-        snprintf(buf, sizeof(buf), "%g\n", self->as.number_float.value);
+    if (is_float_arg(self, 0, NULL)) {
+        snprintf(buf, sizeof(buf), "%g\n", self_float_value(self));
     } else {
         snprintf(buf, sizeof(buf), "%ld\n", (long)self_int_value(self));
     }
@@ -200,7 +205,7 @@ static ClayValue number_println(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue number_toFloat(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return CLAY_VAL(clay_float_new(self_float_value(self)));
+    return clay_float_tag(self_float_value(self));
 }
 
 static ClayValue number_toInt(ClayObject *self, int argc, ClayValue *argv) {
@@ -210,9 +215,9 @@ static ClayValue number_toInt(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue number_abs(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    if (self->type == CLAY_TYPE_FLOAT) {
-        float v = self->as.number_float.value;
-        return CLAY_VAL(clay_float_new(v < 0 ? -v : v));
+    if (is_float_arg(self, 0, NULL)) {
+        float v = self_float_value(self);
+        return clay_float_tag(v < 0 ? -v : v);
     }
     intptr_t v = self_int_value(self);
     return clay_int(v < 0 ? -v : v);

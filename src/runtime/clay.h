@@ -21,14 +21,20 @@ extern "C" {
  */
 typedef uintptr_t ClayValue;
 
-/* Tag checks */
+/* Tag checks — 2-bit tagging scheme:
+ *   (v & 3) == 0  →  pointer or nil
+ *   (v & 3) == 1  →  tagged integer
+ *   (v & 3) == 3  →  tagged float (32-bit IEEE 754 bits in upper word)
+ */
 #define CLAY_TAG_INT    1
-#define CLAY_IS_INT(v)  (((v) & CLAY_TAG_INT) != 0)
-#define CLAY_IS_PTR(v)  (((v) & CLAY_TAG_INT) == 0)
+#define CLAY_TAG_FLOAT  3
+#define CLAY_IS_INT(v)  (((v) & 3) == CLAY_TAG_INT)
+#define CLAY_IS_PTR(v)  (((v) & 1) == 0)
+#define CLAY_IS_TAGGED_FLOAT(v) (((v) & 3) == CLAY_TAG_FLOAT)
 
 /* Integer tagging */
-#define CLAY_INT_MAX  (INTPTR_MAX >> 1)
-#define CLAY_INT_MIN  (INTPTR_MIN >> 1)
+#define CLAY_INT_MAX  (INTPTR_MAX >> 2)
+#define CLAY_INT_MIN  (INTPTR_MIN >> 2)
 
 ClayValue clay_int(intptr_t n);
 intptr_t  clay_to_int(ClayValue v);
@@ -40,6 +46,8 @@ typedef struct ClayObject ClayObject;
 /* Float helpers (CLAY_IS_FLOAT macro defined after struct ClayObject) */
 ClayObject *clay_float_new(float v);
 float      clay_to_float(ClayValue v);
+ClayValue  clay_float_tag(float v);
+float      clay_float_untag(ClayValue v);
 
 /* Method function signature: receiver, argc, argv -> return value */
 typedef ClayValue (*ClayMethodFunc)(ClayObject *self, int argc, ClayValue *argv);
@@ -114,8 +122,9 @@ struct ClayObject {
 #define CLAY_NIL        ((ClayValue)0)
 #define CLAY_IS_NIL(v)  ((v) == CLAY_NIL)
 
-/* Float type check (needs full struct definition) */
-#define CLAY_IS_FLOAT(v) (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && CLAY_OBJ(v)->type == CLAY_TYPE_FLOAT)
+/* Float type check: tagged float OR boxed float object */
+#define CLAY_IS_FLOAT(v) (CLAY_IS_TAGGED_FLOAT(v) || \
+    (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && CLAY_OBJ(v)->type == CLAY_TYPE_FLOAT))
 
 /* Boolean singletons */
 extern ClayObject clay_true_obj;
@@ -161,9 +170,9 @@ void clay_method_cache_clear(void);
 ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);
 
-/* Release a ClayValue if it's a heap-allocated object (safe no-op for ints, nil, booleans) */
+/* Release a ClayValue if it's a heap-allocated object (safe no-op for ints, floats, nil, booleans) */
 static inline void clay_release_val(ClayValue v) {
-    if (!CLAY_IS_INT(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE) {
+    if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE) {
         clay_release(CLAY_OBJ(v));
     }
 }

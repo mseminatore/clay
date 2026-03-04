@@ -291,7 +291,7 @@ static ClayValue fiber_yield(ClayObject *self, int argc, ClayValue *argv) {
 /* Fiber new(block) — create a fiber with its own C stack and VM resources */
 static ClayValue fiber_new(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
     ClayObject *block = CLAY_OBJ(argv[0]);
 
     extern ClayObject *clay_Fiber;
@@ -679,7 +679,7 @@ ClayValue vm_to_clay(clayvm_value_t v) {
         case CLAYVM_VAL_BOOL:   return v.as.boolean ? CLAY_TRUE : CLAY_FALSE;
         case CLAYVM_VAL_NIL:    return CLAY_NIL;
         case CLAYVM_VAL_OBJECT: return CLAY_VAL(v.as.obj);
-        case CLAYVM_VAL_DOUBLE: return CLAY_VAL(clay_float_new((float)v.as.f64));
+        case CLAYVM_VAL_DOUBLE: return clay_float_tag((float)v.as.f64);
         default: break;
     }
     return CLAY_NIL;
@@ -688,6 +688,7 @@ ClayValue vm_to_clay(clayvm_value_t v) {
 clayvm_value_t clay_to_vm(ClayValue cv) {
     if (CLAY_IS_NIL(cv))   return CLAYVM_NIL_VAL;
     if (CLAY_IS_INT(cv))   return CLAYVM_INT64(clay_to_int(cv));
+    if (CLAY_IS_TAGGED_FLOAT(cv)) return CLAYVM_DOUBLE((double)clay_float_untag(cv));
     if (cv == CLAY_TRUE)   return CLAYVM_BOOL(1);
     if (cv == CLAY_FALSE)  return CLAYVM_BOOL(0);
     return CLAYVM_OBJ((void*)(uintptr_t)cv);
@@ -771,7 +772,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     ClayObject *target_obj = NULL;
     HashTable *target_methods = NULL;
 
-    if (CLAY_IS_INT(receiver)) {
+    if (CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) {
         target_obj = clay_Number;
         target_methods = clay_Number->methods;
     } else if (!CLAY_IS_NIL(receiver)) {
@@ -790,7 +791,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         ic->methods_key == target_methods &&
         ic->selector == selector) {
         /* IC hit — invoke directly, skip dispatch */
-        if (CLAY_IS_INT(receiver)) {
+        if (CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) {
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
             result = clay_invoke(ic->method, wrapper, msg_argc, args);
@@ -879,6 +880,8 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
     char buf[256];
     if (CLAY_IS_INT(cv)) {
         snprintf(buf, sizeof(buf), "%ld\n", (long)clay_to_int(cv));
+    } else if (CLAY_IS_TAGGED_FLOAT(cv)) {
+        snprintf(buf, sizeof(buf), "%g\n", clay_float_untag(cv));
     } else if (CLAY_IS_NIL(cv)) {
         snprintf(buf, sizeof(buf), "nil\n");
     } else if (cv == CLAY_TRUE) {
@@ -1910,7 +1913,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_FLOAT_LIT: {
-            int idx = add_constant_obj(bc, clay_float_new(node->as.float_lit.value));
+            int idx = clayvm_vm_add_constant(bc->vm, CLAYVM_DOUBLE((double)node->as.float_lit.value));
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)idx);
             break;
         }

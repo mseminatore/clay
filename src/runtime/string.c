@@ -262,7 +262,7 @@ static ClayValue string_toFloat(ClayObject *self, int argc, ClayValue *argv) {
     if (end == self->as.string.data) {
         clay_raise(CLAY_VAL(clay_error_new("invalid float string", "TypeError")));
     }
-    return CLAY_VAL(clay_float_new(val));
+    return clay_float_tag(val);
 }
 
 static ClayValue string_trim(ClayObject *self, int argc, ClayValue *argv) {
@@ -385,7 +385,7 @@ static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t width = clay_to_int(argv[0]);
     if ((size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
     char pad = ' ';
-    if (argc > 1 && !CLAY_IS_INT(argv[1]) && !CLAY_IS_NIL(argv[1])) {
+    if (argc > 1 && CLAY_IS_PTR(argv[1]) && !CLAY_IS_NIL(argv[1])) {
         ClayObject *ps = CLAY_OBJ(argv[1]);
         if (ps->type == CLAY_TYPE_STRING && ps->as.string.length > 0)
             pad = ps->as.string.data[0];
@@ -403,7 +403,7 @@ static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t width = clay_to_int(argv[0]);
     if ((size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
     char pad = ' ';
-    if (argc > 1 && !CLAY_IS_INT(argv[1]) && !CLAY_IS_NIL(argv[1])) {
+    if (argc > 1 && CLAY_IS_PTR(argv[1]) && !CLAY_IS_NIL(argv[1])) {
         ClayObject *ps = CLAY_OBJ(argv[1]);
         if (ps->type == CLAY_TYPE_STRING && ps->as.string.length > 0)
             pad = ps->as.string.data[0];

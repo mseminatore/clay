@@ -661,7 +661,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             } else if (varRef >= 3 && varRef < g_dap.var_refs.count) {
                 /* Child variables of an expanded object/array */
                 ClayValue parent_cv = g_dap.var_refs.values[varRef];
-                if (!CLAY_IS_NIL(parent_cv) && !CLAY_IS_INT(parent_cv)) {
+                if (!CLAY_IS_NIL(parent_cv) && CLAY_IS_PTR(parent_cv)) {
                     ClayObject *parent = CLAY_OBJ(parent_cv);
                     if (parent && parent->type == CLAY_TYPE_ARRAY) {
                         /* Array elements */
@@ -1095,7 +1095,7 @@ int dap_run(const char *filename) {
     if (caught != 0) {
         /* Exception occurred */
         ClayValue err = clay_error_stack.current_error;
-        if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+        if (!CLAY_IS_NIL(err) && CLAY_IS_PTR(err)) {
             ClayValue msg_val = clay_send_val(err, "message", 0, NULL);
             const char *msg_str = clay_string_data(CLAY_OBJ(msg_val));
             char buf[512];

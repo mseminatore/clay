@@ -204,7 +204,7 @@ static ClayValue array_contains(ClayObject *self, int argc, ClayValue *argv) {
         if (item == argv[0]) return CLAY_TRUE;
         /* Compare by value for ints and strings */
         if (CLAY_IS_INT(item) && CLAY_IS_INT(argv[0]) && item == argv[0]) return CLAY_TRUE;
-        if (!CLAY_IS_INT(item) && !CLAY_IS_NIL(item) && !CLAY_IS_INT(argv[0]) && !CLAY_IS_NIL(argv[0])) {
+        if (CLAY_IS_PTR(item) && !CLAY_IS_NIL(item) && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
             ClayValue eq = clay_send_val(item, "==", 1, &argv[0]);
             if (eq == CLAY_TRUE) return CLAY_TRUE;
         }
@@ -217,7 +217,7 @@ static ClayValue array_indexOf(ClayObject *self, int argc, ClayValue *argv) {
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
         if (item == argv[0]) return clay_int((intptr_t)i);
-        if (!CLAY_IS_INT(item) && !CLAY_IS_NIL(item) && !CLAY_IS_INT(argv[0]) && !CLAY_IS_NIL(argv[0])) {
+        if (CLAY_IS_PTR(item) && !CLAY_IS_NIL(item) && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
             ClayValue eq = clay_send_val(item, "==", 1, &argv[0]);
             if (eq == CLAY_TRUE) return clay_int((intptr_t)i);
         }
@@ -329,7 +329,7 @@ static ClayValue array_removeAt(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue array_equals(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_ARRAY) return CLAY_FALSE;
     if (self == other) return CLAY_TRUE;
@@ -352,7 +352,7 @@ static ClayValue array_flatten(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *result = clay_array_new();
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
-        if (!CLAY_IS_INT(item) && !CLAY_IS_NIL(item) &&
+        if (CLAY_IS_PTR(item) && !CLAY_IS_NIL(item) &&
             CLAY_OBJ(item)->type == CLAY_TYPE_ARRAY) {
             ClayObject *inner = CLAY_OBJ(item);
             for (size_t j = 0; j < inner->as.array.size; j++) {
@@ -381,7 +381,7 @@ static ClayValue array_sum(ClayObject *self, int argc, ClayValue *argv) {
             fsum += clay_to_float(v);
         }
     }
-    if (use_float) return CLAY_VAL(clay_float_new((float)fsum));
+    if (use_float) return clay_float_tag((float)fsum);
     return clay_int(isum);
 }
 
@@ -418,7 +418,7 @@ static ClayValue array_avg(ClayObject *self, int argc, ClayValue *argv) {
         if (CLAY_IS_INT(v)) sum += (double)clay_to_int(v);
         else if (CLAY_IS_FLOAT(v)) sum += (double)clay_to_float(v);
     }
-    return CLAY_VAL(clay_float_new((float)(sum / (double)self->as.array.size)));
+    return clay_float_tag((float)(sum / (double)self->as.array.size));
 }
 
 static ClayValue array_unique(ClayObject *self, int argc, ClayValue *argv) {

@@ -562,15 +562,15 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         int resp_status = 200;
         const char *content_type = "text/plain";
         const char *location = NULL;
-        if (resp != CLAY_NIL && !CLAY_IS_INT(resp)) {
+        if (resp != CLAY_NIL && CLAY_IS_PTR(resp)) {
             ClayValue sv = clay_get_slot(CLAY_OBJ(resp), "_status");
             if (CLAY_IS_INT(sv)) resp_status = (int)clay_to_int(sv);
             ClayValue bv = clay_get_slot(CLAY_OBJ(resp), "_body");
-            if (bv != CLAY_NIL && !CLAY_IS_INT(bv)) resp_body = clay_string_data(CLAY_OBJ(bv));
+            if (bv != CLAY_NIL && CLAY_IS_PTR(bv)) resp_body = clay_string_data(CLAY_OBJ(bv));
             ClayValue ct = clay_get_slot(CLAY_OBJ(resp), "_content_type");
-            if (ct != CLAY_NIL && !CLAY_IS_INT(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
+            if (ct != CLAY_NIL && CLAY_IS_PTR(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
             ClayValue loc = clay_get_slot(CLAY_OBJ(resp), "_location");
-            if (loc != CLAY_NIL && !CLAY_IS_INT(loc)) location = clay_string_data(CLAY_OBJ(loc));
+            if (loc != CLAY_NIL && CLAY_IS_PTR(loc)) location = clay_string_data(CLAY_OBJ(loc));
         }
 
         char http_header[512];
@@ -593,7 +593,7 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         closesocket(client_fd);
 
         clay_release(CLAY_OBJ(req));
-        if (resp != CLAY_NIL && !CLAY_IS_INT(resp)) clay_release(CLAY_OBJ(resp));
+        if (resp != CLAY_NIL && CLAY_IS_PTR(resp)) clay_release(CLAY_OBJ(resp));
     }
 
     closesocket(server_fd);
@@ -669,15 +669,15 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         int resp_status = 200;
         const char *content_type = "text/plain";
         const char *location = NULL;
-        if (resp != CLAY_NIL && !CLAY_IS_INT(resp)) {
+        if (resp != CLAY_NIL && CLAY_IS_PTR(resp)) {
             ClayValue sv = clay_get_slot(CLAY_OBJ(resp), "_status");
             if (CLAY_IS_INT(sv)) resp_status = (int)clay_to_int(sv);
             ClayValue bv = clay_get_slot(CLAY_OBJ(resp), "_body");
-            if (bv != CLAY_NIL && !CLAY_IS_INT(bv)) resp_body = clay_string_data(CLAY_OBJ(bv));
+            if (bv != CLAY_NIL && CLAY_IS_PTR(bv)) resp_body = clay_string_data(CLAY_OBJ(bv));
             ClayValue ct = clay_get_slot(CLAY_OBJ(resp), "_content_type");
-            if (ct != CLAY_NIL && !CLAY_IS_INT(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
+            if (ct != CLAY_NIL && CLAY_IS_PTR(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
             ClayValue loc = clay_get_slot(CLAY_OBJ(resp), "_location");
-            if (loc != CLAY_NIL && !CLAY_IS_INT(loc)) location = clay_string_data(CLAY_OBJ(loc));
+            if (loc != CLAY_NIL && CLAY_IS_PTR(loc)) location = clay_string_data(CLAY_OBJ(loc));
         }
 
         char http_header[512];
@@ -699,7 +699,7 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         close(client_fd);
 
         clay_release(CLAY_OBJ(req));
-        if (resp != CLAY_NIL && !CLAY_IS_INT(resp)) clay_release(CLAY_OBJ(resp));
+        if (resp != CLAY_NIL && CLAY_IS_PTR(resp)) clay_release(CLAY_OBJ(resp));
     }
 
     close(server_fd);

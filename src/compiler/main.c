@@ -743,7 +743,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         if (caught != 0) {
             /* An error was raised during execution */
             ClayValue err = clay_error_stack.current_error;
-            if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+            if (!CLAY_IS_NIL(err) && CLAY_IS_PTR(err)) {
                 ClayValue msg = clay_send_val(err, "message", 0, NULL);
                 fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
                         clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
@@ -859,7 +859,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     int caught = clay_try_push(&_tf);
     if (caught != 0) {
         ClayValue err = clay_error_stack.current_error;
-        if (!CLAY_IS_NIL(err) && !CLAY_IS_INT(err)) {
+        if (!CLAY_IS_NIL(err) && CLAY_IS_PTR(err)) {
             ClayValue file = clay_send_val(err, "file", 0, NULL);
             ClayValue line = clay_send_val(err, "line", 0, NULL);
             ClayValue msg = clay_send_val(err, "message", 0, NULL);
