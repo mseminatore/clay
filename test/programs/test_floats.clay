@@ -1,0 +1,134 @@
+// test_floats.clay — Float operations and tagged float correctness
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue {
+            self _f = self _f + 1
+            ("FAIL eq: " + a toString() + " != " + b toString()) println()
+        }
+        self
+    }
+
+    near(a, b) {
+        diff = (a - b) abs
+        (diff < 0.001) ifTrue { self _p = self _p + 1 }
+        (!(diff < 0.001)) ifTrue {
+            self _f = self _f + 1
+            ("FAIL near: " + a toString() + " not near " + b toString()) println()
+        }
+        self
+    }
+
+    ok(v) {
+        (v == true) ifTrue { self _p = self _p + 1 }
+        (!(v == true)) ifTrue { self _f = self _f + 1; "FAIL: not true" println() }
+        self
+    }
+
+    notOk(v) {
+        (v == false) ifTrue { self _p = self _p + 1 }
+        (!(v == false)) ifTrue { self _f = self _f + 1; "FAIL: not false" println() }
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+// --- Float arithmetic ---
+Test near(1.5 + 2.5, 4.0)
+Test near(10.0 - 3.5, 6.5)
+Test near(2.5 * 4.0, 10.0)
+Test near(7.0 / 2.0, 3.5)
+Test near(0.1 + 0.2, 0.3)
+
+// --- Float comparisons (the exact bug we caught) ---
+Test ok(0.5 < 1.0)
+Test notOk(0.5 > 1.0)
+Test notOk(0.5 == 1.0)
+Test ok(0.5 != 1.0)
+Test ok(0.5 <= 1.0)
+Test ok(1.0 <= 1.0)
+Test ok(1.0 >= 0.5)
+Test ok(1.0 >= 1.0)
+Test notOk(1.0 < 0.5)
+Test notOk(0.5 > 1.0)
+
+// --- Float equality ---
+Test ok(1.0 == 1.0)
+Test ok(0.0 == 0.0)
+Test ok(3.14 == 3.14)
+Test notOk(1.0 == 2.0)
+
+// --- Float truthiness via comparisons ---
+result = (0.0 == 0) ifTrue { "zero" } ifFalse { "nonzero" }
+Test eq(result, "zero")
+
+result = (1.0 != 0) ifTrue { "nonzero" } ifFalse { "zero" }
+Test eq(result, "nonzero")
+
+result = (-1.0 != 0) ifTrue { "nonzero" } ifFalse { "zero" }
+Test eq(result, "nonzero")
+
+// --- Mixed int/float operations ---
+Test near(3 + 0.5, 3.5)
+Test near(0.5 + 3, 3.5)
+Test near(10 - 0.5, 9.5)
+Test near(2 * 1.5, 3.0)
+Test near(7 / 2.0, 3.5)
+
+// --- Negative floats ---
+Test near(0.0 - 1.5, -1.5)
+Test ok(-1.5 < 0.0)
+Test ok(-1.5 < 1.5)
+
+// --- Float toInt / toFloat ---
+Test eq(3.7 toInt(), 3)
+Test eq(3 toFloat(), 3.0)
+
+// --- Float abs ---
+Test near((-3.5) abs, 3.5)
+Test near(3.5 abs, 3.5)
+
+// --- Math library with floats ---
+Test near(Math sqrt(4.0), 2.0)
+Test near(Math sqrt(9.0), 3.0)
+Test near(Math abs(-5.5), 5.5)
+Test near(Math sin(0.0), 0.0)
+Test near(Math cos(0.0), 1.0)
+Test near(Math pi, 3.14159)
+Test ok(Math pi > 3.0)
+Test ok(Math pi < 4.0)
+
+// --- Math min/max with floats ---
+Test near(Math min(1.5, 2.5), 1.5)
+Test near(Math max(1.5, 2.5), 2.5)
+
+// --- Math pow ---
+Test near(Math pow(2.0, 3.0), 8.0)
+Test near(Math pow(4.0, 0.5), 2.0)
+
+// --- Float division by zero (VM produces inf per IEEE 754) ---
+x = 1.0 / 0.0
+Test ok(x toString() == "inf")
+
+// --- Float in compound assignment ---
+x = 1.5
+x += 2.5
+Test near(x, 4.0)
+x -= 1.0
+Test near(x, 3.0)
+x *= 2.0
+Test near(x, 6.0)
+x /= 3.0
+Test near(x, 2.0)
+
+Test done()

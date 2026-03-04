@@ -7,6 +7,7 @@
 #include "bc_compiler.h"
 #include "vm.h"
 #include "hash.h"
+#include <math.h>
 
 extern ClayObject *clay_range_new(intptr_t start, intptr_t end, intptr_t step);
 
@@ -33,6 +34,38 @@ static void test_tagged_values(void) {
     TEST(!CLAY_IS_NIL(CLAY_FALSE));
     TEST(CLAY_IS_TRUE(CLAY_TRUE));
     TEST(CLAY_IS_FALSE(CLAY_FALSE));
+
+    COMMENT("float tagging roundtrip...");
+    TEST(fabsf(clay_float_untag(clay_float_tag(0.0f)) - 0.0f) < 1e-6f);
+    TEST(fabsf(clay_float_untag(clay_float_tag(1.0f)) - 1.0f) < 1e-6f);
+    TEST(fabsf(clay_float_untag(clay_float_tag(-1.0f)) - (-1.0f)) < 1e-6f);
+    TEST(fabsf(clay_float_untag(clay_float_tag(0.5f)) - 0.5f) < 1e-6f);
+    TEST(fabsf(clay_float_untag(clay_float_tag(3.14f)) - 3.14f) < 1e-4f);
+    TEST(fabsf(clay_float_untag(clay_float_tag(1e10f)) - 1e10f) < 1e4f);
+    TEST(fabsf(clay_float_untag(clay_float_tag(1e-10f)) - 1e-10f) < 1e-16f);
+
+    COMMENT("float tag type checks...");
+    ClayValue fv = clay_float_tag(3.14f);
+    TEST(CLAY_IS_TAGGED_FLOAT(fv));
+    TEST(!CLAY_IS_INT(fv));
+    TEST(!CLAY_IS_PTR(fv));
+    TEST(!CLAY_IS_NIL(fv));
+    TEST(CLAY_IS_FLOAT(fv));
+
+    COMMENT("float vs int tag distinctness...");
+    TEST(!CLAY_IS_TAGGED_FLOAT(clay_int(42)));
+    TEST(!CLAY_IS_TAGGED_FLOAT(CLAY_NIL));
+    TEST(!CLAY_IS_TAGGED_FLOAT(CLAY_TRUE));
+
+    COMMENT("float truthiness...");
+    TESTEX("0.0 is falsy", !CLAY_IS_TRUTHY(clay_float_tag(0.0f)));
+    TESTEX("1.0 is truthy", CLAY_IS_TRUTHY(clay_float_tag(1.0f)));
+    TESTEX("-1.0 is truthy", CLAY_IS_TRUTHY(clay_float_tag(-1.0f)));
+    TESTEX("0.5 is truthy", CLAY_IS_TRUTHY(clay_float_tag(0.5f)));
+
+    COMMENT("clay_to_float with tagged floats...");
+    TEST(fabsf(clay_to_float(clay_float_tag(2.5f)) - 2.5f) < 1e-6f);
+    TEST(fabsf(clay_to_float(clay_int(3)) - 3.0f) < 1e-6f);
 }
 
 static void test_object_model(void) {
@@ -126,6 +159,57 @@ static void test_numbers(void) {
     clay_release(CLAY_OBJ(result));
 
     clay_release(num);
+
+    COMMENT("float arithmetic via dispatch...");
+    ClayValue fa = clay_float_tag(10.5f);
+    ClayValue fb = clay_float_tag(3.0f);
+    result = clay_send_val(fa, "+", 1, &fb);
+    TEST(CLAY_IS_TAGGED_FLOAT(result));
+    TEST(fabsf(clay_float_untag(result) - 13.5f) < 1e-4f);
+
+    result = clay_send_val(fa, "-", 1, &fb);
+    TEST(fabsf(clay_float_untag(result) - 7.5f) < 1e-4f);
+
+    result = clay_send_val(fa, "*", 1, &fb);
+    TEST(fabsf(clay_float_untag(result) - 31.5f) < 1e-4f);
+
+    result = clay_send_val(fa, "/", 1, &fb);
+    TEST(fabsf(clay_float_untag(result) - 3.5f) < 1e-4f);
+
+    COMMENT("float comparison via dispatch...");
+    ClayValue half = clay_float_tag(0.5f);
+    ClayValue one = clay_float_tag(1.0f);
+
+    result = clay_send_val(half, "<", 1, &one);
+    TESTEX("0.5 < 1.0 is true", CLAY_IS_TRUE(result));
+
+    result = clay_send_val(half, ">", 1, &one);
+    TESTEX("0.5 > 1.0 is false", CLAY_IS_FALSE(result));
+
+    result = clay_send_val(half, "==", 1, &one);
+    TESTEX("0.5 == 1.0 is false", CLAY_IS_FALSE(result));
+
+    result = clay_send_val(one, "==", 1, &one);
+    TESTEX("1.0 == 1.0 is true", CLAY_IS_TRUE(result));
+
+    result = clay_send_val(half, "!=", 1, &one);
+    TESTEX("0.5 != 1.0 is true", CLAY_IS_TRUE(result));
+
+    result = clay_send_val(half, "<=", 1, &one);
+    TESTEX("0.5 <= 1.0 is true", CLAY_IS_TRUE(result));
+
+    result = clay_send_val(one, ">=", 1, &half);
+    TESTEX("1.0 >= 0.5 is true", CLAY_IS_TRUE(result));
+
+    COMMENT("mixed int/float promotion...");
+    ClayValue ival = clay_int(3);
+    result = clay_send_val(ival, "+", 1, &half);
+    TEST(fabsf(clay_to_float(result) - 3.5f) < 1e-4f);
+
+    COMMENT("float toString...");
+    result = clay_send_val(clay_float_tag(3.14f), "toString", 0, NULL);
+    TEST(!CLAY_IS_NIL(result) && CLAY_IS_PTR(result));
+    clay_release(CLAY_OBJ(result));
 }
 
 static void test_strings(void) {
