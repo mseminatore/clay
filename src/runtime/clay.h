@@ -135,8 +135,8 @@ extern ClayObject clay_false_obj;
 #define CLAY_IS_TRUE(v) ((v) == CLAY_TRUE)
 #define CLAY_IS_FALSE(v) ((v) == CLAY_FALSE)
 
-/* Truthy: everything except nil, false, and 0 */
-#define CLAY_IS_TRUTHY(v) ((v) != CLAY_NIL && (v) != CLAY_FALSE && (v) != clay_int(0))
+/* Truthy: everything except nil, false, integer 0, and float 0.0 */
+#define CLAY_IS_TRUTHY(v) ((v) != CLAY_NIL && (v) != CLAY_FALSE && (v) != clay_int(0) && (v) != CLAY_TAG_FLOAT)
 
 /* --- Object model --- */
 ClayObject *clay_object_new(void);

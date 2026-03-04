@@ -353,8 +353,14 @@ static char *emit_int_lit(CodeGen *cg, AstNode *node) {
 static char *emit_float_lit(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
-    /* Tagged float — no heap allocation, not an owned temp */
-    fprintf(cg->out, "ClayValue %s = clay_float_tag(%gf);\n", t, node->as.float_lit.value);
+    /* Tagged float — no heap allocation, not an owned temp.
+     * Use %.9g to preserve precision; always append .0 if no decimal point. */
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.9g", node->as.float_lit.value);
+    if (!strchr(buf, '.') && !strchr(buf, 'e') && !strchr(buf, 'E')) {
+        strcat(buf, ".0");
+    }
+    fprintf(cg->out, "ClayValue %s = clay_float_tag(%sf);\n", t, buf);
     return t;
 }
 
