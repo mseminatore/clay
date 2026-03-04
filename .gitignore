@@ -1,9 +1,11 @@
 # Project files
 clay
+test_*.txt
 
 # Directories
 build/
 node_modules/
+build_clang/
 
 # Test output captures
 stdout_*.txt
