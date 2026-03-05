@@ -106,14 +106,17 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->frames[g_vm->frame_count].func_index = 0;
     g_vm->frame_count++;
 
-    /* Push params as stack locals (slots 0, 1, ...) */
+    /* Push params as stack locals (slots 0, 1, ...).
+     * Params are borrowed from argv — retain for stack ownership. */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
         ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
         clayvm_value_t vm_val = clay_to_vm(val);
+        vm_retain_val(vm_val);
         clayvm_vm_push(g_vm, vm_val);
     }
 
-    /* Push captured values as additional locals (slots param_count, param_count+1, ...) */
+    /* Push captured values as additional locals (slots param_count, param_count+1, ...).
+     * Captures are borrowed from block env — retain for stack ownership. */
     int capture_count = chunk->capture_count;
     for (int i = 0; i < capture_count; i++) {
         ClayValue cv = (1 + i < self->as.block.env_size) ?
@@ -124,6 +127,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
         } else {
             vm_val = clay_to_vm(cv);
         }
+        vm_retain_val(vm_val);
         clayvm_vm_push(g_vm, vm_val);
     }
 
@@ -174,8 +178,17 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     /* Get return value (last value on stack) */
     ClayValue retval = CLAY_NIL;
+    clayvm_value_t retval_vm = CLAYVM_NIL_VAL;
     if (!had_exception && g_vm->sp > (int)base) {
-        retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
+        retval_vm = g_vm->stack[g_vm->sp - 1];
+        retval = vm_to_clay(retval_vm);
+        vm_retain_val(retval_vm); /* keep retval alive through cleanup */
+    }
+
+    /* Release all stack slots in this frame (params, captures, locals, temps).
+     * Every slot owns a reference (retained on push/SET_LOCAL). */
+    for (size_t i = base; i < (size_t)g_vm->sp; i++) {
+        vm_release_val(g_vm->stack[i]);
     }
 
     /* Restore full VM state */
@@ -567,10 +580,12 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     g_vm->frames[g_vm->frame_count].func_index = 0;
     g_vm->frame_count++;
 
-    /* Push params as stack locals (slots 0, 1, ...) */
+    /* Push params as stack locals (slots 0, 1, ...).
+     * Params are borrowed from argv — retain for stack ownership. */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
         ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
         clayvm_value_t vm_val = clay_to_vm(val);
+        vm_retain_val(vm_val);
         clayvm_vm_push(g_vm, vm_val);
     }
 
@@ -595,7 +610,14 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     /* Get return value */
     ClayValue retval = CLAY_NIL;
     if (g_vm->sp > (int)base) {
-        retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
+        clayvm_value_t retval_vm = g_vm->stack[g_vm->sp - 1];
+        retval = vm_to_clay(retval_vm);
+        vm_retain_val(retval_vm); /* keep retval alive through cleanup */
+    }
+
+    /* Release all stack slots in this frame */
+    for (size_t i = base; i < (size_t)g_vm->sp; i++) {
+        vm_release_val(g_vm->stack[i]);
     }
 
     /* Restore full VM state */
@@ -775,6 +797,19 @@ static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
     ClayValue arg = vm_to_clay(b);
     const char *sel = opcode_to_selector(opcode);
     ClayValue result = clay_send_val(receiver, sel, 1, &arg);
+
+    /* Alias check: if result is same as an operand, retain before releasing */
+    int aliased = 0;
+    if (CLAY_IS_PTR(result) && !CLAY_IS_NIL(result) &&
+        result != CLAY_TRUE && result != CLAY_FALSE) {
+        if (result == receiver || result == arg) aliased = 1;
+        if (aliased) clay_retain(CLAY_OBJ(result));
+    }
+
+    /* Release consumed operands (they were popped from stack by the caller) */
+    vm_release_val(a);
+    vm_release_val(b);
+
     clayvm_vm_push(vm, clay_to_vm(result));
 }
 
