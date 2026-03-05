@@ -76,7 +76,9 @@ static ClayValue array_at(ClayObject *self, int argc, ClayValue *argv) {
     if (!CLAY_IS_INT(argv[0])) return CLAY_NIL;
     intptr_t idx = clay_to_int(argv[0]);
     if (idx < 0) return CLAY_NIL;
-    return clay_array_at(self, (size_t)idx);
+    ClayValue result = clay_array_at(self, (size_t)idx);
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue array_size(ClayObject *self, int argc, ClayValue *argv) {
@@ -228,13 +230,17 @@ static ClayValue array_indexOf(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue array_first(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     if (self->as.array.size == 0) return CLAY_NIL;
-    return self->as.array.items[0];
+    ClayValue result = self->as.array.items[0];
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue array_last(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     if (self->as.array.size == 0) return CLAY_NIL;
-    return self->as.array.items[self->as.array.size - 1];
+    ClayValue result = self->as.array.items[self->as.array.size - 1];
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue array_reverse(ClayObject *self, int argc, ClayValue *argv) {

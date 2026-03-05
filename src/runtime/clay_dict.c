@@ -83,7 +83,9 @@ static ClayValue dict_set(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue dict_get(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
     const char *key = clay_string_data(CLAY_OBJ(argv[0]));
-    return clay_dict_get(self, key);
+    ClayValue result = clay_dict_get(self, key);
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue dict_has(ClayObject *self, int argc, ClayValue *argv) {

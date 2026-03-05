@@ -91,22 +91,30 @@ void clay_raise(ClayValue error) {
 /* Error methods */
 static ClayValue error_message(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_message");
+    ClayValue result = clay_get_slot(self, "_message");
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue error_type(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_type");
+    ClayValue result = clay_get_slot(self, "_type");
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue error_line(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_line");
+    ClayValue result = clay_get_slot(self, "_line");
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue error_file(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_file");
+    ClayValue result = clay_get_slot(self, "_file");
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue error_toString(ClayObject *self, int argc, ClayValue *argv) {

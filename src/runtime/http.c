@@ -36,12 +36,16 @@ static ClayValue make_error_response(const char *msg) {
 /* Response accessor methods (registered on Http prototype, inherited by responses) */
 static ClayValue resp_status(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_status");
+    ClayValue result = clay_get_slot(self, "_status");
+    clay_retain_val(result);
+    return result;
 }
 
 static ClayValue resp_body(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_body");
+    ClayValue result = clay_get_slot(self, "_body");
+    clay_retain_val(result);
+    return result;
 }
 
 /* --- Platform HTTP implementations --- */
@@ -362,20 +366,27 @@ static ClayValue make_request(const char *method_str, const char *path,
 /* Request accessor methods */
 static ClayValue req_method(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_method");
+    ClayValue result = clay_get_slot(self, "_method");
+    clay_retain_val(result);
+    return result;
 }
 static ClayValue req_path(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_path");
+    ClayValue result = clay_get_slot(self, "_path");
+    clay_retain_val(result);
+    return result;
 }
 static ClayValue req_query(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return clay_get_slot(self, "_query");
+    ClayValue result = clay_get_slot(self, "_query");
+    clay_retain_val(result);
+    return result;
 }
 static ClayValue req_params(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     ClayValue v = clay_get_slot(self, "_params");
     if (v == CLAY_NIL) return CLAY_VAL(clay_dict_new());
+    clay_retain_val(v);
     return v;
 }
 

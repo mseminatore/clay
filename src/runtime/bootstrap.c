@@ -200,7 +200,9 @@ static ClayValue object_get_slot(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_NIL;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
     if (name_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
-    return clay_get_slot(self, clay_string_data(name_obj));
+    ClayValue result = clay_get_slot(self, clay_string_data(name_obj));
+    clay_retain_val(result);
+    return result;
 }
 
 /* setSlot("name", value) — set a slot by name dynamically */
@@ -280,7 +282,9 @@ static ClayObject *make_cond_result(ClayValue val, int matched) {
 static ClayValue cond_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue matched = clay_get_slot(self, "_matched");
     if (matched == CLAY_TRUE) {
-        return clay_get_slot(self, "_val");
+        ClayValue result = clay_get_slot(self, "_val");
+        clay_retain_val(result);
+        return result;
     }
     if (argc < 1) return CLAY_NIL;
     return clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
@@ -289,7 +293,9 @@ static ClayValue cond_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue cond_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue matched = clay_get_slot(self, "_matched");
     if (matched == CLAY_TRUE) {
-        return clay_get_slot(self, "_val");
+        ClayValue result = clay_get_slot(self, "_val");
+        clay_retain_val(result);
+        return result;
     }
     if (argc < 1) return CLAY_VAL(self);
     ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);

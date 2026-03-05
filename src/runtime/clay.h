@@ -171,6 +171,13 @@ void clay_method_cache_invalidate(void *methods_ptr);
 ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);
 
+/* Retain a ClayValue if it's a heap-allocated object (safe no-op for ints, floats, nil, booleans) */
+static inline void clay_retain_val(ClayValue v) {
+    if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE) {
+        clay_retain(CLAY_OBJ(v));
+    }
+}
+
 /* Release a ClayValue if it's a heap-allocated object (safe no-op for ints, floats, nil, booleans) */
 static inline void clay_release_val(ClayValue v) {
     if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE) {
