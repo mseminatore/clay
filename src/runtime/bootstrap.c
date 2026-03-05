@@ -300,6 +300,7 @@ static ClayValue cond_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_VAL(self);
     ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
     ClayObject *cr = make_cond_result(result, 1);
+    clay_release_val(result); /* make_cond_result took ownership via set_slot */
     clay_set_method(cr, "ifFalse", cond_ifFalse);
     clay_set_method(cr, "ifTrue", cond_ifTrue);
     return CLAY_VAL(cr);
@@ -310,6 +311,7 @@ static ClayValue bool_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
     if (self == &clay_true_obj) {
         ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
         ClayObject *cr = make_cond_result(result, 1);
+        clay_release_val(result); /* make_cond_result took ownership via set_slot */
         clay_set_method(cr, "ifFalse", cond_ifFalse);
         clay_set_method(cr, "ifTrue", cond_ifTrue);
         return CLAY_VAL(cr);
@@ -326,6 +328,7 @@ static ClayValue bool_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
     if (self == &clay_false_obj) {
         ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
         ClayObject *cr = make_cond_result(result, 1);
+        clay_release_val(result); /* make_cond_result took ownership via set_slot */
         clay_set_method(cr, "ifTrue", cond_ifTrue);
         clay_set_method(cr, "ifFalse", cond_ifFalse);
         return CLAY_VAL(cr);
