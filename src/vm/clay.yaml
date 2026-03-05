@@ -34,17 +34,17 @@ vm:
     - name: PUSH_CONST
       operands: [{ name: index, type: uint16 }]
       description: "Push constant at index onto stack"
-      action: "push constants[$index]"
+      action: "push constants[index]"
 
     - name: POP
       operands: []
       description: "Pop and discard top of stack"
-      action: "pop _"
+      action: "pop"
 
     - name: DUP
       operands: []
       description: "Duplicate top of stack"
-      action: "peek a; push a"
+      action: "dup"
 
     # Arithmetic
     - name: ADD
@@ -243,7 +243,10 @@ vm:
     - name: JUMP_IF_FALSE
       operands: [{ name: offset, type: int16 }]
       description: "Pop and jump by offset if falsy"
-      action: "pop a; jump_if_zero a $offset"
+      action_c: |
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+        if (_falsy) vm->ip += offset;
 
     - name: CALL
       operands: [{ name: func_index, type: uint16 }, { name: arity, type: uint8 }]
@@ -270,14 +273,17 @@ vm:
     - name: GET_LOCAL
       operands: [{ name: slot, type: uint16 }]
       description: "Push local variable from stack slot relative to frame base"
-      action_c: |
-        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+      action: "push stack[frame.base + slot]"
 
     - name: SET_LOCAL
       operands: [{ name: slot, type: uint16 }]
-      description: "Store top of stack into local variable slot (does not pop)"
+      description: "Store top of stack into local variable slot (does not pop). Releases old value."
       action_c: |
-        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _old = vm->stack[_base + slot];
+        clayvm_value_t _new = vm->stack[vm->sp - 1];
+        vm->stack[_base + slot] = _new;
+        if (vm->release_fn) vm->release_fn(_old);
 
     # Exception handling
     - name: TRY_BEGIN
@@ -317,3 +323,5 @@ vm:
     - { name: natives, type: "clayvm_native_table_t", include: "native.h" }
     - { name: globals, type: "void *", comment: "HashTable* for REPL variable persistence" }
     - { name: arith_fallback, type: "void (*)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int)", comment: "Fallback for non-numeric binary ops" }
+    - { name: retain_fn, type: "void (*)(clayvm_value_t)", comment: "Retain callback for OBJECT values (refcount++)" }
+    - { name: release_fn, type: "void (*)(clayvm_value_t)", comment: "Release callback for OBJECT values (refcount--)" }

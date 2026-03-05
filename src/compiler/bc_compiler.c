@@ -105,7 +105,8 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     /* Push params as stack locals (slots 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
         ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
-        clayvm_vm_push(g_vm, clay_to_vm(val));
+        clayvm_value_t vm_val = clay_to_vm(val);
+        clayvm_vm_push(g_vm, vm_val);
     }
 
     /* Push captured values as additional locals (slots param_count, param_count+1, ...) */
@@ -113,7 +114,8 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     for (int i = 0; i < capture_count; i++) {
         ClayValue cv = (1 + i < self->as.block.env_size) ?
                         self->as.block.env[1 + i] : CLAY_NIL;
-        clayvm_vm_push(g_vm, clay_to_vm(cv));
+        clayvm_value_t vm_val = clay_to_vm(cv);
+        clayvm_vm_push(g_vm, vm_val);
     }
 
     /* Reserve stack space for block-created locals beyond params and captures */
@@ -163,7 +165,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     /* Get return value (last value on stack) */
     ClayValue retval = CLAY_NIL;
-    if (!had_exception && g_vm->sp > base) {
+    if (!had_exception && g_vm->sp > (int)base) {
         retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
     }
 
@@ -559,7 +561,8 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     /* Push params as stack locals (slots 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
         ClayValue val = (i < argc) ? argv[i] : CLAY_NIL;
-        clayvm_vm_push(g_vm, clay_to_vm(val));
+        clayvm_value_t vm_val = clay_to_vm(val);
+        clayvm_vm_push(g_vm, vm_val);
     }
 
     /* Reserve stack space for method-created locals beyond params */
@@ -580,9 +583,11 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
         if (rc != 0) break;
     }
 
+    /* Get return value */
     ClayValue retval = CLAY_NIL;
-    if (g_vm->sp > base)
+    if (g_vm->sp > (int)base) {
         retval = vm_to_clay(g_vm->stack[g_vm->sp - 1]);
+    }
 
     /* Restore full VM state */
     g_vm->code = saved_code;
@@ -695,6 +700,28 @@ clayvm_value_t clay_to_vm(ClayValue cv) {
 }
 
 /* --- Native bridge functions --- */
+
+/* VM retain/release callbacks for stack ownership semantics */
+static void vm_retain_cb(clayvm_value_t v) {
+    if (v.type == CLAYVM_VAL_OBJECT && v.as.obj) {
+        clay_retain((ClayObject *)v.as.obj);
+    }
+}
+
+static void vm_release_cb(clayvm_value_t v) {
+    if (v.type == CLAYVM_VAL_OBJECT && v.as.obj) {
+        clay_release((ClayObject *)v.as.obj);
+    }
+}
+
+/* Gated helpers — no-op when retain/release not wired */
+static void vm_retain_val(clayvm_value_t v) {
+    if (g_vm && g_vm->retain_fn) g_vm->retain_fn(v);
+}
+
+static void vm_release_val(clayvm_value_t v) {
+    if (g_vm && g_vm->release_fn) g_vm->release_fn(v);
+}
 
 /* Map VM opcode to Clay operator string */
 static const char *opcode_to_selector(int opcode) {
@@ -977,8 +1004,7 @@ static int native_cell_get_fn(clayvm_vm_t *vm, int argc) {
 static int native_cell_set_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     ClayValue new_val = vm_to_clay(clayvm_vm_pop(vm));
-    clayvm_value_t cv = clayvm_vm_pop(vm);
-    ClayCell *cell = (ClayCell *)cv.as.obj;
+    ClayCell *cell = (ClayCell *)((clayvm_vm_pop(vm)).as.obj);
     /* Release old, retain new if needed */
     ClayValue old = cell->value;
     if (CLAY_IS_PTR(new_val) && !CLAY_IS_NIL(new_val) &&
@@ -1102,10 +1128,8 @@ static int native_raise_fn(clayvm_vm_t *vm, int argc) {
 /* native_make_range(start, end) — create a Range object */
 static int native_make_range_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    clayvm_value_t end_v = clayvm_vm_pop(vm);
-    clayvm_value_t start_v = clayvm_vm_pop(vm);
-    ClayValue start = vm_to_clay(start_v);
-    ClayValue end = vm_to_clay(end_v);
+    ClayValue end = vm_to_clay(clayvm_vm_pop(vm));
+    ClayValue start = vm_to_clay(clayvm_vm_pop(vm));
     intptr_t s = CLAY_IS_INT(start) ? clay_to_int(start) : 0;
     intptr_t e = CLAY_IS_INT(end) ? clay_to_int(end) : 0;
     ClayObject *range = clay_range_new(s, e, 1);
@@ -1136,7 +1160,7 @@ static int native_array_append_fn(clayvm_vm_t *vm, int argc) {
     clayvm_value_t arr_val = clayvm_vm_pop(vm);
     ClayObject *arr = (ClayObject *)arr_val.as.obj;
     clay_array_append(arr, vm_to_clay(val));
-    clayvm_vm_push(vm, arr_val); /* return array for chaining */
+    clayvm_vm_push(vm, arr_val); /* return array — transfer pop's ownership */
     return 0;
 }
 
@@ -1160,7 +1184,7 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
                 slot_idx, g_method_slot_count);
     }
 
-    clayvm_vm_push(vm, obj_val);
+    clayvm_vm_push(vm, obj_val); /* transfer pop's ownership to push */
     return 0;
 }
 
@@ -1192,7 +1216,10 @@ static int native_store_global_fn(clayvm_vm_t *vm, int argc) {
     const char *name = clay_string_data((ClayObject *)name_val.as.obj);
 
     HashTable *globals = (HashTable *)vm->globals;
-    if (!globals) return 0;
+    if (!globals) {
+        clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+        return 0;
+    }
 
     /* Retain new object value */
     if (val.type == CLAYVM_VAL_OBJECT && val.as.obj) {
@@ -1214,7 +1241,7 @@ static int native_store_global_fn(clayvm_vm_t *vm, int argc) {
         ht_add(globals, (ht_key_t)key_copy, (ht_value_t)stored);
     }
 
-    clayvm_vm_push(vm, val);
+    clayvm_vm_push(vm, val); /* transfer pop's ownership to push */
     return 0;
 }
 
@@ -1246,6 +1273,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
 
     /* Register native functions */
     vm->arith_fallback = arith_fallback_fn;
+    vm->retain_fn = vm_retain_cb;
+    vm->release_fn = vm_release_cb;
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);
     bc->native_super_send = clayvm_native_register(&vm->natives, "super_send", native_super_send_fn, -1);
     bc->native_clone = clayvm_native_register(&vm->natives, "clone", native_clone_fn, 1);

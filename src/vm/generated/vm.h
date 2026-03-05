@@ -101,6 +101,8 @@ typedef struct clayvm_vm {
     clayvm_native_table_t natives;
     void * globals; /* HashTable* for REPL variable persistence */
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
+    void (*retain_fn)(clayvm_value_t); /* Retain callback for OBJECT values (refcount++) */
+    void (*release_fn)(clayvm_value_t); /* Release callback for OBJECT values (refcount--) */
     void (*cleanup)(struct clayvm_vm *vm);
 } clayvm_vm_t;
 
