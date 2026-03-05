@@ -32,6 +32,10 @@ static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
 static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
 static ClayObject *g_super_proto = NULL; /* defining prototype for super dispatch */
 
+/* Forward declarations for retain/release helpers */
+static void vm_retain_val(clayvm_value_t v);
+static void vm_release_val(clayvm_value_t v);
+
 /* Dispatch table from vm.c for direct chunk execution */
 extern int (*clayvm_dispatch_table[])(clayvm_vm_t *vm);
 
@@ -114,7 +118,12 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     for (int i = 0; i < capture_count; i++) {
         ClayValue cv = (1 + i < self->as.block.env_size) ?
                         self->as.block.env[1 + i] : CLAY_NIL;
-        clayvm_value_t vm_val = clay_to_vm(cv);
+        clayvm_value_t vm_val;
+        if (self->as.block.env_are_cells && CLAY_IS_PTR(cv) && !CLAY_IS_NIL(cv)) {
+            vm_val = CLAYVM_CELL((void*)(uintptr_t)cv);
+        } else {
+            vm_val = clay_to_vm(cv);
+        }
         clayvm_vm_push(g_vm, vm_val);
     }
 
@@ -684,6 +693,7 @@ ClayValue vm_to_clay(clayvm_value_t v) {
         case CLAYVM_VAL_BOOL:   return v.as.boolean ? CLAY_TRUE : CLAY_FALSE;
         case CLAYVM_VAL_NIL:    return CLAY_NIL;
         case CLAYVM_VAL_OBJECT: return CLAY_VAL(v.as.obj);
+        case CLAYVM_VAL_CELL:   return CLAY_VAL(v.as.obj);
         case CLAYVM_VAL_DOUBLE: return clay_float_tag((float)v.as.f64);
         default: break;
     }
@@ -705,12 +715,16 @@ clayvm_value_t clay_to_vm(ClayValue cv) {
 static void vm_retain_cb(clayvm_value_t v) {
     if (v.type == CLAYVM_VAL_OBJECT && v.as.obj) {
         clay_retain((ClayObject *)v.as.obj);
+    } else if (v.type == CLAYVM_VAL_CELL && v.as.obj) {
+        clay_cell_retain((ClayCell *)v.as.obj);
     }
 }
 
 static void vm_release_cb(clayvm_value_t v) {
     if (v.type == CLAYVM_VAL_OBJECT && v.as.obj) {
         clay_release((ClayObject *)v.as.obj);
+    } else if (v.type == CLAYVM_VAL_CELL && v.as.obj) {
+        clay_cell_release((ClayCell *)v.as.obj);
     }
 }
 
@@ -721,6 +735,14 @@ static void vm_retain_val(clayvm_value_t v) {
 
 static void vm_release_val(clayvm_value_t v) {
     if (g_vm && g_vm->release_fn) g_vm->release_fn(v);
+}
+
+/* Release a ClayValue if it's a heap object (not tagged int/float/nil/bool) */
+static void release_clay_val(ClayValue v) {
+    if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) &&
+        v != CLAY_TRUE && v != CLAY_FALSE) {
+        clay_release(CLAY_OBJ(v));
+    }
 }
 
 /* Map VM opcode to Clay operator string */
@@ -846,6 +868,23 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         }
     }
 
+    /* Alias check: if result is same as an input, retain before releasing */
+    int aliased = 0;
+    if (CLAY_IS_PTR(result) && !CLAY_IS_NIL(result) &&
+        result != CLAY_TRUE && result != CLAY_FALSE) {
+        if (result == receiver) aliased = 1;
+        for (int i = 0; i < msg_argc && !aliased; i++) {
+            if (result == args[i]) aliased = 1;
+        }
+        if (aliased) clay_retain(CLAY_OBJ(result));
+    }
+
+    /* Release consumed values */
+    vm_release_val(recv_val);
+    vm_release_val(sel_val);
+    for (int i = 0; i < msg_argc; i++)
+        release_clay_val(args[i]);
+
     if (args && args != stack_args) free(args);
     clayvm_vm_push(vm, clay_to_vm(result));
     return 0;
@@ -872,6 +911,24 @@ static int native_super_send_fn(clayvm_vm_t *vm, int argc) {
     const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
 
     ClayValue result = clay_send_super(receiver, g_super_proto, selector, msg_argc, args);
+
+    /* Alias check */
+    int aliased = 0;
+    if (CLAY_IS_PTR(result) && !CLAY_IS_NIL(result) &&
+        result != CLAY_TRUE && result != CLAY_FALSE) {
+        if (result == receiver) aliased = 1;
+        for (int i = 0; i < msg_argc && !aliased; i++) {
+            if (result == args[i]) aliased = 1;
+        }
+        if (aliased) clay_retain(CLAY_OBJ(result));
+    }
+
+    /* Release consumed values */
+    vm_release_val(recv_val);
+    vm_release_val(sel_val);
+    for (int i = 0; i < msg_argc; i++)
+        release_clay_val(args[i]);
+
     if (args && args != stack_args) free(args);
 
     clayvm_vm_push(vm, clay_to_vm(result));
@@ -881,8 +938,10 @@ static int native_super_send_fn(clayvm_vm_t *vm, int argc) {
 /* native_clone(proto) -> cloned object */
 static int native_clone_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue proto = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_value_t proto_val = clayvm_vm_pop(vm);
+    ClayValue proto = vm_to_clay(proto_val);
     ClayObject *obj = clay_clone(CLAY_OBJ(proto));
+    vm_release_val(proto_val);
     clayvm_vm_push(vm, CLAYVM_OBJ(obj));
     return 0;
 }
@@ -890,12 +949,16 @@ static int native_clone_fn(clayvm_vm_t *vm, int argc) {
 /* native_set_slot(obj, name_str, value) */
 static int native_set_slot_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue val = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_value_t val_vm = clayvm_vm_pop(vm);
     clayvm_value_t name_val = clayvm_vm_pop(vm);
-    ClayValue obj = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_value_t obj_val = clayvm_vm_pop(vm);
+    ClayValue val = vm_to_clay(val_vm);
+    ClayValue obj = vm_to_clay(obj_val);
     const char *name = clay_string_data((ClayObject *)name_val.as.obj);
     clay_set_slot(CLAY_OBJ(obj), name, val);
-    clayvm_vm_push(vm, clay_to_vm(val)); /* return assigned value */
+    vm_release_val(name_val);
+    vm_release_val(obj_val);
+    clayvm_vm_push(vm, val_vm); /* return assigned value — transfer pop's ownership */
     return 0;
 }
 
@@ -920,6 +983,7 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
         snprintf(buf, sizeof(buf), "%s\n", clay_string_data(CLAY_OBJ(sv)));
         clay_release(CLAY_OBJ(sv));
     }
+    vm_release_val(val);
     if (clay_output_fn) {
         clay_output_fn(buf);
     } else {
@@ -966,6 +1030,9 @@ static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
             }
         }
         block->as.block.env_are_cells = 1;
+        /* Release popped captured values (env took its own ref via cell_retain) */
+        for (int i = 0; i < capture_count; i++)
+            vm_release_val(captured[i]);
         clayvm_vm_push(vm, CLAYVM_OBJ(block));
     } else {
         /* No captures — use standard clay_block_new path.
@@ -980,9 +1047,11 @@ static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
 /* native_cell_new(value) — create a ClayCell wrapping value */
 static int native_cell_new_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue val = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_value_t val_vm = clayvm_vm_pop(vm);
+    ClayValue val = vm_to_clay(val_vm);
     ClayCell *cell = clay_cell_new(val);
-    clayvm_vm_push(vm, CLAYVM_OBJ(cell));
+    vm_release_val(val_vm);
+    clayvm_vm_push(vm, CLAYVM_CELL(cell));
     return 0;
 }
 
@@ -990,21 +1059,26 @@ static int native_cell_new_fn(clayvm_vm_t *vm, int argc) {
 static int native_cell_get_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     clayvm_value_t cv = clayvm_vm_pop(vm);
-    if (cv.type != CLAYVM_VAL_OBJECT || cv.as.obj == NULL) {
+    if (cv.type != CLAYVM_VAL_CELL || cv.as.obj == NULL) {
         fprintf(stderr, "cell_get: expected cell object, got type %d\n", cv.type);
         clayvm_vm_push(vm, CLAYVM_NIL_VAL);
         return 0;
     }
     ClayCell *cell = (ClayCell *)cv.as.obj;
-    clayvm_vm_push(vm, clay_to_vm(cell->value));
+    clayvm_value_t result = clay_to_vm(cell->value);
+    vm_retain_val(result); /* borrowed ref from cell — retain for stack */
+    vm_release_val(cv);
+    clayvm_vm_push(vm, result);
     return 0;
 }
 
 /* native_cell_set(cell, value) — write value to cell, return value */
 static int native_cell_set_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue new_val = vm_to_clay(clayvm_vm_pop(vm));
-    ClayCell *cell = (ClayCell *)((clayvm_vm_pop(vm)).as.obj);
+    clayvm_value_t new_vm = clayvm_vm_pop(vm);
+    clayvm_value_t cell_vm = clayvm_vm_pop(vm);
+    ClayValue new_val = vm_to_clay(new_vm);
+    ClayCell *cell = (ClayCell *)cell_vm.as.obj;
     /* Release old, retain new if needed */
     ClayValue old = cell->value;
     if (CLAY_IS_PTR(new_val) && !CLAY_IS_NIL(new_val) &&
@@ -1016,31 +1090,38 @@ static int native_cell_set_fn(clayvm_vm_t *vm, int argc) {
         old != CLAY_TRUE && old != CLAY_FALSE) {
         clay_release(CLAY_OBJ(old));
     }
-    clayvm_vm_push(vm, clay_to_vm(new_val));
+    vm_release_val(cell_vm); /* release cell (CELL type) */
+    clayvm_vm_push(vm, new_vm); /* transfer pop's ownership */
     return 0;
 }
 
 /* native_is_truthy(val) — push 1 or 0 (for JUMP_IF_FALSE) */
 static int native_is_truthy_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue v = vm_to_clay(clayvm_vm_pop(vm));
-    clayvm_vm_push(vm, CLAYVM_INT64(CLAY_IS_TRUTHY(v) ? 1 : 0));
+    clayvm_value_t v = clayvm_vm_pop(vm);
+    ClayValue cv = vm_to_clay(v);
+    clayvm_vm_push(vm, CLAYVM_INT64(CLAY_IS_TRUTHY(cv) ? 1 : 0));
+    vm_release_val(v);
     return 0;
 }
 
 /* native_to_bool(val) — push CLAY_TRUE or CLAY_FALSE */
 static int native_to_bool_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue v = vm_to_clay(clayvm_vm_pop(vm));
-    clayvm_vm_push(vm, clay_to_vm(CLAY_IS_TRUTHY(v) ? CLAY_TRUE : CLAY_FALSE));
+    clayvm_value_t v = clayvm_vm_pop(vm);
+    ClayValue cv = vm_to_clay(v);
+    clayvm_vm_push(vm, clay_to_vm(CLAY_IS_TRUTHY(cv) ? CLAY_TRUE : CLAY_FALSE));
+    vm_release_val(v);
     return 0;
 }
 
 /* native_is_nil(val) — push 1 if nil, 0 otherwise (for JUMP_IF_FALSE) */
 static int native_is_nil_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    ClayValue v = vm_to_clay(clayvm_vm_pop(vm));
-    clayvm_vm_push(vm, CLAYVM_INT64(v == CLAY_NIL ? 1 : 0));
+    clayvm_value_t v = clayvm_vm_pop(vm);
+    ClayValue cv = vm_to_clay(v);
+    clayvm_vm_push(vm, CLAYVM_INT64(cv == CLAY_NIL ? 1 : 0));
+    vm_release_val(v);
     return 0;
 }
 
@@ -1055,12 +1136,12 @@ static int native_stop_vm_fn(clayvm_vm_t *vm, int argc) {
 /* native_try_catch(try_block, catch_block) — setjmp-based exception handling */
 static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
-    clayvm_value_t finally_val = clayvm_vm_pop(vm);
-    clayvm_value_t catch_val = clayvm_vm_pop(vm);
-    clayvm_value_t try_val = clayvm_vm_pop(vm);
-    ClayValue try_block = vm_to_clay(try_val);
-    ClayValue catch_block = vm_to_clay(catch_val);
-    ClayValue finally_block = vm_to_clay(finally_val);
+    clayvm_value_t finally_vm = clayvm_vm_pop(vm);
+    clayvm_value_t catch_vm = clayvm_vm_pop(vm);
+    clayvm_value_t try_vm = clayvm_vm_pop(vm);
+    ClayValue try_block = vm_to_clay(try_vm);
+    ClayValue catch_block = vm_to_clay(catch_vm);
+    ClayValue finally_block = vm_to_clay(finally_vm);
 
     /* Save VM state — longjmp from raise() bypasses trampoline restore */
     const uint8_t *saved_code = vm->code;
@@ -1083,6 +1164,9 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
         if (!CLAY_IS_NIL(finally_block)) {
             clay_send_val(finally_block, "value", 0, NULL);
         }
+        vm_release_val(try_vm);
+        vm_release_val(catch_vm);
+        vm_release_val(finally_vm);
         clayvm_vm_push(vm, clay_to_vm(result));
     } else {
         /* Error path — trampoline's restore was skipped by longjmp */
@@ -1103,6 +1187,9 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
         if (!CLAY_IS_NIL(finally_block)) {
             clay_send_val(finally_block, "value", 0, NULL);
         }
+        vm_release_val(try_vm);
+        vm_release_val(catch_vm);
+        vm_release_val(finally_vm);
         clayvm_vm_push(vm, clay_to_vm(result));
     }
     return 0;
@@ -1115,11 +1202,16 @@ static int native_raise_fn(clayvm_vm_t *vm, int argc) {
     if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
     }
-    ClayValue val = vm_to_clay(clayvm_vm_pop(vm));
+    clayvm_value_t val_vm = clayvm_vm_pop(vm);
+    ClayValue val = vm_to_clay(val_vm);
     if (CLAY_IS_PTR(val) && !CLAY_IS_NIL(val) &&
         CLAY_OBJ(val)->type == CLAY_TYPE_STRING) {
-        val = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(val)), "RuntimeError"));
+        /* Create error from string — must copy data before releasing */
+        ClayValue err = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(val)), "RuntimeError"));
+        vm_release_val(val_vm);
+        val = err;
     }
+    /* Don't release non-string error objects — they survive through longjmp */
     clay_raise(val);
     /* clay_raise never returns (longjmp) */
     return 0;
@@ -1160,6 +1252,7 @@ static int native_array_append_fn(clayvm_vm_t *vm, int argc) {
     clayvm_value_t arr_val = clayvm_vm_pop(vm);
     ClayObject *arr = (ClayObject *)arr_val.as.obj;
     clay_array_append(arr, vm_to_clay(val));
+    vm_release_val(val);
     clayvm_vm_push(vm, arr_val); /* return array — transfer pop's ownership */
     return 0;
 }
@@ -1184,6 +1277,7 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
                 slot_idx, g_method_slot_count);
     }
 
+    vm_release_val(name_val);
     clayvm_vm_push(vm, obj_val); /* transfer pop's ownership to push */
     return 0;
 }
@@ -1200,10 +1294,13 @@ static int native_load_global_fn(clayvm_vm_t *vm, int argc) {
         ht_value_t found = ht_find(globals, (ht_key_t)name);
         if (found) {
             clayvm_value_t *stored = (clayvm_value_t *)found;
+            vm_retain_val(*stored); /* borrowed ref from global table */
+            vm_release_val(name_val);
             clayvm_vm_push(vm, *stored);
             return 0;
         }
     }
+    vm_release_val(name_val);
     clayvm_vm_push(vm, CLAYVM_NIL_VAL);
     return 0;
 }
@@ -1217,11 +1314,13 @@ static int native_store_global_fn(clayvm_vm_t *vm, int argc) {
 
     HashTable *globals = (HashTable *)vm->globals;
     if (!globals) {
+        vm_release_val(name_val);
+        vm_release_val(val);
         clayvm_vm_push(vm, CLAYVM_NIL_VAL);
         return 0;
     }
 
-    /* Retain new object value */
+    /* Retain new object value for the global table */
     if (val.type == CLAYVM_VAL_OBJECT && val.as.obj) {
         clay_retain((ClayObject *)val.as.obj);
     }
@@ -1241,6 +1340,7 @@ static int native_store_global_fn(clayvm_vm_t *vm, int argc) {
         ht_add(globals, (ht_key_t)key_copy, (ht_value_t)stored);
     }
 
+    vm_release_val(name_val);
     clayvm_vm_push(vm, val); /* transfer pop's ownership to push */
     return 0;
 }

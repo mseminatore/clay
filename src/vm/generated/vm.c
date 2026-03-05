@@ -110,17 +110,20 @@ void clayvm_vm_set_cleanup(clayvm_vm_t *vm, void (*cleanup)(clayvm_vm_t *vm)) {
 int handle_PUSH_CONST(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
     clayvm_value_t _val = vm->constants.values[index];
+    if (vm->retain_fn) vm->retain_fn(_val);
     clayvm_vm_push(vm, _val);
     return 0;
 }
 
 int handle_POP(clayvm_vm_t *vm) {
-    clayvm_vm_pop(vm);
+    clayvm_value_t _val = clayvm_vm_pop(vm);
+    if (vm->release_fn) vm->release_fn(_val);
     return 0;
 }
 
 int handle_DUP(clayvm_vm_t *vm) {
     clayvm_value_t _val = vm->stack[vm->sp - 1];
+    if (vm->retain_fn) vm->retain_fn(_val);
     clayvm_vm_push(vm, _val);
     return 0;
 }
@@ -360,6 +363,7 @@ int handle_JUMP_IF_FALSE(clayvm_vm_t *vm) {
     int16_t offset = READ_INT16();
     clayvm_value_t _val = clayvm_vm_pop(vm);
     int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+    if (vm->release_fn) vm->release_fn(_val);
     if (_falsy) vm->ip += offset;
     return 0;
 }
@@ -397,6 +401,7 @@ int handle_HALT(clayvm_vm_t *vm) {
 int handle_GET_LOCAL(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
     clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+    if (vm->retain_fn) vm->retain_fn(_val);
     clayvm_vm_push(vm, _val);
     return 0;
 }
@@ -406,6 +411,7 @@ int handle_SET_LOCAL(clayvm_vm_t *vm) {
     uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
     clayvm_value_t _old = vm->stack[_base + slot];
     clayvm_value_t _new = vm->stack[vm->sp - 1];
+    if (vm->retain_fn) vm->retain_fn(_new);
     vm->stack[_base + slot] = _new;
     if (vm->release_fn) vm->release_fn(_old);
     return 0;
@@ -529,6 +535,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         uint16_t index = READ_UINT16();
         clayvm_value_t _val = vm->constants.values[index];
+        if (vm->retain_fn) vm->retain_fn(_val);
         clayvm_vm_push(vm, _val);
         DISPATCH();
     }
@@ -537,7 +544,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        clayvm_vm_pop(vm);
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        if (vm->release_fn) vm->release_fn(_val);
         DISPATCH();
     }
 
@@ -546,6 +554,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         clayvm_value_t _val = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_val);
         clayvm_vm_push(vm, _val);
         DISPATCH();
     }
@@ -820,6 +829,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         int16_t offset = READ_INT16();
         clayvm_value_t _val = clayvm_vm_pop(vm);
         int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+        if (vm->release_fn) vm->release_fn(_val);
         if (_falsy) vm->ip += offset;
         DISPATCH();
     }
@@ -872,6 +882,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         uint16_t slot = READ_UINT16();
         clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+        if (vm->retain_fn) vm->retain_fn(_val);
         clayvm_vm_push(vm, _val);
         DISPATCH();
     }
@@ -884,6 +895,7 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
         clayvm_value_t _old = vm->stack[_base + slot];
         clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
         vm->stack[_base + slot] = _new;
         if (vm->release_fn) vm->release_fn(_old);
         DISPATCH();
@@ -968,15 +980,18 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_PUSH_CONST: {
         uint16_t index = READ_UINT16();
         clayvm_value_t _val = vm->constants.values[index];
+        if (vm->retain_fn) vm->retain_fn(_val);
         clayvm_vm_push(vm, _val);
         break;
     }
     case CLAYVM_OP_POP: {
-        clayvm_vm_pop(vm);
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        if (vm->release_fn) vm->release_fn(_val);
         break;
     }
     case CLAYVM_OP_DUP: {
         clayvm_value_t _val = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_val);
         clayvm_vm_push(vm, _val);
         break;
     }
@@ -1191,6 +1206,7 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         int16_t offset = (int16_t)READ_UINT16();
         clayvm_value_t _val = clayvm_vm_pop(vm);
         int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+        if (vm->release_fn) vm->release_fn(_val);
         if (_falsy) vm->ip += offset;
         break;
     }
@@ -1223,6 +1239,7 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_GET_LOCAL: {
         uint16_t slot = READ_UINT16();
         clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+        if (vm->retain_fn) vm->retain_fn(_val);
         clayvm_vm_push(vm, _val);
         break;
     }
@@ -1231,6 +1248,7 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
         clayvm_value_t _old = vm->stack[_base + slot];
         clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
         vm->stack[_base + slot] = _new;
         if (vm->release_fn) vm->release_fn(_old);
         break;

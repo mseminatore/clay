@@ -240,6 +240,13 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             }
         }
         if (argc == 0) {
+            /* Retain so the caller gets an owned reference (matches method-call
+               convention where the returned object's creation ref is the caller's).
+               This is needed for the VM's stack ownership model. */
+            if (CLAY_IS_PTR(slot_val) && !CLAY_IS_NIL(slot_val) &&
+                slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
+                clay_retain(CLAY_OBJ(slot_val));
+            }
             clay_trace_pop();
             return slot_val;
         }

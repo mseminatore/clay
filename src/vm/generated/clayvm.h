@@ -248,6 +248,7 @@ typedef enum {
     CLAYVM_VAL_BOOL,
     CLAYVM_VAL_STRING,
     CLAYVM_VAL_OBJECT,
+    CLAYVM_VAL_CELL,
 } clayvm_val_type_t;
 
 typedef struct {
@@ -265,6 +266,7 @@ typedef struct {
 #define CLAYVM_DOUBLE(v) ((clayvm_value_t){ .type = CLAYVM_VAL_DOUBLE, .as.f64 = (v) })
 #define CLAYVM_BOOL(v)   ((clayvm_value_t){ .type = CLAYVM_VAL_BOOL,   .as.boolean = (v) })
 #define CLAYVM_OBJ(v)    ((clayvm_value_t){ .type = CLAYVM_VAL_OBJECT, .as.obj = (void*)(v) })
+#define CLAYVM_CELL(v)   ((clayvm_value_t){ .type = CLAYVM_VAL_CELL,   .as.obj = (void*)(v) })
 
 typedef struct {
     clayvm_value_t *values;

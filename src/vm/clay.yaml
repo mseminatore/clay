@@ -33,18 +33,26 @@ vm:
     # Stack manipulation
     - name: PUSH_CONST
       operands: [{ name: index, type: uint16 }]
-      description: "Push constant at index onto stack"
-      action: "push constants[index]"
+      description: "Push constant at index onto stack. Retains OBJECT constants."
+      action_c: |
+        clayvm_value_t _val = vm->constants.values[index];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
 
     - name: POP
       operands: []
-      description: "Pop and discard top of stack"
-      action: "pop"
+      description: "Pop and discard top of stack. Releases OBJECT values."
+      action_c: |
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        if (vm->release_fn) vm->release_fn(_val);
 
     - name: DUP
       operands: []
-      description: "Duplicate top of stack"
-      action: "dup"
+      description: "Duplicate top of stack. Retains the duplicated value."
+      action_c: |
+        clayvm_value_t _val = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
 
     # Arithmetic
     - name: ADD
@@ -242,10 +250,11 @@ vm:
 
     - name: JUMP_IF_FALSE
       operands: [{ name: offset, type: int16 }]
-      description: "Pop and jump by offset if falsy"
+      description: "Pop and jump by offset if falsy. Releases popped value."
       action_c: |
         clayvm_value_t _val = clayvm_vm_pop(vm);
         int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+        if (vm->release_fn) vm->release_fn(_val);
         if (_falsy) vm->ip += offset;
 
     - name: CALL
@@ -272,16 +281,20 @@ vm:
     # Local variables
     - name: GET_LOCAL
       operands: [{ name: slot, type: uint16 }]
-      description: "Push local variable from stack slot relative to frame base"
-      action: "push stack[frame.base + slot]"
+      description: "Push local variable from stack slot relative to frame base. Retains for stack ownership."
+      action_c: |
+        clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
 
     - name: SET_LOCAL
       operands: [{ name: slot, type: uint16 }]
-      description: "Store top of stack into local variable slot (does not pop). Releases old value."
+      description: "Store top of stack into local variable slot (does not pop). Retains new value, releases old."
       action_c: |
         uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
         clayvm_value_t _old = vm->stack[_base + slot];
         clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
         vm->stack[_base + slot] = _new;
         if (vm->release_fn) vm->release_fn(_old);
 
