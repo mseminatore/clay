@@ -93,7 +93,8 @@ static ClayValue array_each(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue item = self->as.array.items[i];
         ClayTryFrame _tf;
         if (clay_try_push(&_tf) == 0) {
-            clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
+            ClayValue ret = clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
+            clay_release_val(ret);
             clay_try_pop();
         } else {
             ClayValue err = clay_error_stack.current_error;
@@ -162,6 +163,7 @@ static ClayValue array_map(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue item = self->as.array.items[i];
         ClayValue mapped = clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
         clay_array_append(result, mapped);
+        clay_release_val(mapped);
     }
     return CLAY_VAL(result);
 }
@@ -175,6 +177,7 @@ static ClayValue array_filter(ClayObject *self, int argc, ClayValue *argv) {
         if (CLAY_IS_TRUTHY(test)) {
             clay_array_append(result, item);
         }
+        clay_release_val(test);
     }
     return CLAY_VAL(result);
 }
@@ -182,9 +185,12 @@ static ClayValue array_filter(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue array_reduce(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 2) return CLAY_NIL;
     ClayValue acc = argv[0];
+    clay_retain_val(acc);
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue args[2] = { acc, self->as.array.items[i] };
-        acc = clay_send(CLAY_OBJ(argv[1]), "value", 2, args);
+        ClayValue new_acc = clay_send(CLAY_OBJ(argv[1]), "value", 2, args);
+        clay_release_val(acc);
+        acc = new_acc;
     }
     return acc;
 }

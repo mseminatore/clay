@@ -231,7 +231,9 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue arg = clay_int(i);
         ClayTryFrame _tf;
         if (clay_try_push(&_tf) == 0) {
-            result = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+            ClayValue new_result = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+            clay_release_val(result);
+            result = new_result;
             clay_try_pop();
         } else {
             ClayValue err = clay_error_stack.current_error;

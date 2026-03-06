@@ -33,7 +33,8 @@ static ClayValue range_each(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue arg = clay_int(i);
         ClayTryFrame _tf;
         if (clay_try_push(&_tf) == 0) {
-            clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+            ClayValue ret = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
+            clay_release_val(ret);
             clay_try_pop();
         } else {
             ClayValue err = clay_error_stack.current_error;
@@ -64,6 +65,7 @@ static ClayValue range_map(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue arg = clay_int(i);
         ClayValue mapped = clay_send(CLAY_OBJ(argv[0]), "value", 1, &arg);
         clay_array_append(result, mapped);
+        clay_release_val(mapped);
     }
     return CLAY_VAL(result);
 }
@@ -81,6 +83,7 @@ static ClayValue range_filter(ClayObject *self, int argc, ClayValue *argv) {
         if (CLAY_IS_TRUTHY(test)) {
             clay_array_append(result, arg);
         }
+        clay_release_val(test);
     }
     return CLAY_VAL(result);
 }

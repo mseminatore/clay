@@ -61,7 +61,8 @@ static ClayValue object_new(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *obj = clay_clone(self);
     /* Call init(args) if the clone has an init method */
     if (clay_lookup_method(obj, "init")) {
-        clay_send(obj, "init", argc, argv);
+        ClayValue init_result = clay_send(obj, "init", argc, argv);
+        clay_release_val(init_result);
     }
     return CLAY_VAL(obj);
 }
@@ -76,7 +77,8 @@ static ClayValue object_toString(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue object_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     ClayValue s = clay_send(self, "toString", 0, NULL);
-    clay_send(CLAY_OBJ(s), "println", 0, NULL);
+    ClayValue pr = clay_send(CLAY_OBJ(s), "println", 0, NULL);
+    clay_release_val(pr);
     clay_release(CLAY_OBJ(s));
     return CLAY_VAL(self);
 }

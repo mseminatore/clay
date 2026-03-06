@@ -67,10 +67,13 @@ static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue result = CLAY_NIL;
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
-        if (!CLAY_IS_TRUTHY(cond)) break;
+        if (!CLAY_IS_TRUTHY(cond)) { clay_release_val(cond); break; }
+        clay_release_val(cond);
         ClayTryFrame _tf;
         if (clay_try_push(&_tf) == 0) {
-            result = body->as.block.func(body, 0, NULL);
+            ClayValue new_result = body->as.block.func(body, 0, NULL);
+            clay_release_val(result);
+            result = new_result;
             clay_try_pop();
         } else {
             /* Exception caught — check for break/continue signals */
@@ -98,11 +101,14 @@ static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue result = CLAY_NIL;
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
-        if (CLAY_IS_TRUTHY(cond)) break;
+        if (CLAY_IS_TRUTHY(cond)) { clay_release_val(cond); break; }
+        clay_release_val(cond);
         ClayTryFrame _tf;
         int tp = clay_try_push(&_tf);
         if (tp == 0) {
-            result = body->as.block.func(body, 0, NULL);
+            ClayValue new_result = body->as.block.func(body, 0, NULL);
+            clay_release_val(result);
+            result = new_result;
             clay_try_pop();
         } else {
             ClayValue err = clay_error_stack.current_error;

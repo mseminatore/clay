@@ -141,7 +141,8 @@ static ClayValue dict_each(ClayObject *self, int argc, ClayValue *argv) {
             CLAY_VAL(key_str),
             (ClayValue)(uintptr_t)val
         };
-        clay_send(CLAY_OBJ(argv[0]), "value", 2, args);
+        ClayValue ret = clay_send(CLAY_OBJ(argv[0]), "value", 2, args);
+        clay_release_val(ret);
         clay_release(key_str);
     }
     return CLAY_VAL(self);
