@@ -31,6 +31,7 @@
 static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
 static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
 static ClayObject *g_super_proto = NULL; /* defining prototype for super dispatch */
+static ClayObject *g_method_self = NULL; /* cached self for fast method access */
 
 /* Forward declarations for retain/release helpers */
 static void vm_retain_val(clayvm_value_t v);
@@ -56,26 +57,12 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     BcChunk *chunk = g_bc->chunks[chunk_id];
 
-    /* If invoked as a slot-method, bind the receiver as 'self' in VM globals */
-    ClayObject *method_self = clay_slot_method_self;
-    ClayValue saved_self = CLAY_NIL;
-    int self_existed = 0;
-    if (method_self) {
+    /* If invoked as a slot-method, bind the receiver as 'self' via fast global */
+    ClayObject *slot_method_self = clay_slot_method_self;
+    ClayObject *saved_method_self = g_method_self;
+    if (slot_method_self) {
         clay_slot_method_self = NULL;
-        HashTable *globals = (HashTable *)g_vm->globals;
-        if (globals) {
-            ht_value_t old_self = ht_find(globals, (ht_key_t)"self");
-            if (old_self) {
-                clayvm_value_t *existing = (clayvm_value_t *)old_self;
-                saved_self = vm_to_clay(*existing);
-                self_existed = 1;
-                *existing = CLAYVM_OBJ(method_self);
-            } else {
-                clayvm_value_t *self_stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-                *self_stored = CLAYVM_OBJ(method_self);
-                ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
-            }
-        }
+        g_method_self = slot_method_self;
     }
 
     /* Save VM state for re-entrant execution */
@@ -200,15 +187,8 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->frame_count = saved_frame_count;
 
     /* Restore 'self' if we bound a slot-method receiver */
-    if (method_self) {
-        HashTable *globals = (HashTable *)g_vm->globals;
-        if (globals && self_existed) {
-            ht_value_t cur = ht_find(globals, (ht_key_t)"self");
-            if (cur) {
-                clayvm_value_t *existing = (clayvm_value_t *)cur;
-                *existing = clay_to_vm(saved_self);
-            }
-        }
+    if (slot_method_self) {
+        g_method_self = saved_method_self;
     }
 
     /* Re-raise after VM state is safely restored */
@@ -535,24 +515,9 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     ClayObject *saved_super_proto = g_super_proto;
     g_super_proto = ms->defining_obj;
 
-    /* Save and set self as global (methods access self via global).
-     * Reuse existing hash entry when possible to avoid heap churn. */
-    HashTable *globals = (HashTable *)g_vm->globals;
-    ClayValue saved_self = CLAY_NIL;
-    int self_existed = 0;
-    if (globals) {
-        ht_value_t old_self = ht_find(globals, (ht_key_t)"self");
-        if (old_self) {
-            clayvm_value_t *existing = (clayvm_value_t *)old_self;
-            saved_self = vm_to_clay(*existing);
-            self_existed = 1;
-            *existing = CLAYVM_OBJ(self);  /* update in place */
-        } else {
-            clayvm_value_t *self_stored = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
-            *self_stored = CLAYVM_OBJ(self);
-            ht_add(globals, (ht_key_t)strdup("self"), (ht_value_t)self_stored);
-        }
-    }
+    /* Save and set self via fast-access global */
+    ClayObject *saved_method_self = g_method_self;
+    g_method_self = self;
 
     /* Save full VM state */
     const uint8_t *saved_code = g_vm->code;
@@ -628,16 +593,8 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     g_vm->running = saved_running;
     g_vm->frame_count = saved_frame_count;
 
-    /* Restore self — update in place when possible */
-    if (self_existed) {
-        ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
-        if (cur_self) {
-            *(clayvm_value_t *)cur_self = clay_to_vm(saved_self);
-        }
-    } else {
-        ht_value_t cur_self = ht_find(globals, (ht_key_t)"self");
-        if (cur_self) { free((void *)cur_self); ht_remove(globals, (ht_key_t)"self"); }
-    }
+    /* Restore self */
+    g_method_self = saved_method_self;
 
     /* Restore super prototype context */
     g_super_proto = saved_super_proto;
@@ -826,6 +783,15 @@ typedef struct {
 
 static InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
 
+/* Separate IC table for slot reads — avoids evicting method IC entries */
+typedef struct {
+    size_t      callsite_ip;
+    HashTable  *methods_key;
+    const char *selector;
+} SlotICEntry;
+
+static SlotICEntry g_slot_ic[IC_TABLE_SIZE];
+
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
@@ -852,6 +818,52 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     ClayValue receiver = vm_to_clay(recv_val);
     const char *selector = clay_string_data((ClayObject *)sel_val.as.obj);
 
+    /* Fast-path: tagged number arithmetic — avoids wrapper clone entirely.
+     * Guard: receiver is tagged number, 1 arg that's also tagged, short selector. */
+    if ((CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) &&
+        msg_argc == 1 && (CLAY_IS_INT(args[0]) || CLAY_IS_TAGGED_FLOAT(args[0])) &&
+        selector[0] != '\0' && selector[1] <= '=') {
+        ClayValue arg = args[0];
+        char c0 = selector[0], c1 = selector[1];
+        int both_int = CLAY_IS_INT(receiver) && CLAY_IS_INT(arg);
+        ClayValue fast_result = CLAY_NIL;
+        int handled = 0;
+        if (both_int) {
+            intptr_t a = clay_to_int(receiver), b = clay_to_int(arg);
+            if      (c0 == '+' && c1 == '\0') { fast_result = clay_int(a + b); handled = 1; }
+            else if (c0 == '-' && c1 == '\0') { fast_result = clay_int(a - b); handled = 1; }
+            else if (c0 == '*' && c1 == '\0') { fast_result = clay_int(a * b); handled = 1; }
+            else if (c0 == '/' && c1 == '\0' && b != 0) { fast_result = clay_int(a / b); handled = 1; }
+            else if (c0 == '%' && c1 == '\0' && b != 0) { fast_result = clay_int(a % b); handled = 1; }
+            else if (c0 == '<' && c1 == '\0') { fast_result = CLAY_BOOL(a < b); handled = 1; }
+            else if (c0 == '>' && c1 == '\0') { fast_result = CLAY_BOOL(a > b); handled = 1; }
+            else if (c0 == '<' && c1 == '=')  { fast_result = CLAY_BOOL(a <= b); handled = 1; }
+            else if (c0 == '>' && c1 == '=')  { fast_result = CLAY_BOOL(a >= b); handled = 1; }
+            else if (c0 == '=' && c1 == '=')  { fast_result = CLAY_BOOL(a == b); handled = 1; }
+            else if (c0 == '!' && c1 == '=')  { fast_result = CLAY_BOOL(a != b); handled = 1; }
+        }
+        if (!handled) {
+            float fa = CLAY_IS_TAGGED_FLOAT(receiver) ? clay_float_untag(receiver) : (float)clay_to_int(receiver);
+            float fb = CLAY_IS_TAGGED_FLOAT(arg) ? clay_float_untag(arg) : (float)clay_to_int(arg);
+            if      (c0 == '+' && c1 == '\0') { fast_result = clay_float_tag(fa + fb); handled = 1; }
+            else if (c0 == '-' && c1 == '\0') { fast_result = clay_float_tag(fa - fb); handled = 1; }
+            else if (c0 == '*' && c1 == '\0') { fast_result = clay_float_tag(fa * fb); handled = 1; }
+            else if (c0 == '/' && c1 == '\0' && fb != 0.0f) { fast_result = clay_float_tag(fa / fb); handled = 1; }
+            else if (c0 == '<' && c1 == '\0') { fast_result = CLAY_BOOL(fa < fb); handled = 1; }
+            else if (c0 == '>' && c1 == '\0') { fast_result = CLAY_BOOL(fa > fb); handled = 1; }
+            else if (c0 == '<' && c1 == '=')  { fast_result = CLAY_BOOL(fa <= fb); handled = 1; }
+            else if (c0 == '>' && c1 == '=')  { fast_result = CLAY_BOOL(fa >= fb); handled = 1; }
+            else if (c0 == '=' && c1 == '=')  { fast_result = CLAY_BOOL(fa == fb); handled = 1; }
+            else if (c0 == '!' && c1 == '=')  { fast_result = CLAY_BOOL(fa != fb); handled = 1; }
+        }
+        if (handled) {
+            vm_release_val(sel_val);
+            if (args && args != stack_args) free(args);
+            clayvm_vm_push(vm, clay_to_vm(fast_result));
+            return 0;
+        }
+    }
+
     /* Determine receiver object for IC keying */
     ClayObject *target_obj = NULL;
     HashTable *target_methods = NULL;
@@ -869,12 +881,13 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     unsigned int ic_idx = (unsigned int)(site_ip >> 2) & IC_TABLE_MASK;
     InlineCacheEntry *ic = &g_ic_table[ic_idx];
     ClayValue result;
+    int ic_handled = 0;
 
     if (target_obj &&
         ic->callsite_ip == site_ip &&
         ic->methods_key == target_methods &&
         ic->selector == selector) {
-        /* IC hit — invoke directly, skip dispatch */
+        /* Method IC hit — invoke directly, skip dispatch */
         if (CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) {
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
@@ -888,10 +901,38 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         } else {
             result = clay_invoke(ic->method, target_obj, msg_argc, args);
         }
-    } else {
+        ic_handled = 1;
+    }
+
+    /* Slot-read IC check (separate table, only for 0-arg sends on objects) */
+    if (!ic_handled && msg_argc == 0 && target_obj &&
+        !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver)) {
+        SlotICEntry *sic = &g_slot_ic[ic_idx];
+        if (sic->callsite_ip == site_ip &&
+            sic->methods_key == target_methods &&
+            sic->selector == selector) {
+            ClayValue slot_val = clay_get_slot(target_obj, selector);
+            if (!CLAY_IS_NIL(slot_val) && CLAY_IS_PTR(slot_val) &&
+                slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
+                ClayObject *slot_obj = CLAY_OBJ(slot_val);
+                if (slot_obj->type == CLAY_TYPE_BLOCK && slot_obj->as.block.func) {
+                    /* Block slot — needs invocation, fall through to full dispatch */
+                } else {
+                    clay_retain(slot_obj);
+                    result = slot_val;
+                    ic_handled = 1;
+                }
+            } else {
+                result = slot_val;
+                ic_handled = 1;
+            }
+        }
+    }
+
+    if (!ic_handled) {
         /* IC miss — full dispatch */
         result = clay_send_val(receiver, selector, msg_argc, args);
-        /* Update IC if we found a method */
+        /* Update method IC or slot IC */
         if (target_obj) {
             ClayMethod *m = clay_cached_lookup(target_obj, selector);
             if (m) {
@@ -899,6 +940,13 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
                 ic->methods_key = target_methods;
                 ic->selector = selector;
                 ic->method = m;
+            } else if (msg_argc == 0 &&
+                       !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver) &&
+                       !CLAY_IS_NIL(receiver) && clay_has_slot(target_obj, selector)) {
+                SlotICEntry *sic = &g_slot_ic[ic_idx];
+                sic->callsite_ip = site_ip;
+                sic->methods_key = target_methods;
+                sic->selector = selector;
             }
         }
     }
@@ -1317,6 +1365,18 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* native_load_self() — fast self access via cached global, no hash lookup */
+static int native_load_self_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    if (g_method_self) {
+        clayvm_vm_push(vm, CLAYVM_OBJ(g_method_self));
+        clay_retain(g_method_self);
+    } else {
+        clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+    }
+    return 0;
+}
+
 /* native_load_global(name_str) */
 static int native_load_global_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
@@ -1420,6 +1480,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_make_array = clayvm_native_register(&vm->natives, "make_array", native_make_array_fn, 0);
     bc->native_make_dict = clayvm_native_register(&vm->natives, "make_dict", native_make_dict_fn, 0);
     bc->native_load_global = clayvm_native_register(&vm->natives, "load_global", native_load_global_fn, 1);
+    bc->native_load_self = clayvm_native_register(&vm->natives, "load_self", native_load_self_fn, 0);
     bc->native_store_global = clayvm_native_register(&vm->natives, "store_global", native_store_global_fn, 2);
     bc->native_cell_new = clayvm_native_register(&vm->natives, "cell_new", native_cell_new_fn, 1);
     bc->native_cell_get = clayvm_native_register(&vm->natives, "cell_get", native_cell_get_fn, 1);
@@ -2102,12 +2163,10 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 }
             } else if (bc->in_method && !is_builtin_global(ident_name) && !bc_is_user_global(ident_name)) {
                 /* Inside a method: bare identifier → implicit self slot lookup.
-                 * Emit: load self, push slot name, send(name, 0 args) */
-                int self_idx = add_constant_string(bc, "self");
-                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)self_idx);
+                 * Emit: load_self, push slot name, send(name, 0 args) */
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-                emit_u16(bc, (uint16_t)bc->native_load_global);
-                emit_byte(bc, 1);
+                emit_u16(bc, (uint16_t)bc->native_load_self);
+                emit_byte(bc, 0);
                 int sel_idx = add_constant_string(bc, ident_name);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
@@ -2125,12 +2184,10 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_SELF: {
-            /* Load self from globals (set by method trampoline) */
-            int name_idx = add_constant_string(bc, "self");
-            emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
+            /* Load self via fast cached pointer */
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            emit_u16(bc, (uint16_t)bc->native_load_global);
-            emit_byte(bc, 1);
+            emit_u16(bc, (uint16_t)bc->native_load_self);
+            emit_byte(bc, 0);
             break;
         }
 
@@ -2154,11 +2211,9 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 /* Inside a method scope: write to self slot.
                  * Method-level locals are pre-registered; this path handles
                  * bare assigns inside blocks within methods. */
-                int self_idx = add_constant_string(bc, "self");
-                emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)self_idx);
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-                emit_u16(bc, (uint16_t)bc->native_load_global);
-                emit_byte(bc, 1);
+                emit_u16(bc, (uint16_t)bc->native_load_self);
+                emit_byte(bc, 0);
                 int slot_name = add_constant_string(bc, node->as.assign.name);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)slot_name);
                 bc_emit_expr(bc, node->as.assign.value);

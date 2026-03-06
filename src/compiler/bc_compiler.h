@@ -78,6 +78,7 @@ typedef struct {
     int native_try_catch;
     int native_raise;
     int native_make_range;
+    int native_load_self;
 
     int had_error;
 
