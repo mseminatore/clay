@@ -15,6 +15,7 @@ void (*clay_output_fn)(const char *text) = NULL;
 
 /* Shadow call stack for stack traces */
 ClayCallTrace clay_call_trace = { .depth = 0 };
+int clay_trace_enabled = 1; /* can be disabled for benchmarking */
 
 /* Create an Error object with message and type slots */
 ClayObject *clay_error_new(const char *message, const char *type) {

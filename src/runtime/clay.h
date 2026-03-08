@@ -312,8 +312,10 @@ typedef struct {
 } ClayCallTrace;
 
 extern ClayCallTrace clay_call_trace;
+extern int clay_trace_enabled; /* 0 = skip tracing for performance */
 
 static inline void clay_trace_push(const char *file, int line, const char *sel) {
+    if (!clay_trace_enabled) return;
     if (clay_call_trace.depth < CLAY_MAX_TRACE_DEPTH) {
         ClayTraceFrame *f = &clay_call_trace.frames[clay_call_trace.depth++];
         f->file = file;
@@ -323,6 +325,7 @@ static inline void clay_trace_push(const char *file, int line, const char *sel) 
 }
 
 static inline void clay_trace_pop(void) {
+    if (!clay_trace_enabled) return;
     if (clay_call_trace.depth > 0) clay_call_trace.depth--;
 }
 

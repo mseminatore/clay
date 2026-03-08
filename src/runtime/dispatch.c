@@ -65,43 +65,38 @@ static inline unsigned int cache_hash(uintptr_t key1, uintptr_t key2) {
    Two-level cache: first checks receiver's own methods table, then
    checks the defining prototype's table (shared across siblings). */
 static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
-    /* Use obj pointer itself when methods is NULL to avoid hash collisions */
-    uintptr_t recv_key = obj->methods ? (uintptr_t)obj->methods : (uintptr_t)obj;
+    /* For objects with own methods, key by their methods table pointer.
+     * For objects without (lazy methods), key by parent's methods table.
+     * This groups all instances of the same prototype together (better cache
+     * utilization) and avoids stale entries after objects are freed. */
+    uintptr_t recv_key;
+    if (obj->methods) {
+        recv_key = (uintptr_t)obj->methods;
+    } else if (obj->parent && obj->parent->methods) {
+        recv_key = (uintptr_t)obj->parent->methods;
+    } else {
+        /* No methods anywhere reachable — skip cache */
+        recv_key = 0;
+    }
+
     unsigned int idx = cache_hash(recv_key, (uintptr_t)selector);
     MethodCacheEntry *entry = &method_cache[idx];
 
-    if (entry->methods == (HashTable *)recv_key && entry->selector == selector) {
+    if (recv_key && entry->methods == (HashTable *)recv_key && entry->selector == selector) {
         return entry->method;
-    }
-
-    /* Shortcut: check parent's cache before full chain walk.
-       Only safe when receiver has no local methods (can't override parent). */
-    if (!obj->methods && obj->parent) {
-        uintptr_t parent_key = obj->parent->methods
-            ? (uintptr_t)obj->parent->methods : (uintptr_t)obj->parent;
-        unsigned int pidx = cache_hash(parent_key, (uintptr_t)selector);
-        MethodCacheEntry *pentry = &method_cache[pidx];
-        if (pentry->methods == (HashTable *)parent_key &&
-            pentry->selector == selector && pentry->method) {
-            /* Found in parent's cache — also populate receiver's entry */
-            entry->methods  = (HashTable *)recv_key;
-            entry->selector = selector;
-            entry->method   = pentry->method;
-            return pentry->method;
-        }
     }
 
     /* Full prototype chain walk */
     HashTable *defining = NULL;
     ClayMethod *m = lookup_method_full(obj, selector, &defining);
-    if (m) {
+    if (m && recv_key) {
         /* Cache under receiver's key */
         entry->methods  = (HashTable *)recv_key;
         entry->selector = selector;
         entry->method   = m;
 
         /* Also cache under defining prototype's key (shared by siblings) */
-        if (defining && defining != obj->methods) {
+        if (defining && defining != (HashTable *)recv_key) {
             unsigned int didx = cache_hash((uintptr_t)defining, (uintptr_t)selector);
             MethodCacheEntry *dentry = &method_cache[didx];
             dentry->methods  = defining;

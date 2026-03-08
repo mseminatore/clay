@@ -771,7 +771,7 @@ static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
 }
 
 /* --- Per-callsite inline cache --- */
-#define IC_TABLE_SIZE 512
+#define IC_TABLE_SIZE 4096
 #define IC_TABLE_MASK (IC_TABLE_SIZE - 1)
 
 typedef struct {
@@ -873,7 +873,12 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         target_methods = clay_Number->methods;
     } else if (!CLAY_IS_NIL(receiver)) {
         target_obj = CLAY_OBJ(receiver);
+        /* Use parent methods for IC keying when instance has no own methods
+         * (common after lazy methods optimization). This groups instances by
+         * prototype type, which is the correct semantic for IC matching. */
         target_methods = target_obj->methods;
+        if (!target_methods && target_obj->parent)
+            target_methods = target_obj->parent->methods;
     }
 
     /* Per-callsite inline cache check */

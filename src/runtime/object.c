@@ -24,7 +24,7 @@ ClayObject *clay_object_new(void) {
     }
     obj->parent   = NULL;
     obj->slots    = clay_ht_create();
-    obj->methods  = clay_ht_create();
+    obj->methods  = NULL; /* lazy: created on demand by clay_set_method_ctx */
     obj->refcount = 1;
     obj->type     = CLAY_TYPE_OBJECT;
     clay_alloc_count++;
@@ -91,15 +91,20 @@ ClayObject *clay_clone(ClayObject *proto) {
 }
 
 void clay_set_slot(ClayObject *obj, const char *name, ClayValue value) {
-    /* Check if key already exists and release old value */
+    /* Check if key already exists — update in-place to avoid remove+insert+strdup */
     ht_value_t old;
-    if (ht_lookup(obj->slots, name, &old)) {
+    if (ht_lookup(obj->slots, (ht_key_t)name, &old)) {
         ClayValue ov = (ClayValue)(uintptr_t)old;
         if (CLAY_IS_PTR(ov) && !CLAY_IS_NIL(ov) && ov != CLAY_TRUE && ov != CLAY_FALSE) {
             clay_release(CLAY_OBJ(ov));
         }
-        /* Remove old entry */
-        ht_remove(obj->slots, name);
+        /* Retain new value if it's an object */
+        if (CLAY_IS_PTR(value) && !CLAY_IS_NIL(value) && value != CLAY_TRUE && value != CLAY_FALSE) {
+            clay_retain(CLAY_OBJ(value));
+        }
+        /* Update value in-place (ht_add replaces existing) */
+        ht_add(obj->slots, (ht_key_t)name, (ht_value_t)(uintptr_t)value);
+        return;
     }
 
     /* Retain new value if it's an object */
@@ -145,6 +150,11 @@ void clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func) {
 }
 
 void clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func, void *context) {
+    /* Lazy-create methods hash table on first use */
+    if (!obj->methods) {
+        obj->methods = clay_ht_create();
+    }
+
     /* Allocate a ClayMethod struct to store the function pointer */
     ClayMethod *m = (ClayMethod *)malloc(sizeof(ClayMethod));
     m->func = func;
