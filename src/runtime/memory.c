@@ -78,7 +78,6 @@ static void clay_dealloc(ClayObject *obj) {
                 clay_release(CLAY_OBJ(cv));
             }
         }
-        ht_free(obj->slots);
     }
 
     /* Free method keys and method structs */
@@ -92,6 +91,7 @@ static void clay_dealloc(ClayObject *obj) {
             free((void *)val);
         }
         ht_free(obj->methods);
+        obj->methods = NULL;
     }
 
     /* Free type-specific data */
@@ -145,7 +145,14 @@ static void clay_dealloc(ClayObject *obj) {
             break;
     }
 
-    free(obj);
+    /* Pool simple objects for reuse; free complex ones */
+    if (obj->type == CLAY_TYPE_OBJECT && obj->slots) {
+        ht_clear(obj->slots);
+        clay_object_pool_return(obj);
+    } else {
+        if (obj->slots) ht_free(obj->slots);
+        free(obj);
+    }
 }
 
 void clay_release(ClayObject *obj) {

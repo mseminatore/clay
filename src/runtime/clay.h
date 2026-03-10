@@ -140,6 +140,7 @@ extern ClayObject clay_false_obj;
 
 /* --- Object model --- */
 ClayObject *clay_object_new(void);
+void        clay_object_pool_return(ClayObject *obj); /* Return to free-list pool */
 ClayObject *clay_clone(ClayObject *proto);
 void        clay_set_slot(ClayObject *obj, const char *name, ClayValue value);
 ClayValue   clay_get_slot(ClayObject *obj, const char *name);

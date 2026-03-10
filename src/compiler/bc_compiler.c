@@ -864,6 +864,40 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         }
     }
 
+    /* Fast-path: unary number operations (0-arg sends on tagged numbers) */
+    if ((CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) && msg_argc == 0) {
+        ClayValue fast_result = CLAY_NIL;
+        int handled = 0;
+        if (strcmp(selector, "negated") == 0) {
+            if (CLAY_IS_INT(receiver)) fast_result = clay_int(-clay_to_int(receiver));
+            else fast_result = clay_float_tag(-clay_float_untag(receiver));
+            handled = 1;
+        } else if (strcmp(selector, "abs") == 0) {
+            if (CLAY_IS_INT(receiver)) {
+                intptr_t v = clay_to_int(receiver);
+                fast_result = clay_int(v < 0 ? -v : v);
+            } else {
+                float v = clay_float_untag(receiver);
+                fast_result = clay_float_tag(v < 0.0f ? -v : v);
+            }
+            handled = 1;
+        } else if (strcmp(selector, "toFloat") == 0) {
+            if (CLAY_IS_INT(receiver)) fast_result = clay_float_tag((float)clay_to_int(receiver));
+            else fast_result = receiver;
+            handled = 1;
+        } else if (strcmp(selector, "toInt") == 0) {
+            if (CLAY_IS_TAGGED_FLOAT(receiver)) fast_result = clay_int((intptr_t)clay_float_untag(receiver));
+            else fast_result = receiver;
+            handled = 1;
+        }
+        if (handled) {
+            vm_release_val(sel_val);
+            if (args && args != stack_args) free(args);
+            clayvm_vm_push(vm, clay_to_vm(fast_result));
+            return 0;
+        }
+    }
+
     /* Determine receiver object for IC keying */
     ClayObject *target_obj = NULL;
     HashTable *target_methods = NULL;

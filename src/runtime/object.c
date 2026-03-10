@@ -16,14 +16,46 @@ static HashTable *clay_ht_create(void) {
     return ht;
 }
 
-ClayObject *clay_object_new(void) {
-    ClayObject *obj = (ClayObject *)calloc(1, sizeof(ClayObject));
-    if (!obj) {
-        fprintf(stderr, "clay: out of memory\n");
-        exit(1);
+/* --- Object free-list pool ---
+ * Recycles ClayObject structs with their slots hash table to avoid
+ * repeated calloc/free + ht_create/ht_free cycles. */
+#define OBJECT_POOL_MAX 256
+static ClayObject *object_pool[OBJECT_POOL_MAX];
+static int object_pool_count = 0;
+
+/* Return an object to the pool (called from clay_dealloc after cleanup).
+ * The object's slots hash table is already cleared; methods is NULL. */
+void clay_object_pool_return(ClayObject *obj) {
+    if (object_pool_count < OBJECT_POOL_MAX && obj->slots) {
+        /* Keep the slots hash table for reuse */
+        obj->parent = NULL;
+        obj->methods = NULL;
+        obj->refcount = 0;
+        obj->type = CLAY_TYPE_OBJECT;
+        memset(&obj->as, 0, sizeof(obj->as));
+        object_pool[object_pool_count++] = obj;
+    } else {
+        if (obj->slots) ht_free(obj->slots);
+        free(obj);
     }
+}
+
+ClayObject *clay_object_new(void) {
+    ClayObject *obj;
+
+    if (object_pool_count > 0) {
+        obj = object_pool[--object_pool_count];
+        /* slots hash table is already allocated and cleared */
+    } else {
+        obj = (ClayObject *)calloc(1, sizeof(ClayObject));
+        if (!obj) {
+            fprintf(stderr, "clay: out of memory\n");
+            exit(1);
+        }
+        obj->slots = clay_ht_create();
+    }
+
     obj->parent   = NULL;
-    obj->slots    = clay_ht_create();
     obj->methods  = NULL; /* lazy: created on demand by clay_set_method_ctx */
     obj->refcount = 1;
     obj->type     = CLAY_TYPE_OBJECT;
@@ -71,7 +103,10 @@ ClayObject *clay_clone(ClayObject *proto) {
         }
     }
 
-    /* Copy slots from prototype */
+    /* Copy slots from prototype — DISABLED for copy-on-write optimization.
+     * clay_get_slot() walks the parent chain, so reads still work.
+     * clay_set_slot() writes to local slots, creating them on first write. */
+#if 0
     if (proto && proto->slots) {
         size_t pos = 0;
         ht_key_t key;
@@ -86,6 +121,7 @@ ClayObject *clay_clone(ClayObject *proto) {
             ht_insert(obj->slots, key_copy, val);
         }
     }
+#endif
 
     return obj;
 }
