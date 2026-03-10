@@ -8,34 +8,7 @@ w = 640
 h = 480
 Graphics window(w, h, "Clay Graphics Demo")
 
-// Draw some shapes
-Graphics clear(30, 30, 50)
-
-// Draw colorful rectangles
-Graphics fillRect(50, 50, 100, 80, 200, 50, 50)
-Graphics fillRect(200, 50, 100, 80, 50, 200, 50)
-Graphics fillRect(350, 50, 100, 80, 50, 50, 200)
-
-// Draw circles
-Graphics fillCircle(100, 250, 60, 255, 200, 0)
-Graphics drawCircle(250, 250, 60, 0, 255, 255)
-Graphics fillCircle(400, 250, 60, 255, 0, 255)
-
-// Draw lines
-Graphics color(255, 255, 255)
-x = 50
-{ x <= 590 } whileTrue {
-    Graphics drawLine(x, 380, x + 20, 430, 100, 200, 255)
-    x = x + 30
-}
-
-// Title bar
-Graphics color(255, 255, 255)
-Graphics drawRect(20, 10, 600, 25)
-
-Graphics refresh()
-
-// Simple animation loop
+// Animation loop — redraws full frame each tick
 running = true
 ballX = 320
 ballY = 400
@@ -60,8 +33,25 @@ dy = 2
     (ballX < 10 || ballX > 630) ifTrue { dx = 0 - dx }
     (ballY < 350 || ballY > 470) ifTrue { dy = 0 - dy }
 
-    // Redraw bottom area with bouncing ball
-    Graphics fillRect(0, 350, 640, 130, 30, 30, 50)
+    // Redraw entire frame
+    Graphics clear(30, 30, 50)
+
+    // Static shapes
+    Graphics fillRect(50, 50, 100, 80, 200, 50, 50)
+    Graphics fillRect(200, 50, 100, 80, 50, 200, 50)
+    Graphics fillRect(350, 50, 100, 80, 50, 50, 200)
+    Graphics fillCircle(100, 250, 60, 255, 200, 0)
+    Graphics drawCircle(250, 250, 60, 0, 255, 255)
+    Graphics fillCircle(400, 250, 60, 255, 0, 255)
+
+    x = 50
+    { x <= 590 } whileTrue {
+        Graphics drawLine(x, 380, x + 20, 430, 100, 200, 255)
+        x = x + 30
+    }
+    Graphics drawRect(20, 10, 600, 25)
+
+    // Bouncing ball
     Graphics fillCircle(ballX, ballY, 8, 255, 100, 100)
     Graphics refresh()
 
