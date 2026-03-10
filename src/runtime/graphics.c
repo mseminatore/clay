@@ -533,7 +533,7 @@ static void dict_put(ClayObject *dict, const char *key, ClayValue val) {
     ClayValue args[2];
     args[0] = CLAY_VAL(clay_string_new(key));
     args[1] = val;
-    clay_send_val(CLAY_VAL(dict), "atPut", 2, args);
+    clay_send_val(CLAY_VAL(dict), "set", 2, args);
 }
 
 /* Convert SDL event to a Clay Dict */

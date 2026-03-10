@@ -46,10 +46,10 @@ dy = 2
     // Process events
     event = Graphics pollEvent()
     (event != nil) ifTrue {
-        type = event at("type")
+        type = event get("type")
         (type == "quit") ifTrue { running = false }
         (type == "keydown") ifTrue {
-            key = event at("key")
+            key = event get("key")
             (key == "Escape") ifTrue { running = false }
         }
     }
