@@ -442,6 +442,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
            strcmp(name, "Db") == 0 ||
+           strcmp(name, "Graphics") == 0 ||
            strcmp(name, "Range") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
@@ -468,6 +469,7 @@ static const char *builtin_c_expr(const char *name) {
     if (strcmp(name, "Regex") == 0)   return "CLAY_VAL(clay_Regex)";
     if (strcmp(name, "Fiber") == 0)   return "CLAY_VAL(clay_Fiber)";
     if (strcmp(name, "Db") == 0)      return "CLAY_VAL(clay_Db)";
+    if (strcmp(name, "Graphics") == 0) return "CLAY_VAL(clay_Graphics)";
     if (strcmp(name, "Range") == 0)   return "CLAY_VAL(clay_Range)";
     if (strcmp(name, "true") == 0)return "CLAY_TRUE";
     if (strcmp(name, "false") == 0)   return "CLAY_FALSE";

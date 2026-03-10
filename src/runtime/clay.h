@@ -220,6 +220,8 @@ extern ClayObject *clay_Fiber;
 extern ClayObject *clay_Db;
 extern ClayObject *clay_Range;
 
+extern ClayObject *clay_Graphics;
+
 /* Loop control signal singletons(Error clones used by break/continue) */
 extern ClayObject *clay_BreakSignal;
 extern ClayObject *clay_ContinueSignal;

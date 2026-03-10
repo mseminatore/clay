@@ -1546,6 +1546,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Range", clay_Range},
         {"Fiber", clay_Fiber},
         {"Db", clay_Db},
+        {"Graphics", clay_Graphics},
         {"BreakSignal", clay_BreakSignal},
         {"ContinueSignal", clay_ContinueSignal},
         {NULL, NULL}
@@ -1600,6 +1601,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
            strcmp(name, "Db") == 0 ||
+           strcmp(name, "Graphics") == 0 ||
            strcmp(name, "BreakSignal") == 0 ||
            strcmp(name, "ContinueSignal") == 0 ||
            strcmp(name, "true") == 0 ||
@@ -1734,6 +1736,7 @@ static int bc_is_builtin_global(const char *name) {
            strcmp(name, "Regex") == 0 ||
            strcmp(name, "Fiber") == 0 ||
            strcmp(name, "Db") == 0 ||
+           strcmp(name, "Graphics") == 0 ||
            strcmp(name, "BreakSignal") == 0 ||
            strcmp(name, "ContinueSignal") == 0 ||
            strcmp(name, "true") == 0 || strcmp(name, "false") == 0 ||

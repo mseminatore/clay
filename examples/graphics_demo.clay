@@ -1,0 +1,71 @@
+// graphics_demo.clay — Demonstrates the Graphics prototype
+//
+// Usage: clay graphics_demo.clay
+//
+// Shows: window creation, shapes, colors, animation, keyboard input
+
+w = 640
+h = 480
+Graphics window(w, h, "Clay Graphics Demo")
+
+// Draw some shapes
+Graphics clear(30, 30, 50)
+
+// Draw colorful rectangles
+Graphics fillRect(50, 50, 100, 80, 200, 50, 50)
+Graphics fillRect(200, 50, 100, 80, 50, 200, 50)
+Graphics fillRect(350, 50, 100, 80, 50, 50, 200)
+
+// Draw circles
+Graphics fillCircle(100, 250, 60, 255, 200, 0)
+Graphics drawCircle(250, 250, 60, 0, 255, 255)
+Graphics fillCircle(400, 250, 60, 255, 0, 255)
+
+// Draw lines
+Graphics color(255, 255, 255)
+x = 50
+{ x <= 590 } whileTrue {
+    Graphics drawLine(x, 380, x + 20, 430, 100, 200, 255)
+    x = x + 30
+}
+
+// Title bar
+Graphics color(255, 255, 255)
+Graphics drawRect(20, 10, 600, 25)
+
+Graphics refresh()
+
+// Simple animation loop
+running = true
+ballX = 320
+ballY = 400
+dx = 3
+dy = 2
+
+{ running } whileTrue {
+    // Process events
+    event = Graphics pollEvent()
+    (event != nil) ifTrue {
+        type = event at("type")
+        (type == "quit") ifTrue { running = false }
+        (type == "keydown") ifTrue {
+            key = event at("key")
+            (key == "Escape") ifTrue { running = false }
+        }
+    }
+
+    // Move ball
+    ballX = ballX + dx
+    ballY = ballY + dy
+    (ballX < 10 || ballX > 630) ifTrue { dx = 0 - dx }
+    (ballY < 350 || ballY > 470) ifTrue { dy = 0 - dy }
+
+    // Redraw bottom area with bouncing ball
+    Graphics fillRect(0, 350, 640, 130, 30, 30, 50)
+    Graphics fillCircle(ballX, ballY, 8, 255, 100, 100)
+    Graphics refresh()
+
+    Graphics fps(60)
+}
+
+Graphics close()

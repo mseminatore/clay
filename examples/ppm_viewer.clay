@@ -1,0 +1,77 @@
+// ppm_viewer.clay — View PPM image files using the Graphics prototype
+//
+// Usage:
+//   clay ppm_viewer.clay <path-to-file.ppm>
+//   clay ppm_viewer.clay output.ppm
+//
+// Controls:
+//   ESC or Q — quit
+//   F        — toggle fullscreen
+
+args = System args()
+
+path = nil
+(args size() > 0) ifTrue {
+    path = args at(0)
+}
+
+(path == nil) ifTrue {
+    Console println("Usage: clay ppm_viewer.clay <file.ppm>")
+    System exit(1)
+}
+
+File exists(path) ifFalse {
+    Console println("File not found: " + path)
+    System exit(1)
+}
+
+// Create window first, then load the image
+// We need a window for SDL texture creation
+Graphics window(400, 300, "Clay PPM Viewer")
+
+// Load the PPM
+img = Graphics loadPPM(path)
+imgW = Graphics imageWidth(img)
+imgH = Graphics imageHeight(img)
+
+// Calculate display size (cap at 1024x768)
+winW = imgW
+winH = imgH
+(winW > 1024) ifTrue {
+    scale = 1024.0 / winW toFloat()
+    winW = 1024
+    winH = (imgH toFloat() * scale) toInt()
+}
+(winH > 768) ifTrue {
+    scale = 768.0 / winH toFloat()
+    winH = 768
+    winW = (winW toFloat() * scale) toInt()
+}
+
+// Resize window to fit image
+Graphics resize(winW, winH)
+Graphics title("Clay PPM Viewer")
+
+Graphics clear()
+Graphics drawImage(img, 0, 0, winW, winH)
+Graphics refresh()
+
+// Event loop — wait for quit
+running = true
+{ running } whileTrue {
+    event = Graphics waitEvent()
+    (event != nil) ifTrue {
+        type = event at("type")
+        (type == "quit") ifTrue { running = false }
+        (type == "keydown") ifTrue {
+            key = event at("key")
+            (key == "Escape") ifTrue { running = false }
+            (key == "Q") ifTrue { running = false }
+            (key == "F") ifTrue {
+                Graphics fullscreen()
+            }
+        }
+    }
+}
+
+Graphics close()

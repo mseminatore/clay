@@ -71,6 +71,7 @@ set(RUNTIME_SOURCES
     src/runtime/db.c
     src/runtime/bootstrap.c
     src/runtime/intern.c
+    src/runtime/graphics.c
 )
 
 # SQLite amalgamation
@@ -80,9 +81,25 @@ if(MSVC)
     target_compile_definitions(sqlite3 PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Optional SDL2 for Graphics prototype
+find_package(SDL2 CONFIG QUIET)
+if(SDL2_FOUND)
+    message(STATUS "SDL2 found — Graphics prototype enabled")
+else()
+    message(STATUS "SDL2 not found — Graphics prototype disabled (install via vcpkg)")
+endif()
+
 add_library(clay_runtime STATIC ${RUNTIME_SOURCES})
 target_include_directories(clay_runtime PUBLIC src/runtime deps/sqlite)
 target_link_libraries(clay_runtime PUBLIC ht sqlite3)
+
+if(SDL2_FOUND)
+    target_compile_definitions(clay_runtime PRIVATE CLAY_HAS_SDL2)
+    target_link_libraries(clay_runtime PUBLIC
+        $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+        $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    )
+endif()
 if(WIN32)
     target_link_libraries(clay_runtime PUBLIC winhttp ws2_32)
 endif()
@@ -155,6 +172,15 @@ if(UNIX)
 endif()
 set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 
+# Copy SDL2 DLL to output directory (Windows only)
+if(WIN32 AND SDL2_FOUND AND TARGET SDL2::SDL2)
+    add_custom_command(TARGET clay_compiler POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:SDL2::SDL2>
+            $<TARGET_FILE_DIR:clay_compiler>
+        COMMENT "Copying SDL2 DLL")
+endif()
+
 # Test runner
 add_executable(test_runner test/test_runtime.c test/test_lexer.c test/test_parser.c)
 target_link_libraries(test_runner clay_compiler_lib testy)
@@ -167,6 +193,15 @@ else()
     else()
         target_link_options(test_runner PRIVATE -Wl,-z,stacksize=4194304)
     endif()
+endif()
+
+# Copy SDL2 DLL for test runner
+if(WIN32 AND SDL2_FOUND AND TARGET SDL2::SDL2)
+    add_custom_command(TARGET test_runner POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:SDL2::SDL2>
+            $<TARGET_FILE_DIR:test_runner>
+        COMMENT "Copying SDL2 DLL for tests")
 endif()
 
 enable_testing()

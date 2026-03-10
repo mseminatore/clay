@@ -31,6 +31,7 @@ ClayObject *clay_Regex   = NULL;
 ClayObject *clay_Fiber   = NULL;
 ClayObject *clay_Db     = NULL;
 ClayObject *clay_Range  = NULL;
+ClayObject *clay_Graphics = NULL;
 ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
 
@@ -49,6 +50,7 @@ extern void clay_regex_init_methods(ClayObject *proto);
 extern void clay_fiber_init_methods(ClayObject *proto);
 extern void clay_db_init(ClayObject *proto);
 extern void clay_range_init_methods(ClayObject *proto);
+extern void clay_graphics_init(ClayObject *proto);
 
 /* Object base methods */
 
@@ -671,11 +673,18 @@ void clay_bootstrap(void) {
     clay_Db->refcount = 1000000;
     clay_set_slot(clay_Db, "_name", CLAY_VAL(clay_string_new("Db")));
     clay_db_init(clay_Db);
+
+    /* Graphics prototype (SDL2 backend — may be stub if SDL2 not found) */
+    clay_Graphics = clay_object_new();
+    clay_Graphics->parent = clay_Object;
+    clay_Graphics->refcount = 1000000;
+    clay_set_slot(clay_Graphics, "_name", CLAY_VAL(clay_string_new("Graphics")));
+    clay_graphics_init(clay_Graphics);
 }
 
 void clay_shutdown(void) {
-    /* In a real implementation we'd free all prototypes.
-     * For now, they live for the program's lifetime. */
+    extern void clay_graphics_shutdown(void);
+    clay_graphics_shutdown();
 }
 
 /* Debug helper: print object details to stderr */
