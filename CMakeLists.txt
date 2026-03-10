@@ -271,3 +271,19 @@ if(WIN32)
         RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
         RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins)
 endif()
+
+# Crypto plugin
+add_library(crypto MODULE examples/plugins/crypto_plugin.c)
+target_include_directories(crypto PRIVATE src/runtime)
+set_target_properties(crypto PROPERTIES
+    PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
+if(WIN32)
+    set_target_properties(crypto PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins)
+    target_link_libraries(crypto PRIVATE bcrypt)
+endif()

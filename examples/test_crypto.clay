@@ -1,0 +1,72 @@
+// Crypto plugin test with known test vectors
+Crypto = System plugin("crypto")
+"Crypto plugin loaded!" println
+
+// SHA-256 test vectors (NIST)
+result = Crypto sha256("")
+expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+("sha256('') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+result = Crypto sha256("hello")
+expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+("sha256('hello') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+// SHA-1 test vectors
+result = Crypto sha1("")
+expected = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+("sha1('') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+result = Crypto sha1("hello")
+expected = "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"
+("sha1('hello') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+// MD5 test vectors (RFC 1321)
+result = Crypto md5("")
+expected = "d41d8cd98f00b204e9800998ecf8427e"
+("md5('') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+result = Crypto md5("hello")
+expected = "5d41402abc4b2a76b9719d911017c592"
+("md5('hello') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+// HMAC-SHA256 test vector (RFC 4231 Test Case 2)
+result = Crypto hmacSha256("key", "The quick brown fox jumps over the lazy dog")
+expected = "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+("hmacSha256('key', ...) = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+// Base64 encode/decode
+result = Crypto base64Encode("hello")
+expected = "aGVsbG8="
+("base64Encode('hello') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+result = Crypto base64Decode("aGVsbG8=")
+expected = "hello"
+("base64Decode('aGVsbG8=') = " + result) println
+(result == expected) ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+result = Crypto base64Encode("")
+("base64Encode('') = " + result) println
+(result == "") ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+result = Crypto base64Decode("")
+("base64Decode('') = " + result) println
+(result == "") ifTrue { "  ✓ PASS" println } ifFalse { "  ✗ FAIL" println }
+
+// Random bytes (just verify it returns correct length hex string)
+result = Crypto randomBytes(16)
+("randomBytes(16) = " + result) println
+(result length == 32) ifTrue { "  ✓ PASS (32 hex chars)" println } ifFalse { "  ✗ FAIL (expected 32 chars)" println }
+
+result = Crypto randomBytes(1)
+("randomBytes(1)  = " + result) println
+(result length == 2) ifTrue { "  ✓ PASS (2 hex chars)" println } ifFalse { "  ✗ FAIL (expected 2 chars)" println }
+
+"Done!" println
