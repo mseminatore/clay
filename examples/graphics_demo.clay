@@ -44,11 +44,8 @@ dy = 2
     Graphics drawCircle(250, 250, 60, 0, 255, 255)
     Graphics fillCircle(400, 250, 60, 255, 0, 255)
 
-    x = 50
-    { x <= 590 } whileTrue {
-        Graphics drawLine(x, 380, x + 20, 430, 100, 200, 255)
-        x = x + 30
-    }
+    // Divider line
+    Graphics drawLine(20, 340, 620, 340, 100, 200, 255)
     Graphics drawRect(20, 10, 600, 25)
 
     // Bouncing ball
