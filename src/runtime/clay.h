@@ -74,7 +74,8 @@ typedef enum {
     CLAY_TYPE_ARRAY,
     CLAY_TYPE_BLOCK,
     CLAY_TYPE_DICT,
-    CLAY_TYPE_FLOAT
+    CLAY_TYPE_FLOAT,
+    CLAY_TYPE_PLUGIN
 } ClayType;
 
 struct ClayObject {
@@ -111,6 +112,11 @@ struct ClayObject {
         struct {
             float value;
         } number_float;
+
+        struct {
+            void *data;
+            void (*free_fn)(void *data);
+        } plugin;
     } as;
 };
 
@@ -235,6 +241,12 @@ int clay_regex_search(const char *pat, const char *text, int *match_start, int *
 void clay_bootstrap(void);
 void clay_shutdown(void);
 void clay_set_args(int argc, char **argv);
+
+/* --- Plugin system --- */
+/* Check if a name is a plugin-registered global */
+int clay_plugin_is_global(const char *name);
+/* Get a plugin-registered prototype by name (or NULL) */
+ClayObject *clay_plugin_get_global(const char *name);
 
 /* --- String helpers --- */
 ClayObject *clay_string_new(const char *str);

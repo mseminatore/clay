@@ -142,6 +142,10 @@ static void clay_dealloc(ClayObject *obj) {
                 ht_free(obj->as.dict.map);
             }
             break;
+        case CLAY_TYPE_PLUGIN:
+            if (obj->as.plugin.data && obj->as.plugin.free_fn)
+                obj->as.plugin.free_fn(obj->as.plugin.data);
+            break;
         default:
             break;
     }

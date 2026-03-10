@@ -1572,6 +1572,26 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     clayvm_value_t *nv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
     *nv = CLAYVM_NIL_VAL;
     ht_add(g, (ht_key_t)strdup("nil"), (ht_value_t)nv);
+
+    /* Add plugin-registered globals */
+    for (int i = 0; ; i++) {
+        ClayObject *pobj = NULL;
+        const char *pname = NULL;
+        /* Iterate plugin globals via the public API */
+        extern int clay_plugin_is_global(const char *name);
+        extern ClayObject *clay_plugin_get_global(const char *name);
+        /* Use index-based access — need an accessor */
+        extern int clay_plugin_global_count(void);
+        extern const char *clay_plugin_global_name(int idx);
+        extern ClayObject *clay_plugin_global_object(int idx);
+        if (i >= clay_plugin_global_count()) break;
+        pname = clay_plugin_global_name(i);
+        pobj = clay_plugin_global_object(i);
+        if (!pname || !pobj) continue;
+        clayvm_value_t *pv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
+        *pv = CLAYVM_OBJ(pobj);
+        ht_add(g, (ht_key_t)strdup(pname), (ht_value_t)pv);
+    }
 }
 
 /* --- AST → Bytecode compilation --- */
@@ -1582,6 +1602,7 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node);
 /* --- Local variable helpers --- */
 
 static int is_builtin_global(const char *name) {
+    if (clay_plugin_is_global(name)) return 1;
     return strcmp(name, "Object") == 0 ||
            strcmp(name, "Number") == 0 ||
            strcmp(name, "String") == 0 ||
@@ -1724,6 +1745,7 @@ static void bc_capture_free(BcCaptureList *cl) {
 }
 
 static int bc_is_builtin_global(const char *name) {
+    if (clay_plugin_is_global(name)) return 1;
     return strcmp(name, "Object") == 0 || strcmp(name, "Number") == 0 ||
            strcmp(name, "String") == 0 || strcmp(name, "Array") == 0 ||
            strcmp(name, "Block") == 0 || strcmp(name, "Nil") == 0 ||

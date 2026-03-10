@@ -1,0 +1,22 @@
+// Plugin test — load MathEx plugin
+MathEx = System plugin("mathex")
+"Plugin loaded!" println
+
+// Test math functions
+result = MathEx sqrt(16)
+("sqrt(16) = " + result toString()) println
+
+result = MathEx pow(2, 10)
+("pow(2,10) = " + result toString()) println
+
+result = MathEx sin(0)
+("sin(0) = " + result toString()) println
+
+result = MathEx cos(0)
+("cos(0) = " + result toString()) println
+
+result = MathEx lerp(0, 100, 0.5)
+("lerp(0,100,0.5) = " + result toString()) println
+
+result = MathEx clamp(150, 0, 100)
+("clamp(150,0,100) = " + result toString()) println

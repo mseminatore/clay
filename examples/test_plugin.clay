@@ -1,0 +1,9 @@
+// test_plugin.clay — Test the native plugin system
+//
+// Usage: clay test_plugin.clay
+
+MathEx = System plugin("mathex")
+Console println("Plugin loaded!")
+result = MathEx sqrt(16)
+Console println("sqrt(16) = " + result toString())
+Console println("Done!")

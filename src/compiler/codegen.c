@@ -423,6 +423,7 @@ static void clear_boxed(CodeGen *cg) {
 }
 
 static int is_builtin_global(const char *name) {
+    if (clay_plugin_is_global(name)) return 1;
     return strcmp(name, "Object") == 0 ||
            strcmp(name, "Number") == 0 ||
            strcmp(name, "String") == 0 ||

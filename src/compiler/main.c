@@ -50,6 +50,10 @@ static int ci_streq(const char *a, const char *b) {
 #include "ast.h"
 #include "dap.h"
 
+/* Plugin auto-load */
+extern void clay_plugin_auto_load(const char *exe_path);
+static const char *g_exe_path = NULL;
+
 #ifdef _MSC_VER
 #define strdup _strdup
 #endif
@@ -646,6 +650,7 @@ static void step_callback(void *vm_ptr, size_t ip) {
 
 static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     clay_bootstrap();
+    clay_plugin_auto_load(g_exe_path);
     repl_enable_color();
 
     clayvm_vm_t vm;
@@ -815,6 +820,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
 static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     char *source = read_file(filename);
     clay_bootstrap();
+    clay_plugin_auto_load(g_exe_path);
     repl_enable_color();
 
     clayvm_vm_t vm;
@@ -902,6 +908,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 }
 
 int main(int argc, char *argv[]) {
+    g_exe_path = argv[0];
     clay_set_args(argc, argv);
     const char *source_file = NULL;
     const char *output_name = NULL;

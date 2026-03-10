@@ -101,6 +101,10 @@ ClayObject *clay_clone(ClayObject *proto) {
             if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE)
                 clay_retain(CLAY_OBJ(v));
         }
+    } else if (proto && proto->type == CLAY_TYPE_PLUGIN) {
+        /* Inherit free_fn from prototype; data starts NULL */
+        obj->as.plugin.data = NULL;
+        obj->as.plugin.free_fn = proto->as.plugin.free_fn;
     }
 
     /* Copy slots from prototype — DISABLED for copy-on-write optimization.

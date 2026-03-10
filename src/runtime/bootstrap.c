@@ -80,7 +80,9 @@ static ClayValue object_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     ClayValue s = clay_send(self, "toString", 0, NULL);
     ClayValue pr = clay_send(CLAY_OBJ(s), "println", 0, NULL);
-    clay_release_val(pr);
+    /* pr is often the same object as s (string_println returns self),
+     * so only release each distinct object once. */
+    if (pr != s) clay_release_val(pr);
     clay_release(CLAY_OBJ(s));
     return CLAY_VAL(self);
 }
@@ -632,6 +634,10 @@ void clay_bootstrap(void) {
     clay_set_method(clay_System, "platform", system_platform);
     clay_set_method(clay_System, "clock", system_clock);
 
+    /* Register plugin system on System prototype */
+    extern void clay_plugin_init_system(ClayObject *system_proto);
+    clay_plugin_init_system(clay_System);
+
     /* FFI object — foreign function interface */
     clay_FFI = clay_object_new();
     clay_FFI->parent = clay_Object;
@@ -684,7 +690,9 @@ void clay_bootstrap(void) {
 
 void clay_shutdown(void) {
     extern void clay_graphics_shutdown(void);
+    extern void clay_plugin_shutdown(void);
     clay_graphics_shutdown();
+    clay_plugin_shutdown();
 }
 
 /* Debug helper: print object details to stderr */

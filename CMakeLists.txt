@@ -72,6 +72,7 @@ set(RUNTIME_SOURCES
     src/runtime/bootstrap.c
     src/runtime/intern.c
     src/runtime/graphics.c
+    src/runtime/plugin.c
 )
 
 # SQLite amalgamation
@@ -254,3 +255,19 @@ add_test(NAME clay_test_env COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/te
 set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_env
     PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                LABELS "bricks")
+
+# Example plugin — mathex
+add_library(mathex MODULE examples/plugins/example_plugin.c)
+target_include_directories(mathex PRIVATE src/runtime)
+set_target_properties(mathex PROPERTIES
+    PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
+# On Windows, MODULE produces .dll in RUNTIME_OUTPUT_DIRECTORY
+if(WIN32)
+    set_target_properties(mathex PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins)
+endif()
