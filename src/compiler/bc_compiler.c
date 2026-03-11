@@ -28,10 +28,10 @@
 
 /* --- Global state for trampoline access --- */
 
-static BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
-static clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
-static ClayObject *g_super_proto = NULL; /* defining prototype for super dispatch */
-static ClayObject *g_method_self = NULL; /* cached self for fast method access */
+static CLAY_THREAD_LOCAL BcCompiler *g_bc = NULL;  /* current compiler (for trampoline) */
+static CLAY_THREAD_LOCAL clayvm_vm_t *g_vm = NULL; /* current VM (for trampoline) */
+static CLAY_THREAD_LOCAL ClayObject *g_super_proto = NULL; /* defining prototype for super dispatch */
+static CLAY_THREAD_LOCAL ClayObject *g_method_self = NULL; /* cached self for fast method access */
 
 /* Forward declarations for retain/release helpers */
 static void vm_retain_val(clayvm_value_t v);
@@ -781,7 +781,7 @@ typedef struct {
     ClayMethod *method;
 } InlineCacheEntry;
 
-static InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
+static CLAY_THREAD_LOCAL InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
 
 /* Separate IC table for slot reads — avoids evicting method IC entries */
 typedef struct {
@@ -790,7 +790,7 @@ typedef struct {
     const char *selector;
 } SlotICEntry;
 
-static SlotICEntry g_slot_ic[IC_TABLE_SIZE];
+static CLAY_THREAD_LOCAL SlotICEntry g_slot_ic[IC_TABLE_SIZE];
 
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {

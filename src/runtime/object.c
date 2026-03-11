@@ -23,9 +23,44 @@ static HashTable *clay_ht_create(void) {
 static ClayObject *object_pool[OBJECT_POOL_MAX];
 static int object_pool_count = 0;
 
+#ifdef CLAY_THREAD_SAFE
+  #ifdef _WIN32
+    /* Minimal Windows API declarations to avoid including windows.h */
+    typedef struct { void *DebugInfo; long LockCount; long RecursionCount;
+                     void *OwningThread; void *LockSemaphore; uintptr_t SpinCount; } CLAY_CS;
+    __declspec(dllimport) void __stdcall InitializeCriticalSection(CLAY_CS *);
+    __declspec(dllimport) void __stdcall EnterCriticalSection(CLAY_CS *);
+    __declspec(dllimport) void __stdcall LeaveCriticalSection(CLAY_CS *);
+    static CLAY_CS pool_cs;
+  #else
+    #include <pthread.h>
+    static pthread_mutex_t pool_cs = PTHREAD_MUTEX_INITIALIZER;
+  #endif
+  static int pool_cs_inited = 0;
+  static void pool_lock(void) {
+      #ifdef _WIN32
+      if (!pool_cs_inited) { InitializeCriticalSection(&pool_cs); pool_cs_inited = 1; }
+      EnterCriticalSection(&pool_cs);
+      #else
+      pthread_mutex_lock(&pool_cs);
+      #endif
+  }
+  static void pool_unlock(void) {
+      #ifdef _WIN32
+      LeaveCriticalSection(&pool_cs);
+      #else
+      pthread_mutex_unlock(&pool_cs);
+      #endif
+  }
+#else
+  static void pool_lock(void) {}
+  static void pool_unlock(void) {}
+#endif
+
 /* Return an object to the pool (called from clay_dealloc after cleanup).
  * The object's slots hash table is already cleared; methods is NULL. */
 void clay_object_pool_return(ClayObject *obj) {
+    pool_lock();
     if (object_pool_count < OBJECT_POOL_MAX && obj->slots) {
         /* Keep the slots hash table for reuse */
         obj->parent = NULL;
@@ -34,7 +69,9 @@ void clay_object_pool_return(ClayObject *obj) {
         obj->type = CLAY_TYPE_OBJECT;
         memset(&obj->as, 0, sizeof(obj->as));
         object_pool[object_pool_count++] = obj;
+        pool_unlock();
     } else {
+        pool_unlock();
         if (obj->slots) ht_free(obj->slots);
         free(obj);
     }
@@ -43,10 +80,13 @@ void clay_object_pool_return(ClayObject *obj) {
 ClayObject *clay_object_new(void) {
     ClayObject *obj;
 
+    pool_lock();
     if (object_pool_count > 0) {
         obj = object_pool[--object_pool_count];
+        pool_unlock();
         /* slots hash table is already allocated and cleared */
     } else {
+        pool_unlock();
         obj = (ClayObject *)calloc(1, sizeof(ClayObject));
         if (!obj) {
             fprintf(stderr, "clay: out of memory\n");

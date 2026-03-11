@@ -5,10 +5,10 @@
 
 /* Global method context pointer — set before calling a method function.
  * Used by the BC compiler's generic dispatch to retrieve per-method data. */
-void *clay_method_context = NULL;
+CLAY_THREAD_LOCAL void *clay_method_context = NULL;
 
 /* When non-NULL, block trampolines bind this as 'self' (slot-as-method dispatch) */
-ClayObject *clay_slot_method_self = NULL;
+CLAY_THREAD_LOCAL ClayObject *clay_slot_method_self = NULL;
 
 /* --- Global method cache --- */
 #define METHOD_CACHE_SIZE 1024  /* must be power of 2 */
@@ -20,7 +20,7 @@ typedef struct {
     ClayMethod     *method;    /* cached method struct */
 } MethodCacheEntry;
 
-static MethodCacheEntry method_cache[METHOD_CACHE_SIZE];
+static CLAY_THREAD_LOCAL MethodCacheEntry method_cache[METHOD_CACHE_SIZE];
 
 void clay_method_cache_clear(void) {
     memset(method_cache, 0, sizeof(method_cache));

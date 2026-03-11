@@ -12,6 +12,34 @@ extern "C" {
 #include <string.h>
 #include "hash.h"
 
+/* ------------------------------------------------------------------ */
+/*  Thread-safety support (opt-in via -DCLAY_THREAD_SAFE)              */
+/* ------------------------------------------------------------------ */
+
+#ifdef CLAY_THREAD_SAFE
+  /* Atomic refcount operations */
+  #ifdef _MSC_VER
+    #include <intrin.h>
+    #define CLAY_ATOMIC_INC(p) _InterlockedIncrement((volatile long *)(p))
+    #define CLAY_ATOMIC_DEC(p) _InterlockedDecrement((volatile long *)(p))
+  #else
+    #define CLAY_ATOMIC_INC(p) (__atomic_add_fetch((p), 1, __ATOMIC_SEQ_CST))
+    #define CLAY_ATOMIC_DEC(p) (__atomic_sub_fetch((p), 1, __ATOMIC_SEQ_CST))
+  #endif
+
+  /* Thread-local storage */
+  #ifdef _MSC_VER
+    #define CLAY_THREAD_LOCAL __declspec(thread)
+  #else
+    #define CLAY_THREAD_LOCAL __thread
+  #endif
+#else
+  /* No threading: plain increment/decrement, no TLS */
+  #define CLAY_ATOMIC_INC(p) (++(*(p)))
+  #define CLAY_ATOMIC_DEC(p) (--(*(p)))
+  #define CLAY_THREAD_LOCAL   /* nothing */
+#endif
+
 /*
  * ClayValue - tagged union type
  *
@@ -162,10 +190,10 @@ ClayMethod *clay_cached_lookup(ClayObject *obj, const char *selector);
 ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv);
 
 /* Context pointer set by dispatch before calling a method (for BC compiler) */
-extern void *clay_method_context;
+extern CLAY_THREAD_LOCAL void *clay_method_context;
 
 /* When non-NULL, block trampolines bind this as 'self' (for slot-as-method dispatch) */
-extern ClayObject *clay_slot_method_self;
+extern CLAY_THREAD_LOCAL ClayObject *clay_slot_method_self;
 
 /* --- String interning --- */
 const char *clay_intern(const char *name);
@@ -288,7 +316,7 @@ typedef struct {
     ClayValue current_error;     /* the error being raised */
 } ClayErrorStack;
 
-extern ClayErrorStack clay_error_stack;
+extern CLAY_THREAD_LOCAL ClayErrorStack clay_error_stack;
 
 /* Push/pop try frames — caller must declare a local ClayTryFrame variable */
 #define clay_try_push(frame) \
@@ -302,8 +330,8 @@ extern ClayErrorStack clay_error_stack;
 void clay_raise(ClayValue error);
 
 /* Source location tracking for error messages */
-extern int clay_source_line;
-extern const char *clay_source_file;
+extern CLAY_THREAD_LOCAL int clay_source_line;
+extern CLAY_THREAD_LOCAL const char *clay_source_file;
 
 /* Output hook — when set, all println/print calls route through this
  * instead of writing to stdout. Used by DAP to send output events. */
@@ -326,8 +354,8 @@ typedef struct {
     int depth;
 } ClayCallTrace;
 
-extern ClayCallTrace clay_call_trace;
-extern int clay_trace_enabled; /* 0 = skip tracing for performance */
+extern CLAY_THREAD_LOCAL ClayCallTrace clay_call_trace;
+extern CLAY_THREAD_LOCAL int clay_trace_enabled; /* 0 = skip tracing for performance */
 
 static inline void clay_trace_push(const char *file, int line, const char *sel) {
     if (!clay_trace_enabled) return;

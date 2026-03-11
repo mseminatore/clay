@@ -41,7 +41,7 @@ static int clay_is_singleton(ClayObject *obj) {
 
 ClayObject *clay_retain(ClayObject *obj) {
     if (obj && !clay_is_singleton(obj)) {
-        obj->refcount++;
+        CLAY_ATOMIC_INC(&obj->refcount);
     }
     return obj;
 }
@@ -162,8 +162,7 @@ static void clay_dealloc(ClayObject *obj) {
 
 void clay_release(ClayObject *obj) {
     if (!obj || clay_is_singleton(obj)) return;
-    obj->refcount--;
-    if (obj->refcount <= 0) {
+    if (CLAY_ATOMIC_DEC(&obj->refcount) <= 0) {
         clay_dealloc(obj);
     }
 }

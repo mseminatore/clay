@@ -4,18 +4,18 @@
 #include "clay.h"
 
 /* Global error stack */
-ClayErrorStack clay_error_stack = { .head = NULL, .current_error = 0 };
+CLAY_THREAD_LOCAL ClayErrorStack clay_error_stack = { .head = NULL, .current_error = 0 };
 
 /* Source location tracking */
-int clay_source_line = 0;
-const char *clay_source_file = NULL;
+CLAY_THREAD_LOCAL int clay_source_line = 0;
+CLAY_THREAD_LOCAL const char *clay_source_file = NULL;
 
 /* Output hook for DAP */
 void (*clay_output_fn)(const char *text) = NULL;
 
 /* Shadow call stack for stack traces */
-ClayCallTrace clay_call_trace = { .depth = 0 };
-int clay_trace_enabled = 1; /* can be disabled for benchmarking */
+CLAY_THREAD_LOCAL ClayCallTrace clay_call_trace = { .depth = 0 };
+CLAY_THREAD_LOCAL int clay_trace_enabled = 1; /* can be disabled for benchmarking */
 
 /* Create an Error object with message and type slots */
 ClayObject *clay_error_new(const char *message, const char *type) {

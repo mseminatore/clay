@@ -148,12 +148,12 @@ ClayCell *clay_cell_new(ClayValue initial) {
 }
 
 void clay_cell_retain(ClayCell *cell) {
-    if (cell) cell->refcount++;
+    if (cell) CLAY_ATOMIC_INC(&cell->refcount);
 }
 
 void clay_cell_release(ClayCell *cell) {
     if (!cell) return;
-    if (--cell->refcount <= 0) {
+    if (CLAY_ATOMIC_DEC(&cell->refcount) <= 0) {
         ClayValue v = cell->value;
         if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) &&
             v != CLAY_TRUE && v != CLAY_FALSE) {

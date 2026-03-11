@@ -3,9 +3,16 @@ project(clay C)
 
 set(CMAKE_C_STANDARD 99)
 
+# Thread-safety option (off by default — zero overhead when disabled)
+option(CLAY_THREAD_SAFE "Enable thread-safe refcounting and TLS for multi-threaded use" OFF)
+
 # Suppress MSVC deprecation warnings
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
+if(CLAY_THREAD_SAFE)
+    add_compile_definitions(CLAY_THREAD_SAFE)
 endif()
 
 # Suppress typedef redefinition warning (generated VM code uses C11 pattern)
