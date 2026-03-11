@@ -336,7 +336,8 @@ j = _imageHeight - 1
   j = j - 1
 }
 
-_msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") using parallelMap..."
+_mode = Thread available ifTrue { "parallel" } ifFalse { "sequential" }
+_msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") [" + _mode + "]"
 _msg println
 
 startTime = System clock

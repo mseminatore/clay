@@ -201,10 +201,16 @@ static ClayValue thread_done(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_BOOL(fd->done);
 }
 
+static ClayValue thread_available(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_TRUE;
+}
+
 void clay_thread_init(ClayObject *proto) {
     clay_set_method(proto, "spawn", thread_spawn);
     clay_set_method(proto, "await", thread_await);
     clay_set_method(proto, "done", thread_done);
+    clay_set_method(proto, "available", thread_available);
 }
 
 /* ---- parallelMap: per-element worker ---- */
@@ -320,8 +326,14 @@ static ClayValue thread_not_available(ClayObject *self, int argc, ClayValue *arg
     return CLAY_NIL;
 }
 
+static ClayValue thread_available_false(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_FALSE;
+}
+
 void clay_thread_init(ClayObject *proto) {
     clay_set_method(proto, "spawn", thread_not_available);
+    clay_set_method(proto, "available", thread_available_false);
 }
 
 #endif /* CLAY_THREAD_SAFE */
