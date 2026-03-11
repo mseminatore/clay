@@ -228,9 +228,9 @@ static inline void clay_release_val(ClayValue v) {
     }
 }
 
-/* Memory diagnostics counters */
-extern size_t clay_alloc_count;
-extern size_t clay_dealloc_count;
+/* Memory diagnostics counters (volatile long for atomic increment in MT builds) */
+extern volatile long clay_alloc_count;
+extern volatile long clay_dealloc_count;
 
 /* --- Message dispatch --- */
 ClayValue   clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv);

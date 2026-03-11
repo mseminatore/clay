@@ -99,7 +99,7 @@ ClayObject *clay_object_new(void) {
     obj->methods  = NULL; /* lazy: created on demand by clay_set_method_ctx */
     obj->refcount = 1;
     obj->type     = CLAY_TYPE_OBJECT;
-    clay_alloc_count++;
+    CLAY_ATOMIC_INC(&clay_alloc_count);
     return obj;
 }
 

@@ -5,8 +5,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
-
-static int g_random_seeded = 0;
+#include <stdint.h>
 
 static float get_float_arg(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
@@ -83,13 +82,25 @@ static ClayValue math_cos(ClayObject *self, int argc, ClayValue *argv) {
     return clay_float_tag(cosf(get_float_arg(self, argc, argv)));
 }
 
+/* Per-thread xorshift32 PRNG — thread-safe, no shared state */
+static CLAY_THREAD_LOCAL uint32_t g_random_state = 0;
+
+static uint32_t xorshift32(void) {
+    uint32_t x = g_random_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    g_random_state = x;
+    return x;
+}
+
 static ClayValue math_random(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
-    if (!g_random_seeded) {
-        srand((unsigned int)time(NULL));
-        g_random_seeded = 1;
+    if (g_random_state == 0) {
+        g_random_state = (uint32_t)time(NULL) ^ (uint32_t)(uintptr_t)&self;
+        if (g_random_state == 0) g_random_state = 1;
     }
-    return clay_float_tag((float)rand() / (float)RAND_MAX);
+    return clay_float_tag((float)xorshift32() / (float)UINT32_MAX);
 }
 
 void clay_math_init(ClayObject *proto) {

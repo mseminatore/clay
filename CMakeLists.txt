@@ -54,6 +54,9 @@ target_include_directories(ht PUBLIC deps/hash)
 if(UNIX)
     target_compile_definitions(ht PRIVATE _POSIX_C_SOURCE=200809L)
 endif()
+if(CLAY_THREAD_SAFE)
+    target_compile_definitions(ht PRIVATE HT_THREAD_SAFE)
+endif()
 
 # Build testy library directly
 add_library(testy STATIC deps/testy/test_main.c)

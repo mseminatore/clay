@@ -814,9 +814,9 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     printf("%sBye!%s\n", C(C_DIM), C(C_RESET));
     if (mem_stats) {
         printf("\n%s--- Memory Stats ---%s\n", C(C_DIM), C(C_RESET));
-        printf("  Objects allocated: %zu\n", clay_alloc_count);
-        printf("  Objects freed:     %zu\n", clay_dealloc_count);
-        printf("  Still live:        %zu\n", clay_alloc_count - clay_dealloc_count);
+        printf("  Objects allocated: %ld\n", clay_alloc_count);
+        printf("  Objects freed:     %ld\n", clay_dealloc_count);
+        printf("  Still live:        %ld\n", clay_alloc_count - clay_dealloc_count);
     }
     clayvm_vm_free(&vm);
     return 0;
