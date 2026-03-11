@@ -522,6 +522,15 @@ static ClayValue array_setAt(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(self);
 }
 
+/* parallelMap: uses clay_parallel_map from thread.c */
+extern ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block);
+
+static ClayValue array_parallel_map(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1) return CLAY_NIL;
+    if (self->as.array.size == 0) return CLAY_VAL(clay_array_new());
+    return clay_parallel_map(self, CLAY_OBJ(argv[0]));
+}
+
 void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "append", array_append);
     clay_set_method(proto, "push", array_append);
@@ -555,4 +564,5 @@ void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "slice", array_slice);
     clay_set_method(proto, "insert", array_insert);
     clay_set_method(proto, "setAt", array_setAt);
+    clay_set_method(proto, "parallelMap", array_parallel_map);
 }

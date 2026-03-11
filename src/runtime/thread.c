@@ -207,7 +207,110 @@ void clay_thread_init(ClayObject *proto) {
     clay_set_method(proto, "done", thread_done);
 }
 
+/* ---- parallelMap: per-element worker ---- */
+typedef struct {
+    ClayObject  *block;   /* the mapper block (shared, retained) */
+    ClayValue    item;    /* input element (retained) */
+    ClayValue    result;  /* output element */
+    volatile int done;
+} PMapWorker;
+
+#ifdef _WIN32
+static unsigned __stdcall pmap_worker(void *arg) {
+#else
+static void *pmap_worker(void *arg) {
+#endif
+    PMapWorker *w = (PMapWorker *)arg;
+
+    if (g_thread_vm_init) g_thread_vm_init();
+
+    ClayValue result = clay_send(w->block, "value", 1, &w->item);
+    if (CLAY_IS_PTR(result) && !CLAY_IS_NIL(result) &&
+        result != CLAY_TRUE && result != CLAY_FALSE)
+        clay_retain(CLAY_OBJ(result));
+
+    w->result = result;
+    w->done = 1;
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
+    size_t n = arr->as.array.size;
+    if (n == 0) return CLAY_VAL(clay_array_new());
+
+    PMapWorker *workers = (PMapWorker *)calloc(n, sizeof(PMapWorker));
+#ifdef _WIN32
+    HANDLE *handles = (HANDLE *)calloc(n, sizeof(HANDLE));
+#else
+    pthread_t *threads = (pthread_t *)calloc(n, sizeof(pthread_t));
+#endif
+
+    /* Retain block once for sharing */
+    clay_retain(block);
+
+    for (size_t i = 0; i < n; i++) {
+        workers[i].block = block;
+        workers[i].item = arr->as.array.items[i];
+        workers[i].result = CLAY_NIL;
+        workers[i].done = 0;
+
+        /* Retain item if it's an object */
+        ClayValue item = workers[i].item;
+        if (CLAY_IS_PTR(item) && !CLAY_IS_NIL(item) &&
+            item != CLAY_TRUE && item != CLAY_FALSE)
+            clay_retain(CLAY_OBJ(item));
+
+#ifdef _WIN32
+        handles[i] = (HANDLE)_beginthreadex(NULL, 0, pmap_worker, &workers[i], 0, NULL);
+#else
+        pthread_create(&threads[i], NULL, pmap_worker, &workers[i]);
+#endif
+    }
+
+    /* Wait for all threads */
+#ifdef _WIN32
+    WaitForMultipleObjects((DWORD)n, handles, TRUE, INFINITE);
+    for (size_t i = 0; i < n; i++) CloseHandle(handles[i]);
+    free(handles);
+#else
+    for (size_t i = 0; i < n; i++) pthread_join(threads[i], NULL);
+    free(threads);
+#endif
+
+    /* Collect results */
+    ClayObject *result = clay_array_new();
+    for (size_t i = 0; i < n; i++) {
+        clay_array_append(result, workers[i].result);
+        /* Release item */
+        ClayValue item = workers[i].item;
+        if (CLAY_IS_PTR(item) && !CLAY_IS_NIL(item) &&
+            item != CLAY_TRUE && item != CLAY_FALSE)
+            clay_release(CLAY_OBJ(item));
+    }
+
+    clay_release(block);
+    free(workers);
+    return CLAY_VAL(result);
+}
+
 #else /* !CLAY_THREAD_SAFE */
+
+/* Sequential fallback for parallelMap */
+ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
+    ClayObject *result = clay_array_new();
+    for (size_t i = 0; i < arr->as.array.size; i++) {
+        ClayValue item = arr->as.array.items[i];
+        ClayValue mapped = clay_send(block, "value", 1, &item);
+        clay_array_append(result, mapped);
+        clay_release_val(mapped);
+    }
+    return CLAY_VAL(result);
+}
 
 static ClayValue thread_not_available(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
