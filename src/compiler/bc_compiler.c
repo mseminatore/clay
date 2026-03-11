@@ -1627,7 +1627,7 @@ void bc_worker_thread_init(void) {
     clayvm_vm_init(&worker_vm);
     bc_compiler_init(&worker_bc, &worker_vm);
 
-    /* Share chunks and constants from main thread (read-only during execution) */
+    /* Share chunks, constants, and globals from main thread */
     if (g_main_bc) {
         worker_bc.chunks = g_main_bc->chunks;
         worker_bc.chunk_count = g_main_bc->chunk_count;
@@ -1635,6 +1635,12 @@ void bc_worker_thread_init(void) {
 
         /* Share constant pool (values are immutable after compilation) */
         worker_vm.constants = g_main_bc->vm->constants;
+
+        /* Share globals table (user globals + builtins).
+         * Worker globals table was freshly created by bc_compiler_init
+         * with only builtins — replace it with the main thread's table
+         * which also has user-defined globals like closures. */
+        worker_vm.globals = g_main_bc->vm->globals;
     }
 }
 

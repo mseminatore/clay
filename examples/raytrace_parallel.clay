@@ -1,0 +1,355 @@
+// raytrace_parallel.clay — Parallel ray tracer using Thread parallelMap
+//
+// Same scene as raytrace.clay but renders scanlines in parallel.
+// Requires: clay built with -DCLAY_THREAD_SAFE
+//
+// Usage:  clay raytrace_parallel.clay              # 200x112
+//         clay raytrace_parallel.clay -- --small   # 100x56
+//         clay raytrace_parallel.clay -- --tiny    # 20x11
+//         clay raytrace_parallel.clay -- --hd      # 400x225
+//
+// Output: output.ppm
+
+// ============================================================
+//  Vec3 — uses built-in Vec3 type (fast-path in VM)
+// ============================================================
+
+// Built-in Vec3 already provides: new, x, y, z, +, -, *, /,
+// dot, cross, length, normalize, mul, reflect, nearZero, negated
+
+// ============================================================
+//  Ray
+// ============================================================
+
+Ray = Object clone {
+  origin = nil
+  direction = nil
+
+  init(o, d) { origin = o; direction = d }
+
+  at(t) { origin + direction * t }
+}
+
+// ============================================================
+//  Hit record
+// ============================================================
+
+HitRecord = Object clone {
+  p = nil
+  normal = nil
+  t = 0.0
+  frontFace = true
+  material = nil
+
+  init(_p, outwardNormal, _t, ray, mat) {
+    p = _p
+    t = _t
+    material = mat
+    frontFace = ray direction dot(outwardNormal) < 0.0
+    frontFace ifTrue {
+      normal = outwardNormal
+    } ifFalse {
+      normal = outwardNormal negated
+    }
+  }
+}
+
+// ============================================================
+//  Sphere
+// ============================================================
+
+Sphere = Object clone {
+  center = nil
+  radius = 0.0
+  material = nil
+
+  init(c, r, mat) { center = c; radius = r; material = mat }
+
+  hit(ray, tMin, tMax) {
+    oc = ray origin - center
+    a = ray direction dot(ray direction)
+    halfB = oc dot(ray direction)
+    _c = oc dot(oc) - radius * radius
+    disc = halfB * halfB - a * _c
+
+    _hitResult = nil
+    (disc >= 0.0) ifTrue {
+      sqrtD = Math sqrt(disc)
+
+      root = (0.0 - halfB - sqrtD) / a
+      _validRoot = true
+      (root < tMin || root > tMax) ifTrue {
+        root = (0.0 - halfB + sqrtD) / a
+        (root < tMin || root > tMax) ifTrue { _validRoot = false }
+      }
+
+      (_validRoot == true) ifTrue {
+        _p = ray at(root)
+        outN = (_p - center) / radius
+        _hitResult = HitRecord new(_p, outN, root, ray, material)
+      }
+    }
+    _hitResult
+  }
+}
+
+// ============================================================
+//  Materials
+// ============================================================
+
+randomInUnitSphere = nil
+randomInUnitSphere = {
+  _v = Vec3 new(Math random * 2.0 - 1.0, Math random * 2.0 - 1.0, Math random * 2.0 - 1.0)
+  _result = _v
+  (_v lengthSquared >= 1.0) ifTrue {
+    _result = randomInUnitSphere value
+  }
+  _result
+}
+
+Lambertian = Object clone {
+  albedo = nil
+  init(a) { albedo = a }
+  scatter(ray, rec) {
+    dir = rec normal + randomInUnitSphere value normalize
+    dir nearZero ifTrue { dir = rec normal }
+    scattered = Ray new(rec p, dir)
+    Object clone { attenuation = albedo; ray = scattered }
+  }
+}
+
+Metal = Object clone {
+  albedo = nil
+  fuzz = 0.0
+  init(a, f) { albedo = a; fuzz = f }
+  scatter(ray, rec) {
+    reflected = ray direction normalize reflect(rec normal)
+    (fuzz > 0.0) ifTrue {
+      reflected = reflected + randomInUnitSphere value * fuzz
+    }
+    (reflected dot(rec normal) > 0.0) ifTrue {
+      scattered = Ray new(rec p, reflected)
+      Object clone { attenuation = albedo; ray = scattered }
+    } ifFalse {
+      nil
+    }
+  }
+}
+
+// ============================================================
+//  Scene
+// ============================================================
+
+Scene = Object clone {
+  objects = nil
+  init() { objects = [] }
+  add(obj) { objects append(obj) }
+  hit(ray, tMin, tMax) {
+    closestRec = nil
+    closestT = tMax
+    objects each { |obj|
+      rec = obj hit(ray, tMin, closestT)
+      (rec != nil) ifTrue {
+        closestT = rec t
+        closestRec = rec
+      }
+    }
+    closestRec
+  }
+}
+
+// ============================================================
+//  Camera
+// ============================================================
+
+Math setMethod("tan", { |x| Math sin(x) / Math cos(x) })
+
+Camera = Object clone {
+  origin = nil
+  lowerLeftCorner = nil
+  horizontal = nil
+  vertical = nil
+
+  init(lookFrom, lookAt, vUp, vfov, aspectRatio) {
+    theta = vfov * Math pi / 180.0
+    h = Math tan(theta / 2.0)
+    viewportHeight = 2.0 * h
+    viewportWidth = aspectRatio * viewportHeight
+
+    w = (lookFrom - lookAt) normalize
+    u = vUp cross(w) normalize
+    v = w cross(u)
+
+    origin = lookFrom
+    horizontal = u * viewportWidth
+    vertical = v * viewportHeight
+    lowerLeftCorner = origin - horizontal / 2.0 - vertical / 2.0 - w
+  }
+
+  getRay(s, t) {
+    Ray new(origin, lowerLeftCorner + horizontal * s + vertical * t - origin)
+  }
+}
+
+// ============================================================
+//  Shared render helpers
+// ============================================================
+
+clamp = { |x, mn, mx|
+  _r = x
+  (x < mn) ifTrue { _r = mn }
+  (x > mx) ifTrue { _r = mx }
+  _r
+}
+
+rayColor = nil
+rayColor = { |ray, scene, depth|
+  _result = Vec3 new(0, 0, 0)
+  _done = false
+
+  (depth <= 0) ifTrue { _done = true }
+
+  (_done == false) ifTrue {
+    rec = scene hit(ray, 0.001, 999999.0)
+    (rec != nil) ifTrue {
+      scattered = rec material scatter(ray, rec)
+      (scattered != nil) ifTrue {
+        deeper = rayColor value(scattered ray, scene, depth - 1)
+        _result = scattered attenuation mul(deeper)
+      }
+      _done = true
+    }
+  }
+
+  (_done == false) ifTrue {
+    unitDir = ray direction normalize
+    t = 0.5 * (unitDir y + 1.0)
+    white = Vec3 new(1.0, 1.0, 1.0)
+    blue = Vec3 new(0.5, 0.7, 1.0)
+    _result = white * (1.0 - t) + blue * t
+  }
+
+  _result
+}
+
+// ============================================================
+//  Parallel Renderer
+// ============================================================
+
+renderScanline = { |args|
+  _j = args at(0)
+  _scene = args at(1)
+  _camera = args at(2)
+  _width = args at(3)
+  _height = args at(4)
+  _samplesPerPixel = args at(5)
+  _maxDepth = args at(6)
+
+  _linePixels = ""
+  i = 0
+  { i < _width } whileTrue {
+    pixelColor = Vec3 new(0, 0, 0)
+    s = 0
+    { s < _samplesPerPixel } whileTrue {
+      u = (i + Math random) / (_width - 1)
+      v = (_j + Math random) / (_height - 1)
+      ray = _camera getRay(u, v)
+      pixelColor = pixelColor + rayColor value(ray, _scene, _maxDepth)
+      s = s + 1
+    }
+
+    scale = 1.0 / _samplesPerPixel
+    r = Math sqrt(pixelColor x * scale)
+    g = Math sqrt(pixelColor y * scale)
+    b = Math sqrt(pixelColor z * scale)
+
+    ir = (256.0 * clamp value(r, 0.0, 0.999)) toInt
+    ig = (256.0 * clamp value(g, 0.0, 0.999)) toInt
+    ib = (256.0 * clamp value(b, 0.0, 0.999)) toInt
+
+    _linePixels = _linePixels + ir toString + " " + ig toString + " " + ib toString + "\n"
+    i = i + 1
+  }
+  _linePixels
+}
+
+// ============================================================
+//  Main
+// ============================================================
+
+_imageWidth = 200
+_samplesPerPixel = 10
+_maxDepth = 10
+
+_args = System args
+_args each { |a|
+  (a == "--small") ifTrue {
+    _imageWidth = 100
+    _samplesPerPixel = 4
+    _maxDepth = 8
+  }
+  (a == "--tiny") ifTrue {
+    _imageWidth = 20
+    _samplesPerPixel = 1
+    _maxDepth = 3
+  }
+  (a == "--hd") ifTrue {
+    _imageWidth = 400
+    _samplesPerPixel = 50
+    _maxDepth = 25
+  }
+}
+
+aspectRatio = 16.0 / 9.0
+_imageHeight = (_imageWidth / aspectRatio) toInt
+
+// Materials
+matGround = Lambertian new(Vec3 new(0.5, 0.5, 0.5))
+matCenter = Lambertian new(Vec3 new(0.1, 0.2, 0.5))
+matLeft   = Metal new(Vec3 new(0.8, 0.8, 0.8), 0.0)
+matRight  = Metal new(Vec3 new(0.8, 0.6, 0.2), 0.3)
+
+scene = Scene new
+scene add(Sphere new(Vec3 new(0.0, -100.5, -1.0), 100.0, matGround))
+scene add(Sphere new(Vec3 new(0.0, 0.0, -1.0), 0.5, matCenter))
+scene add(Sphere new(Vec3 new(-1.0, 0.0, -1.0), 0.5, matLeft))
+scene add(Sphere new(Vec3 new(1.0, 0.0, -1.0), 0.5, matRight))
+
+_lookFrom = Vec3 new(-2.0, 2.0, 1.0)
+_lookAt = Vec3 new(0.0, 0.0, -1.0)
+_vUp = Vec3 new(0.0, 1.0, 0.0)
+cam = Camera new(_lookFrom, _lookAt, _vUp, 20.0, aspectRatio)
+
+// Build scanline argument arrays (top to bottom for PPM)
+scanlineArgs = Array new
+j = _imageHeight - 1
+{ j >= 0 } whileTrue {
+  args = Array new
+  args append(j)
+  args append(scene)
+  args append(cam)
+  args append(_imageWidth)
+  args append(_imageHeight)
+  args append(_samplesPerPixel)
+  args append(_maxDepth)
+  scanlineArgs append(args)
+  j = j - 1
+}
+
+_msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") using parallelMap..."
+_msg println
+
+startTime = System clock
+
+// Render all scanlines in parallel
+scanlineResults = scanlineArgs parallelMap(renderScanline)
+
+elapsed = System clock - startTime
+
+// Assemble PPM
+header = "P3\n" + _imageWidth toString + " " + _imageHeight toString + "\n255\n"
+body = scanlineResults join("")
+File write("output.ppm", header + body)
+
+"" println
+("Done! " + _imageWidth toString + "x" + _imageHeight toString + " rendered in " + elapsed toString + "ms") println
