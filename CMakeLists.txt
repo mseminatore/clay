@@ -79,6 +79,7 @@ set(RUNTIME_SOURCES
     src/runtime/bootstrap.c
     src/runtime/intern.c
     src/runtime/graphics.c
+    src/runtime/vec3.c
     src/runtime/plugin.c
 )
 

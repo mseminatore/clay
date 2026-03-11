@@ -145,6 +145,10 @@ ClayObject *clay_clone(ClayObject *proto) {
         /* Inherit free_fn from prototype; data starts NULL */
         obj->as.plugin.data = NULL;
         obj->as.plugin.free_fn = proto->as.plugin.free_fn;
+    } else if (proto && proto->type == CLAY_TYPE_VEC3) {
+        obj->as.vec3.x = proto->as.vec3.x;
+        obj->as.vec3.y = proto->as.vec3.y;
+        obj->as.vec3.z = proto->as.vec3.z;
     }
 
     /* Copy slots from prototype — DISABLED for copy-on-write optimization.

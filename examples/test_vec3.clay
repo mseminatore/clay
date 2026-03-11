@@ -1,0 +1,96 @@
+// test_vec3.clay — Test the built-in Vec3 type
+
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+  cond ifTrue {
+    passed = passed + 1
+  } ifFalse {
+    ("FAIL: " + msg) println
+    failed = failed + 1
+  }
+}
+
+// Basic construction
+v = Vec3 new(1.0, 2.0, 3.0)
+assert value(v type == "Vec3", "Vec3 type")
+assert value(v x == 1.0, "x accessor")
+assert value(v y == 2.0, "y accessor")
+assert value(v z == 3.0, "z accessor")
+
+// Addition
+a = Vec3 new(1.0, 2.0, 3.0)
+b = Vec3 new(4.0, 5.0, 6.0)
+c = a + b
+assert value(c x == 5.0, "add x")
+assert value(c y == 7.0, "add y")
+assert value(c z == 9.0, "add z")
+
+// Subtraction
+d = b - a
+assert value(d x == 3.0, "sub x")
+assert value(d y == 3.0, "sub y")
+assert value(d z == 3.0, "sub z")
+
+// Scalar multiply
+e = a * 2.0
+assert value(e x == 2.0, "mul x")
+assert value(e y == 4.0, "mul y")
+assert value(e z == 6.0, "mul z")
+
+// Scalar divide
+f = Vec3 new(4.0, 6.0, 8.0) / 2.0
+assert value(f x == 2.0, "div x")
+assert value(f y == 3.0, "div y")
+assert value(f z == 4.0, "div z")
+
+// Dot product
+dp = Vec3 new(1.0, 0.0, 0.0) dot(Vec3 new(0.0, 1.0, 0.0))
+assert value(dp == 0.0, "dot orthogonal")
+dp2 = Vec3 new(1.0, 2.0, 3.0) dot(Vec3 new(1.0, 2.0, 3.0))
+assert value(dp2 == 14.0, "dot self")
+
+// Cross product
+cx = Vec3 new(1.0, 0.0, 0.0) cross(Vec3 new(0.0, 1.0, 0.0))
+assert value(cx x == 0.0, "cross x")
+assert value(cx y == 0.0, "cross y")
+assert value(cx z == 1.0, "cross z")
+
+// Length
+len = Vec3 new(3.0, 4.0, 0.0) length
+assert value(len == 5.0, "length 3-4-5")
+
+// Normalize
+n = Vec3 new(3.0, 0.0, 0.0) normalize
+assert value(n x == 1.0, "normalize x")
+assert value(n y == 0.0, "normalize y")
+assert value(n z == 0.0, "normalize z")
+
+// Component-wise mul
+m = Vec3 new(2.0, 3.0, 4.0) mul(Vec3 new(5.0, 6.0, 7.0))
+assert value(m x == 10.0, "mul component x")
+assert value(m y == 18.0, "mul component y")
+assert value(m z == 28.0, "mul component z")
+
+// Reflect
+incident = Vec3 new(1.0, -1.0, 0.0)
+normal = Vec3 new(0.0, 1.0, 0.0)
+r = incident reflect(normal)
+assert value(r x == 1.0, "reflect x")
+assert value(r y == 1.0, "reflect y")
+assert value(r z == 0.0, "reflect z")
+
+// NearZero
+assert value(Vec3 new(0.0, 0.0, 0.0) nearZero, "nearZero true")
+assert value((Vec3 new(1.0, 0.0, 0.0) nearZero) not, "nearZero false")
+
+// ToString
+s = Vec3 new(1.0, 2.0, 3.0) toString
+assert value(s type == "String", "toString returns string")
+
+// Equality
+assert value(Vec3 new(1.0, 2.0, 3.0) == Vec3 new(1.0, 2.0, 3.0), "equality")
+assert value(Vec3 new(1.0, 2.0, 3.0) != Vec3 new(1.0, 2.0, 4.0), "inequality")
+
+(passed toString + " passed, " + failed toString + " failed") println

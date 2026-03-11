@@ -103,7 +103,8 @@ typedef enum {
     CLAY_TYPE_BLOCK,
     CLAY_TYPE_DICT,
     CLAY_TYPE_FLOAT,
-    CLAY_TYPE_PLUGIN
+    CLAY_TYPE_PLUGIN,
+    CLAY_TYPE_VEC3
 } ClayType;
 
 struct ClayObject {
@@ -145,6 +146,10 @@ struct ClayObject {
             void *data;
             void (*free_fn)(void *data);
         } plugin;
+
+        struct {
+            float x, y, z;
+        } vec3;
     } as;
 };
 
@@ -202,6 +207,9 @@ const char *clay_intern(const char *name);
 void clay_method_cache_clear(void);
 void clay_method_cache_invalidate(void *methods_ptr);
 
+/* --- Inline cache (BC compiler) --- */
+void clay_ic_invalidate(void *methods_ptr);
+
 /* --- Memory management --- */
 ClayObject *clay_retain(ClayObject *obj);
 void        clay_release(ClayObject *obj);
@@ -256,6 +264,8 @@ extern ClayObject *clay_Range;
 
 extern ClayObject *clay_Graphics;
 
+extern ClayObject *clay_Vec3;
+
 /* Loop control signal singletons(Error clones used by break/continue) */
 extern ClayObject *clay_BreakSignal;
 extern ClayObject *clay_ContinueSignal;
@@ -298,6 +308,10 @@ ClayValue   clay_dict_get(ClayObject *dict, const char *key);
 int         clay_dict_has(ClayObject *dict, const char *key);
 void        clay_dict_remove(ClayObject *dict, const char *key);
 size_t      clay_dict_size(ClayObject *dict);
+
+/* --- Vec3 helpers --- */
+ClayObject *clay_vec3_new(float x, float y, float z);
+void        clay_vec3_init_methods(ClayObject *proto);
 
 /* --- Debug --- */
 void        clay_inspect(ClayObject *obj);

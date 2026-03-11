@@ -35,6 +35,7 @@ static int clay_is_singleton(ClayObject *obj) {
            obj == clay_Fiber ||
            obj == clay_Db ||
            obj == clay_Graphics ||
+           obj == clay_Vec3 ||
            obj == clay_BreakSignal ||
            obj == clay_ContinueSignal;
 }
@@ -84,6 +85,7 @@ static void clay_dealloc(ClayObject *obj) {
     /* Free method keys and method structs */
     if (obj->methods) {
         clay_method_cache_invalidate(obj->methods);
+        clay_ic_invalidate(obj->methods);
         size_t pos = 0;
         ht_key_t key;
         ht_value_t val;
@@ -151,8 +153,9 @@ static void clay_dealloc(ClayObject *obj) {
     }
 
     /* Pool simple objects for reuse; free complex ones */
-    if (obj->type == CLAY_TYPE_OBJECT && obj->slots) {
+    if ((obj->type == CLAY_TYPE_OBJECT || obj->type == CLAY_TYPE_VEC3) && obj->slots) {
         ht_clear(obj->slots);
+        obj->type = CLAY_TYPE_OBJECT;
         clay_object_pool_return(obj);
     } else {
         if (obj->slots) ht_free(obj->slots);

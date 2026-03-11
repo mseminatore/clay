@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef _MSC_VER
 #define strdup _strdup
@@ -792,6 +793,17 @@ typedef struct {
 
 static CLAY_THREAD_LOCAL SlotICEntry g_slot_ic[IC_TABLE_SIZE];
 
+/* Invalidate IC entries referencing a freed methods hash table */
+void clay_ic_invalidate(void *methods_ptr) {
+    HashTable *target = (HashTable *)methods_ptr;
+    for (int i = 0; i < IC_TABLE_SIZE; i++) {
+        if (g_ic_table[i].methods_key == target)
+            g_ic_table[i].methods_key = NULL;
+        if (g_slot_ic[i].methods_key == target)
+            g_slot_ic[i].methods_key = NULL;
+    }
+}
+
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (argc < 2) { clayvm_vm_push(vm, CLAYVM_NIL_VAL); return 0; }
@@ -895,6 +907,127 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
             if (args && args != stack_args) free(args);
             clayvm_vm_push(vm, clay_to_vm(fast_result));
             return 0;
+        }
+    }
+
+    /* Fast-path: Vec3 operations — inline vec3 arithmetic without full dispatch */
+    if (CLAY_IS_PTR(receiver) && !CLAY_IS_NIL(receiver) &&
+        receiver != CLAY_TRUE && receiver != CLAY_FALSE) {
+        ClayObject *rv = CLAY_OBJ(receiver);
+        if (rv->type == CLAY_TYPE_VEC3) {
+            ClayValue fast_result = CLAY_NIL;
+            int handled = 0;
+            char c0 = selector[0], c1 = selector[1];
+
+            if (msg_argc == 1) {
+                ClayValue arg = args[0];
+                /* Vec3 + Vec3, Vec3 - Vec3 */
+                if (CLAY_IS_PTR(arg) && !CLAY_IS_NIL(arg) &&
+                    arg != CLAY_TRUE && arg != CLAY_FALSE &&
+                    CLAY_OBJ(arg)->type == CLAY_TYPE_VEC3) {
+                    ClayObject *av = CLAY_OBJ(arg);
+                    if (c0 == '+' && c1 == '\0') {
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.x + av->as.vec3.x,
+                            rv->as.vec3.y + av->as.vec3.y,
+                            rv->as.vec3.z + av->as.vec3.z));
+                        handled = 1;
+                    } else if (c0 == '-' && c1 == '\0') {
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.x - av->as.vec3.x,
+                            rv->as.vec3.y - av->as.vec3.y,
+                            rv->as.vec3.z - av->as.vec3.z));
+                        handled = 1;
+                    } else if (c0 == 'd' && strcmp(selector, "dot") == 0) {
+                        fast_result = clay_float_tag(
+                            rv->as.vec3.x * av->as.vec3.x +
+                            rv->as.vec3.y * av->as.vec3.y +
+                            rv->as.vec3.z * av->as.vec3.z);
+                        handled = 1;
+                    } else if (c0 == 'c' && strcmp(selector, "cross") == 0) {
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.y * av->as.vec3.z - rv->as.vec3.z * av->as.vec3.y,
+                            rv->as.vec3.z * av->as.vec3.x - rv->as.vec3.x * av->as.vec3.z,
+                            rv->as.vec3.x * av->as.vec3.y - rv->as.vec3.y * av->as.vec3.x));
+                        handled = 1;
+                    } else if (c0 == 'm' && strcmp(selector, "mul") == 0) {
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.x * av->as.vec3.x,
+                            rv->as.vec3.y * av->as.vec3.y,
+                            rv->as.vec3.z * av->as.vec3.z));
+                        handled = 1;
+                    } else if (c0 == 'r' && strcmp(selector, "reflect") == 0) {
+                        float d = rv->as.vec3.x * av->as.vec3.x +
+                                  rv->as.vec3.y * av->as.vec3.y +
+                                  rv->as.vec3.z * av->as.vec3.z;
+                        float t = 2.0f * d;
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.x - av->as.vec3.x * t,
+                            rv->as.vec3.y - av->as.vec3.y * t,
+                            rv->as.vec3.z - av->as.vec3.z * t));
+                        handled = 1;
+                    }
+                }
+                /* Vec3 * scalar, Vec3 / scalar */
+                if (!handled && (CLAY_IS_INT(arg) || CLAY_IS_TAGGED_FLOAT(arg))) {
+                    float s = CLAY_IS_TAGGED_FLOAT(arg) ? clay_float_untag(arg) : (float)clay_to_int(arg);
+                    if (c0 == '*' && c1 == '\0') {
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.x * s, rv->as.vec3.y * s, rv->as.vec3.z * s));
+                        handled = 1;
+                    } else if (c0 == '/' && c1 == '\0' && s != 0.0f) {
+                        float inv = 1.0f / s;
+                        fast_result = CLAY_VAL(clay_vec3_new(
+                            rv->as.vec3.x * inv, rv->as.vec3.y * inv, rv->as.vec3.z * inv));
+                        handled = 1;
+                    }
+                }
+            } else if (msg_argc == 0) {
+                /* Unary Vec3 operations */
+                if (c0 == 'x' && c1 == '\0') {
+                    fast_result = clay_float_tag(rv->as.vec3.x); handled = 1;
+                } else if (c0 == 'y' && c1 == '\0') {
+                    fast_result = clay_float_tag(rv->as.vec3.y); handled = 1;
+                } else if (c0 == 'z' && c1 == '\0') {
+                    fast_result = clay_float_tag(rv->as.vec3.z); handled = 1;
+                } else if (c0 == 'l' && strcmp(selector, "length") == 0) {
+                    float x = rv->as.vec3.x, y = rv->as.vec3.y, z = rv->as.vec3.z;
+                    fast_result = clay_float_tag(sqrtf(x*x + y*y + z*z));
+                    handled = 1;
+                } else if (c0 == 'l' && strcmp(selector, "lengthSquared") == 0) {
+                    float x = rv->as.vec3.x, y = rv->as.vec3.y, z = rv->as.vec3.z;
+                    fast_result = clay_float_tag(x*x + y*y + z*z);
+                    handled = 1;
+                } else if (c0 == 'n' && strcmp(selector, "normalize") == 0) {
+                    float x = rv->as.vec3.x, y = rv->as.vec3.y, z = rv->as.vec3.z;
+                    float len = sqrtf(x*x + y*y + z*z);
+                    if (len > 0.0f) {
+                        float inv = 1.0f / len;
+                        fast_result = CLAY_VAL(clay_vec3_new(x*inv, y*inv, z*inv));
+                    } else {
+                        fast_result = CLAY_VAL(clay_vec3_new(0, 0, 0));
+                    }
+                    handled = 1;
+                } else if (c0 == 'n' && strcmp(selector, "negated") == 0) {
+                    fast_result = CLAY_VAL(clay_vec3_new(-rv->as.vec3.x, -rv->as.vec3.y, -rv->as.vec3.z));
+                    handled = 1;
+                } else if (c0 == 'n' && strcmp(selector, "nearZero") == 0) {
+                    float s = 0.00001f;
+                    fast_result = CLAY_BOOL(fabsf(rv->as.vec3.x) < s &&
+                                            fabsf(rv->as.vec3.y) < s &&
+                                            fabsf(rv->as.vec3.z) < s);
+                    handled = 1;
+                }
+            }
+            if (handled) {
+                vm_release_val(sel_val);
+                release_clay_val(receiver);
+                for (int i = 0; i < msg_argc; i++)
+                    release_clay_val(args[i]);
+                if (args && args != stack_args) free(args);
+                clayvm_vm_push(vm, clay_to_vm(fast_result));
+                return 0;
+            }
         }
     }
 
@@ -1547,6 +1680,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Fiber", clay_Fiber},
         {"Db", clay_Db},
         {"Graphics", clay_Graphics},
+        {"Vec3", clay_Vec3},
         {"BreakSignal", clay_BreakSignal},
         {"ContinueSignal", clay_ContinueSignal},
         {NULL, NULL}

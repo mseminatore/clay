@@ -32,6 +32,7 @@ ClayObject *clay_Fiber   = NULL;
 ClayObject *clay_Db     = NULL;
 ClayObject *clay_Range  = NULL;
 ClayObject *clay_Graphics = NULL;
+ClayObject *clay_Vec3 = NULL;
 ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
 
@@ -109,6 +110,7 @@ static ClayValue object_type(ClayObject *self, int argc, ClayValue *argv) {
             case CLAY_TYPE_BLOCK:  name = "Block"; break;
             case CLAY_TYPE_FLOAT:  name = "Float"; break;
             case CLAY_TYPE_DICT:   name = "Dict"; break;
+            case CLAY_TYPE_VEC3:   name = "Vec3"; break;
             default:
                 /* Tagged ints are wrapped with parent=clay_Number */
                 if (self->parent == clay_Number) name = "Number";
@@ -679,6 +681,14 @@ void clay_bootstrap(void) {
     clay_Db->refcount = 1000000;
     clay_set_slot(clay_Db, "_name", CLAY_VAL(clay_string_new("Db")));
     clay_db_init(clay_Db);
+
+    /* Vec3 prototype — 3D vector with inline float x/y/z */
+    clay_Vec3 = clay_object_new();
+    clay_Vec3->parent = clay_Object;
+    clay_Vec3->type = CLAY_TYPE_VEC3;
+    clay_Vec3->refcount = 1000000;
+    clay_set_slot(clay_Vec3, "_name", CLAY_VAL(clay_string_new("Vec3")));
+    clay_vec3_init_methods(clay_Vec3);
 
     /* Graphics prototype (SDL2 backend — may be stub if SDL2 not found) */
     clay_Graphics = clay_object_new();
