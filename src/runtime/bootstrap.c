@@ -33,6 +33,7 @@ ClayObject *clay_Db     = NULL;
 ClayObject *clay_Range  = NULL;
 ClayObject *clay_Graphics = NULL;
 ClayObject *clay_Vec3 = NULL;
+ClayObject *clay_Thread = NULL;
 ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
 
@@ -689,6 +690,16 @@ void clay_bootstrap(void) {
     clay_Vec3->refcount = 1000000;
     clay_set_slot(clay_Vec3, "_name", CLAY_VAL(clay_string_new("Vec3")));
     clay_vec3_init_methods(clay_Vec3);
+
+    /* Thread prototype (requires -DCLAY_THREAD_SAFE for real threading) */
+    clay_Thread = clay_object_new();
+    clay_Thread->parent = clay_Object;
+    clay_Thread->refcount = 1000000;
+    clay_set_slot(clay_Thread, "_name", CLAY_VAL(clay_string_new("Thread")));
+    {
+        extern void clay_thread_init(ClayObject *proto);
+        clay_thread_init(clay_Thread);
+    }
 
     /* Graphics prototype (SDL2 backend — may be stub if SDL2 not found) */
     clay_Graphics = clay_object_new();

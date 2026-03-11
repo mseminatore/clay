@@ -1618,6 +1618,30 @@ static int globals_str_compare(ht_key_t a, ht_key_t b) {
     return strcmp((const char *)a, (const char *)b) == 0;
 }
 
+/* Initialize a worker thread's VM context (called via clay_thread_set_vm_init callback) */
+static BcCompiler *g_main_bc = NULL;  /* shared: main thread's compiler (set once) */
+
+void bc_worker_thread_init(void) {
+    static CLAY_THREAD_LOCAL BcCompiler worker_bc;
+    static CLAY_THREAD_LOCAL clayvm_vm_t worker_vm;
+    clayvm_vm_init(&worker_vm);
+    bc_compiler_init(&worker_bc, &worker_vm);
+
+    /* Share chunks and constants from main thread (read-only during execution) */
+    if (g_main_bc) {
+        worker_bc.chunks = g_main_bc->chunks;
+        worker_bc.chunk_count = g_main_bc->chunk_count;
+        worker_bc.chunk_capacity = g_main_bc->chunk_capacity;
+
+        /* Share constant pool (values are immutable after compilation) */
+        worker_vm.constants = g_main_bc->vm->constants;
+    }
+}
+
+void bc_set_main_compiler(BcCompiler *bc) {
+    g_main_bc = bc;
+}
+
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     memset(bc, 0, sizeof(*bc));
     bc->vm = vm;
@@ -1681,6 +1705,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Db", clay_Db},
         {"Graphics", clay_Graphics},
         {"Vec3", clay_Vec3},
+        {"Thread", clay_Thread},
         {"BreakSignal", clay_BreakSignal},
         {"ContinueSignal", clay_ContinueSignal},
         {NULL, NULL}

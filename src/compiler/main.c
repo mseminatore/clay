@@ -661,6 +661,12 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     bc_compiler_init(&bc, &vm);
     bc.source_file = "<repl>";
     clay_source_file = "<repl>";
+
+    extern void bc_worker_thread_init(void);
+    extern void bc_set_main_compiler(BcCompiler *bc);
+    clay_thread_set_vm_init(bc_worker_thread_init);
+    bc_set_main_compiler(&bc);
+
     if (step_mode) {
         g_step.stepping = 1;
         g_step.last_line = 0;
@@ -831,6 +837,12 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     bc_compiler_init(&bc, &vm);
     bc.source_file = filename;
     clay_source_file = filename;
+
+    /* Register worker thread VM init callback for Thread spawn */
+    extern void bc_worker_thread_init(void);
+    extern void bc_set_main_compiler(BcCompiler *bc);
+    clay_thread_set_vm_init(bc_worker_thread_init);
+    bc_set_main_compiler(&bc);
 
     if (step_mode) {
         g_step.stepping = 1;

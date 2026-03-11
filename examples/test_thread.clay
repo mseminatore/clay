@@ -1,0 +1,35 @@
+// test_thread.clay - Test Thread spawn/await
+// Requires thread-safe build (-DCLAY_THREAD_SAFE)
+
+passed = 0
+failed = 0
+
+assert = { |cond, msg|
+    cond ifTrue {
+        passed = passed + 1
+    } ifFalse {
+        ("FAIL: " + msg) println
+        failed = failed + 1
+    }
+}
+
+// Test 1: spawn and await a simple computation
+block1 = { 2 + 3 }
+f = Thread spawn(block1)
+result = f await
+assert value(result == 5, "spawn/await simple value")
+
+// Test 2: spawn returning a string
+block2 = { "hello" }
+f2 = Thread spawn(block2)
+r2 = f2 await
+assert value(r2 == "hello", "spawn/await string")
+
+// Test 3: done() check
+block3 = { 42 }
+f3 = Thread spawn(block3)
+r3 = f3 await
+assert value(f3 done, "future should be done after await")
+assert value(r3 == 42, "future result should be 42")
+
+(passed toString + " passed, " + failed toString + " failed") println

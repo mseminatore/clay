@@ -266,6 +266,11 @@ extern ClayObject *clay_Graphics;
 
 extern ClayObject *clay_Vec3;
 
+extern ClayObject *clay_Thread;
+
+/* Thread VM initialization callback (set by compiler) */
+void clay_thread_set_vm_init(void (*fn)(void));
+
 /* Loop control signal singletons(Error clones used by break/continue) */
 extern ClayObject *clay_BreakSignal;
 extern ClayObject *clay_ContinueSignal;

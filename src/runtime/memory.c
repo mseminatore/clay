@@ -36,6 +36,7 @@ static int clay_is_singleton(ClayObject *obj) {
            obj == clay_Db ||
            obj == clay_Graphics ||
            obj == clay_Vec3 ||
+           obj == clay_Thread ||
            obj == clay_BreakSignal ||
            obj == clay_ContinueSignal;
 }

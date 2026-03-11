@@ -13,6 +13,9 @@ endif()
 
 if(CLAY_THREAD_SAFE)
     add_compile_definitions(CLAY_THREAD_SAFE)
+    if(NOT WIN32)
+        find_package(Threads REQUIRED)
+    endif()
 endif()
 
 # Suppress typedef redefinition warning (generated VM code uses C11 pattern)
@@ -80,6 +83,7 @@ set(RUNTIME_SOURCES
     src/runtime/intern.c
     src/runtime/graphics.c
     src/runtime/vec3.c
+    src/runtime/thread.c
     src/runtime/plugin.c
 )
 
@@ -115,6 +119,9 @@ endif()
 if(UNIX)
     target_compile_definitions(clay_runtime PRIVATE _POSIX_C_SOURCE=200809L)
     target_link_libraries(clay_runtime PUBLIC m dl)
+    if(CLAY_THREAD_SAFE)
+        target_link_libraries(clay_runtime PUBLIC Threads::Threads)
+    endif()
     if(OPENSSL_FOUND)
         target_compile_definitions(clay_runtime PRIVATE CLAY_HAS_SSL)
         target_include_directories(clay_runtime PRIVATE ${OPENSSL_INCLUDE_DIR})
