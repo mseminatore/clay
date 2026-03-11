@@ -12,6 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 /* Callback to initialize a worker thread's VM context.
  * Set by the compiler (bc_compiler.c) at startup. */
@@ -213,7 +216,7 @@ void clay_thread_init(ClayObject *proto) {
     clay_set_method(proto, "available", thread_available);
 }
 
-/* ---- parallelMap: per-element worker ---- */
+/* ---- parallelMap: chunked worker ---- */
 typedef struct {
     ClayObject  *block;   /* the mapper block (shared, retained) */
     ClayValue    item;    /* input element (retained) */
@@ -221,22 +224,31 @@ typedef struct {
     volatile int done;
 } PMapWorker;
 
+typedef struct {
+    PMapWorker *workers;
+    size_t start;
+    size_t end;
+    ClayObject *block;
+} PMapChunkArg;
+
 #ifdef _WIN32
-static unsigned __stdcall pmap_worker(void *arg) {
+static unsigned __stdcall pmap_chunk_worker(void *arg) {
 #else
-static void *pmap_worker(void *arg) {
+static void *pmap_chunk_worker(void *arg) {
 #endif
-    PMapWorker *w = (PMapWorker *)arg;
+    PMapChunkArg *ca = (PMapChunkArg *)arg;
 
     if (g_thread_vm_init) g_thread_vm_init();
 
-    ClayValue result = clay_send(w->block, "value", 1, &w->item);
-    if (CLAY_IS_PTR(result) && !CLAY_IS_NIL(result) &&
-        result != CLAY_TRUE && result != CLAY_FALSE)
-        clay_retain(CLAY_OBJ(result));
-
-    w->result = result;
-    w->done = 1;
+    for (size_t i = ca->start; i < ca->end; i++) {
+        PMapWorker *w = &ca->workers[i];
+        ClayValue result = clay_send(w->block, "value", 1, &w->item);
+        if (CLAY_IS_PTR(result) && !CLAY_IS_NIL(result) &&
+            result != CLAY_TRUE && result != CLAY_FALSE)
+            clay_retain(CLAY_OBJ(result));
+        w->result = result;
+        w->done = 1;
+    }
 
 #ifdef _WIN32
     return 0;
@@ -249,44 +261,89 @@ ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
     size_t n = arr->as.array.size;
     if (n == 0) return CLAY_VAL(clay_array_new());
 
+    /* Cap thread count to avoid excessive OS thread creation.
+     * Each thread processes a contiguous chunk of the array. */
+    size_t max_threads = 8;  /* reasonable default for most machines */
+#ifdef _WIN32
+    {
+        /* Minimal declarations to avoid including windows.h name clashes */
+        typedef struct { uintptr_t mask; uintptr_t group; } SYSTEM_INFO_AFFINITY;
+        typedef struct {
+            union { unsigned long oemId; struct { unsigned short arch; unsigned short _; } s; } u;
+            unsigned long pageSize;
+            void *minAddr, *maxAddr;
+            uintptr_t activeMask;
+            unsigned long numProcs, procType, allocGran;
+            unsigned short procLevel, procRev;
+        } CLAY_SYSINFO;
+        __declspec(dllimport) void __stdcall GetSystemInfo(CLAY_SYSINFO *);
+        CLAY_SYSINFO si;
+        GetSystemInfo(&si);
+        if (si.numProcs > 1) max_threads = si.numProcs;
+    }
+#else
+    {
+        long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+        if (nproc > 1) max_threads = (size_t)nproc;
+    }
+#endif
+    size_t num_threads = n < max_threads ? n : max_threads;
+
     PMapWorker *workers = (PMapWorker *)calloc(n, sizeof(PMapWorker));
 #ifdef _WIN32
-    HANDLE *handles = (HANDLE *)calloc(n, sizeof(HANDLE));
+    HANDLE *handles = (HANDLE *)calloc(num_threads, sizeof(HANDLE));
 #else
-    pthread_t *threads = (pthread_t *)calloc(n, sizeof(pthread_t));
+    pthread_t *threads = (pthread_t *)calloc(num_threads, sizeof(pthread_t));
 #endif
 
-    /* Retain block once for sharing */
+    /* Set up all work items */
     clay_retain(block);
-
     for (size_t i = 0; i < n; i++) {
         workers[i].block = block;
         workers[i].item = arr->as.array.items[i];
         workers[i].result = CLAY_NIL;
         workers[i].done = 0;
 
-        /* Retain item if it's an object */
         ClayValue item = workers[i].item;
         if (CLAY_IS_PTR(item) && !CLAY_IS_NIL(item) &&
             item != CLAY_TRUE && item != CLAY_FALSE)
             clay_retain(CLAY_OBJ(item));
+    }
 
+    /* Assign work ranges to threads: each thread processes [start, end) */
+    PMapChunkArg *chunks = (PMapChunkArg *)calloc(num_threads, sizeof(PMapChunkArg));
+    size_t items_per = n / num_threads;
+    size_t extra = n % num_threads;
+    size_t offset = 0;
+    for (size_t t = 0; t < num_threads; t++) {
+        chunks[t].workers = workers;
+        chunks[t].start = offset;
+        chunks[t].end = offset + items_per + (t < extra ? 1 : 0);
+        chunks[t].block = block;
+        offset = chunks[t].end;
+    }
+
+    /* Launch worker threads */
+    for (size_t t = 0; t < num_threads; t++) {
 #ifdef _WIN32
-        handles[i] = (HANDLE)_beginthreadex(NULL, 0, pmap_worker, &workers[i], 0, NULL);
+        handles[t] = (HANDLE)_beginthreadex(NULL, 0, pmap_chunk_worker, &chunks[t], 0, NULL);
 #else
-        pthread_create(&threads[i], NULL, pmap_worker, &workers[i]);
+        pthread_create(&threads[t], NULL, pmap_chunk_worker, &chunks[t]);
 #endif
     }
 
     /* Wait for all threads */
 #ifdef _WIN32
-    WaitForMultipleObjects((DWORD)n, handles, TRUE, INFINITE);
-    for (size_t i = 0; i < n; i++) CloseHandle(handles[i]);
+    for (size_t t = 0; t < num_threads; t++) {
+        WaitForSingleObject(handles[t], INFINITE);
+        CloseHandle(handles[t]);
+    }
     free(handles);
 #else
-    for (size_t i = 0; i < n; i++) pthread_join(threads[i], NULL);
+    for (size_t t = 0; t < num_threads; t++) pthread_join(threads[t], NULL);
     free(threads);
 #endif
+    free(chunks);
 
     /* Collect results */
     ClayObject *result = clay_array_new();
