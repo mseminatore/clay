@@ -348,7 +348,7 @@ cam = Camera new(_lookFrom, _lookAt, _vUp, 40.0, aspectRatio)
 // ============================================================
 
 _liveMode ifTrue {
-  // --- Live mode: render sequentially, display in Graphics window ---
+  // --- Live mode: hybrid parallel rendering + progressive display ---
   _scale = 1
   (_imageWidth <= 100) ifTrue { _scale = 4 }
   (_imageWidth <= 50) ifTrue { _scale = 8 }
@@ -356,60 +356,76 @@ _liveMode ifTrue {
   _winH = _imageHeight * _scale
   Graphics window(_winW, _winH, "Clay Raytracer")
 
-  _msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") [live]"
+  _batchSize = 12
+  _mode = Thread available ifTrue { "parallel+live" } ifFalse { "sequential+live" }
+  _msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") [" + _mode + "]"
   _msg println
 
-  startTime = System clock
-  ppmBody = ""
-  _scanY = 0
-
+  // Build all scanline args (top to bottom for PPM)
+  _allArgs = Array new
   j = _imageHeight - 1
   { j >= 0 } whileTrue {
+    args = Array new
+    args append(j)
+    args append(scene)
+    args append(cam)
+    args append(_imageWidth)
+    args append(_imageHeight)
+    args append(_samplesPerPixel)
+    args append(_maxDepth)
+    _allArgs append(args)
+    j = j - 1
+  }
+
+  startTime = System clock
+  _allResults = Array new
+  _scanY = 0
+  _batchStart = 0
+
+  { _batchStart < _allArgs size } whileTrue {
     // Pump SDL events so window stays responsive
     Graphics pollEvent
 
-    i = 0
-    _linePixels = ""
-    { i < _imageWidth } whileTrue {
-      pixelColor = Vec3 new(0, 0, 0)
-      s = 0
-      { s < _samplesPerPixel } whileTrue {
-        u = (i + Math random) / (_imageWidth - 1)
-        v = (j + Math random) / (_imageHeight - 1)
-        ray = cam getRay(u, v)
-        pixelColor = pixelColor + rayColor value(ray, scene, _maxDepth)
-        s = s + 1
-      }
+    // Slice a batch of scanline args
+    _batchEnd = _batchStart + _batchSize
+    (_batchEnd > _allArgs size) ifTrue { _batchEnd = _allArgs size }
+    _batch = _allArgs slice(_batchStart, _batchEnd)
 
-      scale = 1.0 / _samplesPerPixel
-      r = Math sqrt(pixelColor x * scale)
-      g = Math sqrt(pixelColor y * scale)
-      b = Math sqrt(pixelColor z * scale)
+    // Render batch in parallel
+    _batchResults = _batch parallelMap(renderScanline)
 
-      ir = (256.0 * clamp value(r, 0.0, 0.999)) toInt
-      ig = (256.0 * clamp value(g, 0.0, 0.999)) toInt
-      ib = (256.0 * clamp value(b, 0.0, 0.999)) toInt
+    // Parse results and draw pixels to window
+    _batchResults each { |lineStr|
+      _allResults append(lineStr)
 
-      _linePixels = _linePixels + ir toString + " " + ig toString + " " + ib toString + "\n"
+      // Parse PPM pixels: "ir ig ib\nir ig ib\n..."
+      _pixels = lineStr split("\n")
+      _px = 0
+      _pixels each { |pixelStr|
+        (pixelStr length > 0) ifTrue {
+          _parts = pixelStr split(" ")
+          _ir = _parts at(0) toInt
+          _ig = _parts at(1) toInt
+          _ib = _parts at(2) toInt
 
-      // Draw pixel to window (scaled)
-      sx = 0
-      { sx < _scale } whileTrue {
-        sy = 0
-        { sy < _scale } whileTrue {
-          Graphics setPixel(i * _scale + sx, _scanY * _scale + sy, ir, ig, ib)
-          sy = sy + 1
+          // Draw scaled pixel
+          _sx = 0
+          { _sx < _scale } whileTrue {
+            _sy = 0
+            { _sy < _scale } whileTrue {
+              Graphics setPixel(_px * _scale + _sx, _scanY * _scale + _sy, _ir, _ig, _ib)
+              _sy = _sy + 1
+            }
+            _sx = _sx + 1
+          }
+          _px = _px + 1
         }
-        sx = sx + 1
       }
-
-      i = i + 1
+      _scanY = _scanY + 1
     }
 
-    ppmBody = ppmBody + _linePixels
     Graphics refresh
-    _scanY = _scanY + 1
-    j = j - 1
+    _batchStart = _batchEnd
   }
 
   elapsed = System clock - startTime
@@ -418,7 +434,8 @@ _liveMode ifTrue {
 
   // Write PPM
   header = "P3\n" + _imageWidth toString + " " + _imageHeight toString + "\n255\n"
-  File write("output.ppm", header + ppmBody)
+  body = _allResults join("")
+  File write("output.ppm", header + body)
   "Saved output.ppm — press any key or close window" println
 
   // Wait for user to close window
