@@ -3,10 +3,12 @@
 // Same scene as raytrace.clay but renders scanlines in parallel.
 // Requires: clay built with -DCLAY_THREAD_SAFE
 //
-// Usage:  clay raytrace_parallel.clay              # 200x112
+// Usage:  clay raytrace_parallel.clay              # 200x112, batch mode
+//         clay raytrace_parallel.clay -- --live    # live Graphics window
 //         clay raytrace_parallel.clay -- --small   # 100x56
 //         clay raytrace_parallel.clay -- --tiny    # 20x11
 //         clay raytrace_parallel.clay -- --hd      # 400x225
+//         clay raytrace_parallel.clay -- --small --live
 //
 // Output: output.ppm
 
@@ -280,6 +282,7 @@ renderScanline = { |args|
 _imageWidth = 200
 _samplesPerPixel = 10
 _maxDepth = 10
+_liveMode = false
 
 _args = System args
 _args each { |a|
@@ -298,6 +301,7 @@ _args each { |a|
     _samplesPerPixel = 50
     _maxDepth = 25
   }
+  (a == "--live") ifTrue { _liveMode = true }
 }
 
 aspectRatio = 16.0 / 9.0
@@ -339,37 +343,130 @@ _lookAt = Vec3 new(0.0, -0.1, -1.0)
 _vUp = Vec3 new(0.0, 1.0, 0.0)
 cam = Camera new(_lookFrom, _lookAt, _vUp, 40.0, aspectRatio)
 
-// Build scanline argument arrays (top to bottom for PPM)
-scanlineArgs = Array new
-j = _imageHeight - 1
-{ j >= 0 } whileTrue {
-  args = Array new
-  args append(j)
-  args append(scene)
-  args append(cam)
-  args append(_imageWidth)
-  args append(_imageHeight)
-  args append(_samplesPerPixel)
-  args append(_maxDepth)
-  scanlineArgs append(args)
-  j = j - 1
+// ============================================================
+//  Render
+// ============================================================
+
+_liveMode ifTrue {
+  // --- Live mode: render sequentially, display in Graphics window ---
+  _scale = 1
+  (_imageWidth <= 100) ifTrue { _scale = 4 }
+  (_imageWidth <= 50) ifTrue { _scale = 8 }
+  _winW = _imageWidth * _scale
+  _winH = _imageHeight * _scale
+  Graphics window(_winW, _winH, "Clay Raytracer")
+
+  _msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") [live]"
+  _msg println
+
+  startTime = System clock
+  ppmBody = ""
+  _scanY = 0
+
+  j = _imageHeight - 1
+  { j >= 0 } whileTrue {
+    // Pump SDL events so window stays responsive
+    Graphics pollEvent
+
+    i = 0
+    _linePixels = ""
+    { i < _imageWidth } whileTrue {
+      pixelColor = Vec3 new(0, 0, 0)
+      s = 0
+      { s < _samplesPerPixel } whileTrue {
+        u = (i + Math random) / (_imageWidth - 1)
+        v = (j + Math random) / (_imageHeight - 1)
+        ray = cam getRay(u, v)
+        pixelColor = pixelColor + rayColor value(ray, scene, _maxDepth)
+        s = s + 1
+      }
+
+      scale = 1.0 / _samplesPerPixel
+      r = Math sqrt(pixelColor x * scale)
+      g = Math sqrt(pixelColor y * scale)
+      b = Math sqrt(pixelColor z * scale)
+
+      ir = (256.0 * clamp value(r, 0.0, 0.999)) toInt
+      ig = (256.0 * clamp value(g, 0.0, 0.999)) toInt
+      ib = (256.0 * clamp value(b, 0.0, 0.999)) toInt
+
+      _linePixels = _linePixels + ir toString + " " + ig toString + " " + ib toString + "\n"
+
+      // Draw pixel to window (scaled)
+      sx = 0
+      { sx < _scale } whileTrue {
+        sy = 0
+        { sy < _scale } whileTrue {
+          Graphics setPixel(i * _scale + sx, _scanY * _scale + sy, ir, ig, ib)
+          sy = sy + 1
+        }
+        sx = sx + 1
+      }
+
+      i = i + 1
+    }
+
+    ppmBody = ppmBody + _linePixels
+    Graphics refresh
+    _scanY = _scanY + 1
+    j = j - 1
+  }
+
+  elapsed = System clock - startTime
+  "" println
+  ("Done! " + _imageWidth toString + "x" + _imageHeight toString + " rendered in " + elapsed toString + "ms") println
+
+  // Write PPM
+  header = "P3\n" + _imageWidth toString + " " + _imageHeight toString + "\n255\n"
+  File write("output.ppm", header + ppmBody)
+  "Saved output.ppm — press any key or close window" println
+
+  // Wait for user to close window
+  _waiting = true
+  { _waiting } whileTrue {
+    evt = Graphics waitEvent
+    (evt != nil) ifTrue {
+      evtType = evt at("type")
+      (evtType == "quit" || evtType == "keydown") ifTrue { _waiting = false }
+    }
+  }
+  Graphics close
+
+} ifFalse {
+  // --- Batch mode: parallelMap (existing behavior) ---
+
+  // Build scanline argument arrays (top to bottom for PPM)
+  scanlineArgs = Array new
+  j = _imageHeight - 1
+  { j >= 0 } whileTrue {
+    args = Array new
+    args append(j)
+    args append(scene)
+    args append(cam)
+    args append(_imageWidth)
+    args append(_imageHeight)
+    args append(_samplesPerPixel)
+    args append(_maxDepth)
+    scanlineArgs append(args)
+    j = j - 1
+  }
+
+  _mode = Thread available ifTrue { "parallel" } ifFalse { "sequential" }
+  _msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") [" + _mode + "]"
+  _msg println
+
+  startTime = System clock
+
+  // Render all scanlines in parallel
+  scanlineResults = scanlineArgs parallelMap(renderScanline)
+
+  elapsed = System clock - startTime
+
+  // Assemble PPM
+  header = "P3\n" + _imageWidth toString + " " + _imageHeight toString + "\n255\n"
+  body = scanlineResults join("")
+  File write("output.ppm", header + body)
+
+  "" println
+  ("Done! " + _imageWidth toString + "x" + _imageHeight toString + " rendered in " + elapsed toString + "ms") println
 }
-
-_mode = Thread available ifTrue { "parallel" } ifFalse { "sequential" }
-_msg = "Rendering " + _imageWidth toString + "x" + _imageHeight toString + " (" + _samplesPerPixel toString + " samples, depth " + _maxDepth toString + ") [" + _mode + "]"
-_msg println
-
-startTime = System clock
-
-// Render all scanlines in parallel
-scanlineResults = scanlineArgs parallelMap(renderScanline)
-
-elapsed = System clock - startTime
-
-// Assemble PPM
-header = "P3\n" + _imageWidth toString + " " + _imageHeight toString + "\n255\n"
-body = scanlineResults join("")
-File write("output.ppm", header + body)
-
-"" println
-("Done! " + _imageWidth toString + "x" + _imageHeight toString + " rendered in " + elapsed toString + "ms") println
