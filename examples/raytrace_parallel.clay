@@ -443,7 +443,7 @@ _liveMode ifTrue {
   { _waiting } whileTrue {
     evt = Graphics waitEvent
     (evt != nil) ifTrue {
-      evtType = evt at("type")
+      evtType = evt get("type")
       (evtType == "quit" || evtType == "keydown") ifTrue { _waiting = false }
     }
   }
