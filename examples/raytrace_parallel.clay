@@ -304,21 +304,40 @@ aspectRatio = 16.0 / 9.0
 _imageHeight = (_imageWidth / aspectRatio) toInt
 
 // Materials
-matGround = Lambertian new(Vec3 new(0.5, 0.5, 0.5))
+matGround = Lambertian new(Vec3 new(0.48, 0.58, 0.35))
+
+// Hero spheres
 matCenter = Lambertian new(Vec3 new(0.1, 0.2, 0.5))
-matLeft   = Metal new(Vec3 new(0.8, 0.8, 0.8), 0.0)
-matRight  = Metal new(Vec3 new(0.8, 0.6, 0.2), 0.3)
+matLeft   = Metal new(Vec3 new(0.95, 0.95, 0.95), 0.0)
+matRight  = Metal new(Vec3 new(0.8, 0.6, 0.2), 0.1)
 
 scene = Scene new
 scene add(Sphere new(Vec3 new(0.0, -100.5, -1.0), 100.0, matGround))
-scene add(Sphere new(Vec3 new(0.0, 0.0, -1.0), 0.5, matCenter))
-scene add(Sphere new(Vec3 new(-1.0, 0.0, -1.0), 0.5, matLeft))
-scene add(Sphere new(Vec3 new(1.0, 0.0, -1.0), 0.5, matRight))
 
-_lookFrom = Vec3 new(-2.0, 2.0, 1.0)
-_lookAt = Vec3 new(0.0, 0.0, -1.0)
+// Three hero spheres (larger, prominent)
+scene add(Sphere new(Vec3 new(0.0, 0.0, -1.2), 0.5, matCenter))
+scene add(Sphere new(Vec3 new(-1.1, 0.0, -1.0), 0.5, matLeft))
+scene add(Sphere new(Vec3 new(1.1, 0.0, -1.0), 0.5, matRight))
+
+// Scattered small spheres for visual interest
+scene add(Sphere new(Vec3 new(-0.4, -0.35, -0.3), 0.15, Lambertian new(Vec3 new(0.9, 0.2, 0.15))))
+scene add(Sphere new(Vec3 new(0.5, -0.35, -0.4), 0.15, Metal new(Vec3 new(0.7, 0.8, 0.9), 0.0)))
+scene add(Sphere new(Vec3 new(-1.8, -0.3, -0.8), 0.2, Lambertian new(Vec3 new(0.3, 0.8, 0.3))))
+scene add(Sphere new(Vec3 new(1.8, -0.3, -0.7), 0.2, Lambertian new(Vec3 new(0.8, 0.3, 0.7))))
+scene add(Sphere new(Vec3 new(0.0, -0.4, -0.1), 0.1, Metal new(Vec3 new(0.9, 0.9, 0.5), 0.3)))
+scene add(Sphere new(Vec3 new(-0.6, -0.4, -2.0), 0.1, Lambertian new(Vec3 new(0.95, 0.6, 0.1))))
+scene add(Sphere new(Vec3 new(0.7, -0.4, -2.0), 0.1, Metal new(Vec3 new(0.9, 0.4, 0.4), 0.0)))
+scene add(Sphere new(Vec3 new(-2.2, -0.25, -1.5), 0.25, Metal new(Vec3 new(0.6, 0.9, 0.6), 0.2)))
+scene add(Sphere new(Vec3 new(2.3, -0.25, -1.2), 0.25, Lambertian new(Vec3 new(0.2, 0.4, 0.9))))
+scene add(Sphere new(Vec3 new(0.3, -0.35, -2.5), 0.15, Lambertian new(Vec3 new(0.9, 0.9, 0.2))))
+scene add(Sphere new(Vec3 new(-1.5, -0.35, -2.3), 0.15, Metal new(Vec3 new(0.85, 0.55, 0.2), 0.1)))
+scene add(Sphere new(Vec3 new(1.5, -0.35, -2.5), 0.15, Lambertian new(Vec3 new(0.6, 0.2, 0.8))))
+
+// Camera pulled back for wider view
+_lookFrom = Vec3 new(0.0, 1.5, 2.5)
+_lookAt = Vec3 new(0.0, -0.1, -1.0)
 _vUp = Vec3 new(0.0, 1.0, 0.0)
-cam = Camera new(_lookFrom, _lookAt, _vUp, 20.0, aspectRatio)
+cam = Camera new(_lookFrom, _lookAt, _vUp, 40.0, aspectRatio)
 
 // Build scanline argument arrays (top to bottom for PPM)
 scanlineArgs = Array new
