@@ -1,0 +1,70 @@
+//
+// Parallel benchmark — sequential map vs parallelMap
+//
+// Compares CPU-bound primality testing on 10,000 numbers.
+// Run with thread-safe build: clay parallel_bench.clay
+//
+
+isPrime = { |n|
+    (n < 2) ifTrue { false } ifFalse {
+        limit = Math floor(Math sqrt(n))
+        result = true
+        i = 2
+        { (i <= limit) && result } whileTrue {
+            ((n % i) == 0) ifTrue {
+                result = false
+            } ifFalse {
+                i = i + 1
+            }
+        }
+        result
+    }
+}
+
+// Build array of numbers to test
+numbers = []
+i = 10000
+{ i <= 20000 } whileTrue {
+    numbers append(i)
+    i = i + 1
+}
+("Testing primality of " + numbers length toString + " numbers (10000..20000)") println
+
+// Sequential map
+"" println
+"Sequential map..." println
+t0 = System clock
+seqResults = numbers map(isPrime)
+seqTime = System clock - t0
+seqCount = seqResults filter { |x| x } length
+("  Primes found: " + seqCount toString) println
+("  Time: " + seqTime toString + "ms") println
+
+// Parallel map
+Thread available ifTrue {
+    "" println
+    "Parallel map..." println
+    t1 = System clock
+    parResults = numbers parallelMap(isPrime)
+    parTime = System clock - t1
+    parCount = parResults filter { |x| x } length
+    ("  Primes found: " + parCount toString) println
+    ("  Time: " + parTime toString + "ms") println
+
+    // Verify results match
+    "" println
+    (seqCount == parCount) ifTrue {
+        "✓ Results match!" println
+    } ifFalse {
+        "✗ MISMATCH — sequential=" println
+    }
+
+    // Speedup
+    (parTime > 0) ifTrue {
+        speedup = seqTime / parTime
+        ("Speedup: " + speedup toString + "x (" + Thread available toString + " threads)") println
+    }
+} ifFalse {
+    "" println
+    "(Skipping parallel benchmark — build with -DCLAY_THREAD_SAFE=ON)" println
+}

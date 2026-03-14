@@ -18,3 +18,38 @@ resp body slice(0, 100) println
 "Posting to httpbin..." println
 post_resp = Http post("http://httpbin.org/post", "hello from Clay!")
 ("POST status: " + (post_resp status)) println
+
+// --- Concurrent requests with Thread spawn ---
+"" println
+Thread available ifTrue {
+    "=== Concurrent HTTP Requests ===" println
+
+    urls = ["http://example.com", "http://httpbin.org/get", "http://httpbin.org/ip"]
+
+    // Sequential
+    t0 = System clock
+    urls each { |url| Http get(url) }
+    seqTime = System clock - t0
+    ("Sequential: " + seqTime toString + "ms") println
+
+    // Parallel — spawn all requests, then await all results
+    t1 = System clock
+    futures = urls map { |url|
+        block = { Http get(url) }
+        Thread spawn(block)
+    }
+    results = futures map { |f| f await }
+    parTime = System clock - t1
+
+    results each { |r|
+        ("  Status: " + (r status) toString) println
+    }
+    ("Parallel:   " + parTime toString + "ms") println
+
+    (parTime > 0) ifTrue {
+        speedup = seqTime / parTime
+        ("Speedup:    " + speedup toString + "x") println
+    }
+} ifFalse {
+    "(Skipping concurrent demo — build with -DCLAY_THREAD_SAFE=ON)" println
+}
