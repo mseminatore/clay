@@ -27,7 +27,9 @@ RUNTIME_SRCS = src/runtime/object.c src/runtime/memory.c src/runtime/dispatch.c 
                src/runtime/clay_dict.c src/runtime/range.c src/runtime/math.c src/runtime/file.c \
                src/runtime/ffi.c src/runtime/date.c src/runtime/http.c \
                src/runtime/regex.c src/runtime/db.c \
-               src/runtime/bootstrap.c src/runtime/intern.c
+               src/runtime/bootstrap.c src/runtime/intern.c \
+               src/runtime/graphics.c src/runtime/vec3.c src/runtime/thread.c \
+               src/runtime/plugin.c
 RUNTIME_OBJS = $(RUNTIME_SRCS:.c=.o)
 
 VM_SRCS = src/vm/generated/vm.c src/vm/generated/native.c \
@@ -94,9 +96,13 @@ CLAY_TESTS = test/programs/test_numbers.clay test/programs/test_strings.clay \
              test/programs/test_errors.clay
 
 # Targets
-.PHONY: all clean test test-clay
+.PHONY: all build clean test test-clay
 
 all: libclay.a libclayvm.a clay
+
+# `make build` should always invoke the default build graph, even when a
+# workspace `build/` directory exists.
+build: all
 
 # Runtime static library
 libclay.a: $(RUNTIME_OBJS) $(HASH_OBJ) $(SQLITE_OBJ) $(FIBER_OBJS) $(FIBER_ASM_OBJS)
