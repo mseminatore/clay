@@ -2,68 +2,131 @@
     "version": "0.2.0",
     "configurations": [
         {
-          "type": "clay",
-          "request": "launch",
-          "name": "Debug Clay",
-          "program": "${file}",
-          "clayPath": "C:/dev/objc/build/Debug/clay.exe"
+            "type": "clay",
+            "request": "launch",
+            "name": "Debug Clay",
+            "program": "${file}",
+            "clayPath": "${workspaceFolder}/build/clay",
+            "preLaunchTask": "CMake: Build All",
+            "windows": {
+                "clayPath": "${workspaceFolder}/build/Debug/clay.exe"
+            },
+            "linux": {
+                "clayPath": "${workspaceFolder}/build/clay"
+            },
+            "osx": {
+                "clayPath": "${workspaceFolder}/build/clay"
+            }
         },
         {
             "name": "Run: Current .clay File",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/Debug/clay.exe",
+            "program": "${workspaceFolder}/build/clay",
             "args": ["${file}"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
-            "console": "integratedTerminal"
+            "externalConsole": false,
+            "preLaunchTask": "CMake: Build All",
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/clay.exe"
+            }
         },
         {
             "name": "Debug: Test Runner",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/Debug/test_runner.exe",
+            "program": "${workspaceFolder}/build/test_runner",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "preLaunchTask": "CMake: Build All"
+            "externalConsole": false,
+            "preLaunchTask": "CMake: Build All",
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/test_runner.exe"
+            }
         },
         {
             "name": "Debug: VM REPL",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/Debug/clay.exe",
+            "program": "${workspaceFolder}/build/clay",
             "args": ["--vm-repl"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "console": "integratedTerminal",
-            "preLaunchTask": "CMake: Build All"
+            "externalConsole": true,
+            "preLaunchTask": "CMake: Build All",
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/clay.exe"
+            }
         },
         {
             "name": "Debug: Compiled .clay Program",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
-            "preLaunchTask": "Compile Current .clay to Native"
+            "externalConsole": false,
+            "preLaunchTask": "Compile Current .clay to Native",
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${fileDirname}/${fileBasenameNoExtension}.exe"
+            }
         },
         {
             "name": "Debug: Classic REPL",
-            "type": "cppvsdbg",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/Debug/clay.exe",
+            "program": "${workspaceFolder}/build/clay",
             "args": ["--repl"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "console": "integratedTerminal",
-            "preLaunchTask": "CMake: Build All"
+            "externalConsole": true,
+            "preLaunchTask": "CMake: Build All",
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "type": "cppvsdbg",
+                "program": "${workspaceFolder}/build/Debug/clay.exe"
+            }
         }
     ]
 }

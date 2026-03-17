@@ -14,16 +14,20 @@
             "type": "shell",
             "command": "cmake",
             "args": ["--build", "build"],
+            "dependsOn": "CMake: Configure",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": "$msCompile"
+            "problemMatcher": []
         },
         {
             "label": "Run Tests",
             "type": "shell",
-            "command": "${workspaceFolder}/build/Debug/test_runner.exe",
+            "command": "${workspaceFolder}/build/test_runner",
+            "windows": {
+                "command": "${workspaceFolder}/build/Debug/test_runner.exe"
+            },
             "group": {
                 "kind": "test",
                 "isDefault": true
@@ -34,7 +38,10 @@
         {
             "label": "Run Current .clay File",
             "type": "shell",
-            "command": "${workspaceFolder}/build/Debug/clay.exe",
+            "command": "${workspaceFolder}/build/clay",
+            "windows": {
+                "command": "${workspaceFolder}/build/Debug/clay.exe"
+            },
             "args": ["${file}"],
             "group": "build",
             "problemMatcher": {
@@ -56,7 +63,10 @@
         {
             "label": "Compile Current .clay to Native",
             "type": "shell",
-            "command": "${workspaceFolder}/build/Debug/clay.exe",
+            "command": "${workspaceFolder}/build/clay",
+            "windows": {
+                "command": "${workspaceFolder}/build/Debug/clay.exe"
+            },
             "args": ["-c", "${file}"],
             "group": "build",
             "problemMatcher": {
@@ -74,7 +84,10 @@
         {
             "label": "Compile .clay to C Only",
             "type": "shell",
-            "command": "${workspaceFolder}/build/Debug/clay.exe",
+            "command": "${workspaceFolder}/build/clay",
+            "windows": {
+                "command": "${workspaceFolder}/build/Debug/clay.exe"
+            },
             "args": ["-c", "-o", "${fileDirname}/${fileBasenameNoExtension}.c", "${file}"],
             "group": "build",
             "problemMatcher": []
@@ -82,7 +95,10 @@
         {
             "label": "Launch VM REPL",
             "type": "shell",
-            "command": "${workspaceFolder}/build/Debug/clay.exe",
+            "command": "${workspaceFolder}/build/clay",
+            "windows": {
+                "command": "${workspaceFolder}/build/Debug/clay.exe"
+            },
             "args": ["--vm-repl"],
             "group": "none",
             "isBackground": false,

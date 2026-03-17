@@ -1,7 +1,7 @@
 {
     "configurations": [
         {
-            "name": "MSVC",
+            "name": "Windows",
             "includePath": [
                 "${workspaceFolder}/src/runtime",
                 "${workspaceFolder}/src/compiler",
@@ -14,8 +14,33 @@
                 "_MSC_VER"
             ],
             "cStandard": "c99",
-            "intelliSenseMode": "windows-msvc-x64",
-            "compilerPath": "cl.exe"
+            "intelliSenseMode": "windows-msvc-x64"
+        },
+        {
+            "name": "macOS",
+            "includePath": [
+                "${workspaceFolder}/src/runtime",
+                "${workspaceFolder}/src/compiler",
+                "${workspaceFolder}/src/vm/generated",
+                "${workspaceFolder}/deps/hash",
+                "${workspaceFolder}/deps/testy"
+            ],
+            "defines": [],
+            "cStandard": "c99",
+            "intelliSenseMode": "${default}"
+        },
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/src/runtime",
+                "${workspaceFolder}/src/compiler",
+                "${workspaceFolder}/src/vm/generated",
+                "${workspaceFolder}/deps/hash",
+                "${workspaceFolder}/deps/testy"
+            ],
+            "defines": [],
+            "cStandard": "c99",
+            "intelliSenseMode": "${default}"
         }
     ],
     "version": 4

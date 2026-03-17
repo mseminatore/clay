@@ -5,7 +5,7 @@
 // Current date and time
 d = Date now
 d toString println
-
+    
 // Access individual components
 ("Year:    " + (d year)) println
 ("Month:   " + (d month)) println
@@ -24,3 +24,5 @@ epoch = Date fromTimestamp(1700000000)
 
 // Formatting
 ("Formatted: " + (d format("%Y-%m-%d"))) println
+("Formatted: " + (d format("%H:%M:%S"))) println
+("Formatted: " + (d format("%Y-%m-%d %H:%M:%S"))) println
