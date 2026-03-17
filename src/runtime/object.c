@@ -135,7 +135,7 @@ ClayObject *clay_clone(ClayObject *proto) {
         obj->as.array.items = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)cap);
         obj->as.array.size = proto->as.array.size;
         obj->as.array.capacity = cap;
-        for (int i = 0; i < proto->as.array.size; i++) {
+        for (size_t i = 0; i < proto->as.array.size; i++) {
             obj->as.array.items[i] = proto->as.array.items[i];
             ClayValue v = proto->as.array.items[i];
             if (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && v != CLAY_TRUE && v != CLAY_FALSE)

@@ -231,6 +231,13 @@ static int compile_c_file(const char *c_file, const char *output_name,
             quiet ? ">nul 2>&1" : "");
     }
 #else
+    char fiber_asm_src[512] = "";
+#if defined(__x86_64__) || defined(_M_X64)
+    snprintf(fiber_asm_src, sizeof(fiber_asm_src), "\"%s/src/runtime/fiber_amd64.S\" ", clay_dir);
+#elif defined(__aarch64__)
+    snprintf(fiber_asm_src, sizeof(fiber_asm_src), "\"%s/src/runtime/fiber_arm64.S\" ", clay_dir);
+#endif
+
     snprintf(cmd, sizeof(cmd),
         "cc -std=c99 -O2 %s "
         "-I\"%s/src/runtime\" -I\"%s/deps/hash\" -I\"%s/deps/sqlite\" "
@@ -256,11 +263,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "\"%s/src/runtime/db.c\" "
         "\"%s/src/runtime/intern.c\" "
         "\"%s/src/runtime/fiber_ctx.c\" "
-#if defined(__x86_64__) || defined(_M_X64)
-        "\"%s/src/runtime/fiber_amd64.S\" "
-#elif defined(__aarch64__)
-        "\"%s/src/runtime/fiber_arm64.S\" "
-#endif
+        "%s"
         "\"%s/deps/hash/hash.c\" "
         "\"%s/deps/sqlite/sqlite3.c\" "
         "-lm -ldl -o \"%s\"",
@@ -273,7 +276,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
         clay_dir, clay_dir, clay_dir, clay_dir,
         clay_dir, clay_dir, clay_dir, clay_dir,
         clay_dir,  /* fiber_ctx.c */
-        clay_dir,  /* fiber asm */
+        fiber_asm_src,
         clay_dir, clay_dir,
         output_name);
 #endif

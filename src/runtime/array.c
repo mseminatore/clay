@@ -346,7 +346,7 @@ static ClayValue array_equals(ClayObject *self, int argc, ClayValue *argv) {
     if (other->type != CLAY_TYPE_ARRAY) return CLAY_FALSE;
     if (self == other) return CLAY_TRUE;
     if (self->as.array.size != other->as.array.size) return CLAY_FALSE;
-    for (int i = 0; i < self->as.array.size; i++) {
+    for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue a = self->as.array.items[i];
         ClayValue b = other->as.array.items[i];
         ClayValue eq = clay_send_val(a, "==", 1, &b);

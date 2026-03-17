@@ -90,6 +90,7 @@ static ClayValue object_println(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
     const char *sel = (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0]))
         ? clay_string_data(CLAY_OBJ(argv[0]))
         : "???";

@@ -276,18 +276,19 @@ static int bricks_has_lock(void) {
 static int get_dep_resolved(const char *dep_dir, char *out, size_t out_sz) {
     char cmd[2048];
     char tmp_file[BRICK_MAX_PATH];
+    const char *null_device;
     out[0] = '\0';
+
+#ifdef _WIN32
+    null_device = "nul";
+#else
+    null_device = "/dev/null";
+#endif
 
     snprintf(tmp_file, sizeof(tmp_file), "bricks/.brick_resolve_tmp");
     snprintf(cmd, sizeof(cmd),
              "git -C \"%s\" rev-parse HEAD > \"%s\" 2>%s",
-             dep_dir, tmp_file,
-#ifdef _WIN32
-             "nul"
-#else
-             "/dev/null"
-#endif
-    );
+             dep_dir, tmp_file, null_device);
 
     int rc = system(cmd);
     if (rc != 0) return -1;

@@ -159,7 +159,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     /* Write back captured values from locals to env (by-reference semantics) */
     for (int i = 0; i < capture_count; i++) {
         size_t slot = base + (size_t)chunk->param_count + (size_t)i;
-        if (slot < g_vm->sp && (1 + i) < self->as.block.env_size) {
+        if (g_vm->sp > 0 && slot < (size_t)g_vm->sp && (1 + i) < self->as.block.env_size) {
             self->as.block.env[1 + i] = vm_to_clay(g_vm->stack[slot]);
         }
     }
