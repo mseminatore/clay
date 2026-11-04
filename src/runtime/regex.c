@@ -353,8 +353,8 @@ static int re_search(const char *pat, const char *text, int *match_start, int *m
 static ClayValue regex_match(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 2) return CLAY_NIL;
-    if (CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
-    if (CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) return CLAY_NIL;
+    if (!CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
+    if (!CLAY_IS_OBJ(argv[1])) return CLAY_NIL;
 
     const char *text = clay_string_data(CLAY_OBJ(argv[0]));
     const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
@@ -370,8 +370,8 @@ static ClayValue regex_match(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue regex_test(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 2) return CLAY_FALSE;
-    if (CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
-    if (CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) return CLAY_FALSE;
+    if (!CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
+    if (!CLAY_IS_OBJ(argv[1])) return CLAY_FALSE;
 
     const char *text = clay_string_data(CLAY_OBJ(argv[0]));
     const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
@@ -384,9 +384,9 @@ static ClayValue regex_test(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue regex_replace(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 3) return argc > 0 ? argv[0] : CLAY_NIL;
-    if (CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return argv[0];
-    if (CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) return argv[0];
-    if (CLAY_IS_INT(argv[2]) || CLAY_IS_NIL(argv[2])) return argv[0];
+    if (!CLAY_IS_OBJ(argv[0])) return argv[0];
+    if (!CLAY_IS_OBJ(argv[1])) return argv[0];
+    if (!CLAY_IS_OBJ(argv[2])) return argv[0];
 
     const char *text = clay_string_data(CLAY_OBJ(argv[0]));
     const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
@@ -438,8 +438,8 @@ static ClayValue regex_replace(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue regex_find(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 2) return CLAY_VAL(clay_array_new());
-    if (CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_VAL(clay_array_new());
-    if (CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) return CLAY_VAL(clay_array_new());
+    if (!CLAY_IS_OBJ(argv[0])) return CLAY_VAL(clay_array_new());
+    if (!CLAY_IS_OBJ(argv[1])) return CLAY_VAL(clay_array_new());
 
     const char *text = clay_string_data(CLAY_OBJ(argv[0]));
     const char *pat = clay_string_data(CLAY_OBJ(argv[1]));

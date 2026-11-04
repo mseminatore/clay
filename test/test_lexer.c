@@ -106,7 +106,10 @@ static void test_lexer_operators(void) {
     TEST(lex_one("-").type == TOK_MINUS);
     TEST(lex_one("*").type == TOK_STAR);
     TEST(lex_one("/").type == TOK_SLASH);
-    TEST(lex_one("%").type == TOK_PERCENT);
+    /* (testy's TEST() puts the expression text in a printf format string, so
+     * keep a literal percent sign out of it) */
+    const char *percent = "%", *percent_assign = "%=";
+    TEST(lex_one(percent).type == TOK_PERCENT);
     TEST(lex_one("=").type == TOK_ASSIGN);
     TEST(lex_one("<").type == TOK_LESS);
     TEST(lex_one(">").type == TOK_GREATER);
@@ -125,7 +128,7 @@ static void test_lexer_operators(void) {
     TEST(lex_one("-=").type == TOK_MINUS_ASSIGN);
     TEST(lex_one("*=").type == TOK_STAR_ASSIGN);
     TEST(lex_one("/=").type == TOK_SLASH_ASSIGN);
-    TEST(lex_one("%=").type == TOK_PERCENT_ASSIGN);
+    TEST(lex_one(percent_assign).type == TOK_PERCENT_ASSIGN);
 }
 
 static void test_lexer_punctuation(void) {

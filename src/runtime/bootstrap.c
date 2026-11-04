@@ -199,7 +199,7 @@ static ClayValue object_parent(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue object_has_slot(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
     if (name_obj->type != CLAY_TYPE_STRING) return CLAY_FALSE;
     return CLAY_BOOL(clay_has_slot(self, clay_string_data(name_obj)));
@@ -207,7 +207,7 @@ static ClayValue object_has_slot(ClayObject *self, int argc, ClayValue *argv) {
 
 /* getSlot("name") — return raw slot value without invoking blocks */
 static ClayValue object_get_slot(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
     if (name_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
     ClayValue result = clay_get_slot(self, clay_string_data(name_obj));
@@ -217,7 +217,7 @@ static ClayValue object_get_slot(ClayObject *self, int argc, ClayValue *argv) {
 
 /* setSlot("name", value) — set a slot by name dynamically */
 static ClayValue object_set_slot(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 2 || CLAY_IS_INT(argv[0])) return CLAY_NIL;
+    if (argc < 2 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
     if (name_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
     clay_set_slot(self, clay_string_data(name_obj), argv[1]);
@@ -225,7 +225,7 @@ static ClayValue object_set_slot(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue object_has_method(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
     if (name_obj->type != CLAY_TYPE_STRING) return CLAY_FALSE;
     return CLAY_BOOL(clay_lookup_method(self, clay_string_data(name_obj)) != NULL);
@@ -244,11 +244,11 @@ static ClayValue block_method_trampoline(ClayObject *self, int argc, ClayValue *
 }
 
 static ClayValue object_set_method(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 2 || CLAY_IS_INT(argv[0])) return CLAY_NIL;
+    if (argc < 2 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *name_obj = CLAY_OBJ(argv[0]);
     if (name_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
     /* Verify second arg is a block */
-    if (CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) return CLAY_NIL;
+    if (!CLAY_IS_OBJ(argv[1])) return CLAY_NIL;
     ClayObject *block = CLAY_OBJ(argv[1]);
     if (block->type != CLAY_TYPE_BLOCK) return CLAY_NIL;
     clay_retain(block);
@@ -394,6 +394,33 @@ static ClayValue console_readLine(ClayObject *self, int argc, ClayValue *argv) {
         return CLAY_VAL(clay_string_new(buf));
     }
     return CLAY_NIL;
+}
+
+/* Write text to stdout, or to the debugger's output hook when one is set */
+static void console_write(const char *text) {
+    if (clay_output_fn) clay_output_fn(text);
+    else fputs(text, stdout);
+}
+
+/* Console print(args...) — print each argument's toString, space-separated */
+static ClayValue console_print(ClayObject *self, int argc, ClayValue *argv) {
+    for (int i = 0; i < argc; i++) {
+        if (i > 0) console_write(" ");
+        ClayValue s = clay_send_val(argv[i], "toString", 0, NULL);
+        if (CLAY_IS_TYPE(s, CLAY_TYPE_STRING)) console_write(clay_string_data(CLAY_OBJ(s)));
+        else console_write(CLAY_IS_NIL(argv[i]) ? "nil" : "?");
+        clay_release_val(s);
+    }
+    fflush(stdout);
+    return CLAY_VAL(self);
+}
+
+/* Console println(args...) — like print, followed by a newline */
+static ClayValue console_println(ClayObject *self, int argc, ClayValue *argv) {
+    console_print(self, argc, argv);
+    console_write("\n");
+    fflush(stdout);
+    return CLAY_VAL(self);
 }
 
 static ClayValue console_prompt(ClayObject *self, int argc, ClayValue *argv) {
@@ -618,6 +645,8 @@ void clay_bootstrap(void) {
     clay_Console->refcount = 1000000;
     clay_set_method(clay_Console, "readLine", console_readLine);
     clay_set_method(clay_Console, "prompt", console_prompt);
+    clay_set_method(clay_Console, "print", console_print);
+    clay_set_method(clay_Console, "println", console_println);
 
     /* File object */
     clay_File = clay_object_new();

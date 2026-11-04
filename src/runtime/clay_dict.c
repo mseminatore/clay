@@ -206,7 +206,7 @@ static ClayValue dict_toString(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue dict_equals(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_DICT) return CLAY_FALSE;
     if (self == other) return CLAY_TRUE;
@@ -233,7 +233,7 @@ static ClayValue dict_neq(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue dict_merge(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_VAL(self);
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_VAL(self);
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_DICT) return CLAY_VAL(self);
     size_t pos = 0;

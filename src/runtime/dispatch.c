@@ -107,9 +107,20 @@ static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
     return m;
 }
 
-/* Helper: invoke method, setting context before call */
+/* Helper: invoke method, setting context before call.
+ *
+ * Many native methods read argv[0..2] without checking argc (e.g. a missing
+ * argument in `Date now format()`), which would read past the caller's array.
+ * Guarantee at least CLAY_ARGV_PAD readable slots, padding with nil, so a
+ * missing argument behaves like an explicit nil. argc is passed unchanged. */
+#define CLAY_ARGV_PAD 4
 static inline ClayValue invoke_method(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv) {
     clay_method_context = m->context;
+    if (argc < CLAY_ARGV_PAD) {
+        ClayValue padded[CLAY_ARGV_PAD] = { CLAY_NIL, CLAY_NIL, CLAY_NIL, CLAY_NIL };
+        for (int i = 0; i < argc; i++) padded[i] = argv[i];
+        return m->func(obj, argc, padded);
+    }
     return m->func(obj, argc, argv);
 }
 
@@ -290,4 +301,24 @@ ClayValue clay_send_super(ClayValue receiver, ClayObject *defining_obj,
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     clay_trace_pop();
     return CLAY_NIL;
+}
+
+/* Retain `result` if it aliases the receiver or an argument (see clay.h) */
+static ClayValue own_result(ClayValue result, ClayValue receiver, int argc, ClayValue *argv) {
+    if (!CLAY_IS_OBJ(result) || result == CLAY_TRUE || result == CLAY_FALSE) return result;
+    int aliased = (result == receiver);
+    for (int i = 0; i < argc && !aliased; i++)
+        if (result == argv[i]) aliased = 1;
+    if (aliased) clay_retain(CLAY_OBJ(result));
+    return result;
+}
+
+ClayValue clay_send_owned(ClayValue receiver, const char *selector, int argc, ClayValue *argv) {
+    return own_result(clay_send_val(receiver, selector, argc, argv), receiver, argc, argv);
+}
+
+ClayValue clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
+                                const char *selector, int argc, ClayValue *argv) {
+    return own_result(clay_send_super(receiver, defining_obj, selector, argc, argv),
+                      receiver, argc, argv);
 }

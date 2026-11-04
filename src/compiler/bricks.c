@@ -23,6 +23,73 @@
 #endif
 #include "bricks.h"
 
+/* --- Input validation ---
+ *
+ * Brick names, URLs and refs come from brick.json files — including the
+ * manifests of transitively-installed bricks, i.e. third-party content — and
+ * are interpolated into shell commands (git clone / checkout, rm -rf) and
+ * filesystem paths. Restrict them to a conservative character set so they can
+ * never break out of the quoted arguments or escape the bricks/ directory.
+ */
+
+/* One or more path segments of [A-Za-z0-9._-]; '/' separates segments when
+ * allow_slash is set. Rejects empty segments, "." / ".." segments, and a
+ * leading '-' (which git would read as an option). */
+static int brick_safe_path(const char *s, int allow_slash) {
+    if (!s || !*s || *s == '-' || *s == '/') return 0;
+    const char *seg = s;
+    for (const char *c = s; ; c++) {
+        if (*c == '/' || *c == '\0') {
+            size_t len = (size_t)(c - seg);
+            if (len == 0) return 0;
+            if (len == 1 && seg[0] == '.') return 0;
+            if (len == 2 && seg[0] == '.' && seg[1] == '.') return 0;
+            if (*c == '\0') return 1;
+            if (!allow_slash) return 0;
+            seg = c + 1;
+            continue;
+        }
+        char ch = *c;
+        int ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                 (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+        if (!ok) return 0;
+    }
+}
+
+/* A dependency URL: [https://|http://]host/owner/repo[/subpath][@ref] where
+ * every part is a safe path (host may also contain ':' for a port). */
+static int brick_safe_url(const char *url) {
+    if (!url || !*url) return 0;
+    const char *p = url;
+    if (strncmp(p, "https://", 8) == 0) p += 8;
+    else if (strncmp(p, "http://", 7) == 0) p += 7;
+
+    char tmp[BRICK_MAX_PATH];
+    size_t n = strlen(p);
+    if (n >= sizeof(tmp)) return 0;
+    memcpy(tmp, p, n + 1);
+
+    char *at = strchr(tmp, '@');
+    if (at) {
+        *at = '\0';
+        if (!brick_safe_path(at + 1, 1)) return 0;   /* ref: tag, branch or SHA */
+    }
+    /* host[:port] */
+    char *slash = strchr(tmp, '/');
+    if (!slash) return 0;
+    *slash = '\0';
+    char *colon = strchr(tmp, ':');
+    if (colon) {
+        *colon = '\0';
+        for (const char *c = colon + 1; *c; c++)
+            if (*c < '0' || *c > '9') return 0;
+        if (!colon[1]) return 0;
+    }
+    if (!brick_safe_path(tmp, 0)) return 0;
+    /* owner/repo[/subpath] */
+    return brick_safe_path(slash + 1, 1);
+}
+
 /* --- Minimal JSON-subset parser for brick.json --- */
 
 /* Skip whitespace */
@@ -87,6 +154,13 @@ static int parse_manifest(const char *json, BrickManifest *m) {
                 p = skip_ws(p + 1);
                 p = parse_string(p, dep->url, sizeof(dep->url));
                 if (!p) return -1;
+                if (!brick_safe_path(dep->name, 1) || !brick_safe_url(dep->url)) {
+                    fprintf(stderr, "error: brick.json: rejecting unsafe dependency "
+                            "\"%s\": \"%s\" (names and URLs may only contain "
+                            "letters, digits, '.', '_', '-', '/' and an optional @ref)\n",
+                            dep->name, dep->url);
+                    return -1;
+                }
                 m->dep_count++;
                 p = skip_ws(p);
                 if (*p == ',') p = skip_ws(p + 1);
@@ -122,7 +196,7 @@ int brick_parse(const char *path, BrickManifest *out) {
     fclose(f);
     int rc = parse_manifest(buf, out);
     free(buf);
-    return rc;
+    return rc == 0 ? 0 : -2;  /* -1: file missing, -2: invalid manifest */
 }
 
 int brick_write(const char *path, const BrickManifest *m) {
@@ -531,8 +605,82 @@ static void url_to_name(const char *url, char *name, size_t sz) {
     }
 }
 
-/* Install a single dependency. Returns 0 on success. */
+/* Lock file consulted by install_dep() to pin each dependency to the commit
+ * recorded in brick.lock (set by cmd_install when a matching lock exists). */
+static const BrickLock *g_install_lock = NULL;
+
+/* Names already visited during this install — guards against dependency cycles */
+#define BRICK_MAX_VISITED (BRICK_MAX_DEPS * 4)
+static char g_visited[BRICK_MAX_VISITED][BRICK_MAX_NAME];
+static int  g_visited_count = 0;
+
+static int brick_mark_visited(const char *name) {
+    for (int i = 0; i < g_visited_count; i++)
+        if (strcmp(g_visited[i], name) == 0) return 0;   /* already seen */
+    if (g_visited_count < BRICK_MAX_VISITED) {
+        strncpy(g_visited[g_visited_count], name, BRICK_MAX_NAME - 1);
+        g_visited[g_visited_count][BRICK_MAX_NAME - 1] = '\0';
+        g_visited_count++;
+    }
+    return 1;
+}
+
+/* The locked commit SHA for (name, url), or NULL if not locked */
+static const char *brick_locked_sha(const char *name, const char *url) {
+    if (!g_install_lock) return NULL;
+    for (int i = 0; i < g_install_lock->entry_count; i++) {
+        const BrickLockEntry *e = &g_install_lock->entries[i];
+        if (strcmp(e->name, name) != 0 || strcmp(e->url, url) != 0) continue;
+        size_t n = strlen(e->resolved);
+        if (n < 7 || n > 64) return NULL;
+        for (size_t k = 0; k < n; k++) {
+            char c = e->resolved[k];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return NULL;
+        }
+        return e->resolved;
+    }
+    return NULL;
+}
+
+static int install_dep(const char *url, const char *name);
+
+/* Install the dependencies listed in <dir>/brick.json, if any */
+static int install_subdeps(const char *dir, const char *name) {
+    char sub_manifest[BRICK_MAX_PATH];
+    snprintf(sub_manifest, sizeof(sub_manifest), "%s/brick.json", dir);
+    BrickManifest sub;
+    int prc = brick_parse(sub_manifest, &sub);
+    if (prc == -1) return 0;               /* no manifest: nothing to do */
+    if (prc != 0) {
+        fprintf(stderr, "  error: invalid brick.json in %s\n", name);
+        return -1;
+    }
+    int failed = 0;
+    if (sub.dep_count > 0) {
+        printf("  Installing dependencies of %s...\n", name);
+        for (int i = 0; i < sub.dep_count; i++)
+            if (install_dep(sub.deps[i].url, sub.deps[i].name) != 0) failed++;
+    }
+    return failed ? -1 : 0;
+}
+
+/* Check out `ref` (or the locked commit, which takes precedence) in `dir` */
+static void brick_checkout(const char *dir, const char *name, const char *url,
+                           const char *ref) {
+    const char *target = brick_locked_sha(name, url);
+    if (!target && ref[0]) target = ref;
+    if (!target) return;
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"", dir, target);
+    if (system(cmd) != 0)
+        fprintf(stderr, "  warning: could not checkout '%s' for %s\n", target, name);
+}
+
+/* Install a single dependency (and, recursively, its dependencies).
+ * Returns 0 on success. */
 static int install_dep(const char *url, const char *name) {
+    if (!brick_mark_visited(name)) return 0;   /* cycle or diamond: done already */
+
     char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
     split_url_parts(url, clone_url, sizeof(clone_url),
                     subpath, sizeof(subpath), ref, sizeof(ref));
@@ -552,18 +700,11 @@ static int install_dep(const char *url, const char *name) {
             snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"",
                      clone_url, repo_dest);
             printf("  Cloning %s...\n", repo_name);
-            int rc = system(cmd);
-            if (rc != 0) {
+            if (system(cmd) != 0) {
                 fprintf(stderr, "  error: failed to clone %s\n", clone_url);
                 return -1;
             }
-            if (ref[0]) {
-                snprintf(cmd, sizeof(cmd),
-                         "git -C \"%s\" checkout --quiet \"%s\"", repo_dest, ref);
-                rc = system(cmd);
-                if (rc != 0)
-                    fprintf(stderr, "  warning: could not checkout '%s'\n", ref);
-            }
+            brick_checkout(repo_dest, name, url, ref);
         }
 
         /* Verify the sub-brick exists */
@@ -577,60 +718,42 @@ static int install_dep(const char *url, const char *name) {
         }
 
         printf("  Installed %s (from %s)\n", name, repo_name);
-
-        /* Recursively install sub-dependencies from the sub-brick's manifest */
-        char sub_manifest[BRICK_MAX_PATH];
-        snprintf(sub_manifest, sizeof(sub_manifest), "%s/brick.json", brick_dir);
-        BrickManifest sub;
-        if (brick_parse(sub_manifest, &sub) == 0 && sub.dep_count > 0) {
-            printf("  Installing dependencies of %s...\n", name);
-            for (int i = 0; i < sub.dep_count; i++) {
-                install_dep(sub.deps[i].url, sub.deps[i].name);
-            }
-        }
-    } else {
-        /* Simple single-brick repo (existing behavior) */
-        char dest[BRICK_MAX_PATH];
-        snprintf(dest, sizeof(dest), "bricks/%s", name);
-
-        struct stat st;
-        if (stat(dest, &st) == 0) {
-            printf("  %s: already installed\n", name);
-            return 0;
-        }
-
-        char cmd[2048];
-        snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"",
-                 clone_url, dest);
-        printf("  Installing %s from %s...\n", name, clone_url);
-        int rc = system(cmd);
-        if (rc != 0) {
-            fprintf(stderr, "  error: failed to clone %s\n", clone_url);
-            return -1;
-        }
-
-        if (ref[0]) {
-            snprintf(cmd, sizeof(cmd),
-                     "git -C \"%s\" checkout --quiet \"%s\"", dest, ref);
-            rc = system(cmd);
-            if (rc != 0)
-                fprintf(stderr, "  warning: could not checkout '%s' for %s\n",
-                        ref, name);
-        }
-
-        /* Recursively install sub-dependencies */
-        char sub_manifest[BRICK_MAX_PATH];
-        snprintf(sub_manifest, sizeof(sub_manifest), "%s/brick.json", dest);
-        BrickManifest sub;
-        if (brick_parse(sub_manifest, &sub) == 0 && sub.dep_count > 0) {
-            printf("  Installing dependencies of %s...\n", name);
-            for (int i = 0; i < sub.dep_count; i++) {
-                install_dep(sub.deps[i].url, sub.deps[i].name);
-            }
-        }
+        return install_subdeps(brick_dir, name);
     }
 
-    return 0;
+    /* Simple single-brick repo */
+    char dest[BRICK_MAX_PATH];
+    snprintf(dest, sizeof(dest), "bricks/%s", name);
+
+    struct stat st;
+    if (stat(dest, &st) == 0) {
+        printf("  %s: already installed\n", name);
+        return 0;
+    }
+
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"", clone_url, dest);
+    printf("  Installing %s from %s...\n", name, clone_url);
+    if (system(cmd) != 0) {
+        fprintf(stderr, "  error: failed to clone %s\n", clone_url);
+        return -1;
+    }
+    brick_checkout(dest, name, url, ref);
+    return install_subdeps(dest, name);
+}
+
+/* Directory a dependency is installed into (bricks/<name> or bricks/<repo>/<sub>) */
+static void brick_install_dir(const char *url, const char *name, char *out, size_t sz) {
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+    if (subpath[0]) {
+        char repo_name[BRICK_MAX_NAME];
+        url_to_repo_name(url, repo_name, sizeof(repo_name));
+        snprintf(out, sz, "bricks/%s/%s", repo_name, subpath);
+    } else {
+        snprintf(out, sz, "bricks/%s", name);
+    }
 }
 
 static int cmd_init(void) {
@@ -666,8 +789,10 @@ static int cmd_init(void) {
 
 static int cmd_install(void) {
     BrickManifest m;
-    if (brick_parse("brick.json", &m) != 0) {
-        fprintf(stderr, "error: no brick.json found (run 'clay bricks init' first)\n");
+    int prc = brick_parse("brick.json", &m);
+    if (prc != 0) {
+        if (prc == -1) fprintf(stderr, "error: no brick.json found (run 'clay bricks init' first)\n");
+        else fprintf(stderr, "error: brick.json is invalid\n");
         return 1;
     }
     if (m.dep_count == 0) {
@@ -675,23 +800,37 @@ static int cmd_install(void) {
         return 0;
     }
 
-    /* Check if lockfile is up-to-date */
-    if (bricks_has_lock()) {
-        BrickLock lock;
-        if (bricks_read_lock(&lock) == 0 && bricks_lock_matches(&m, &lock)) {
+    /* With a matching lockfile, install exactly the locked commits. If every
+     * dependency is also already present, there is nothing to do. */
+    static BrickLock lock;
+    int locked = bricks_has_lock() && bricks_read_lock(&lock) == 0 &&
+                 bricks_lock_matches(&m, &lock);
+    if (locked) {
+        int all_present = 1;
+        for (int i = 0; i < m.dep_count && all_present; i++) {
+            char dir[BRICK_MAX_PATH];
+            struct stat st;
+            brick_install_dir(m.deps[i].url, m.deps[i].name, dir, sizeof(dir));
+            if (stat(dir, &st) != 0) all_present = 0;
+        }
+        if (all_present) {
             printf("Dependencies already locked and up to date.\n");
             return 0;
         }
+        g_install_lock = &lock;
     }
 
     make_dir("bricks");
-    printf("Installing %d dependencies...\n", m.dep_count);
+    printf("Installing %d dependencies%s...\n", m.dep_count,
+           locked ? " (from brick.lock)" : "");
     int failed = 0;
+    g_visited_count = 0;
     for (int i = 0; i < m.dep_count; i++) {
         if (install_dep(m.deps[i].url, m.deps[i].name) != 0) {
             failed++;
         }
     }
+    g_install_lock = NULL;
     if (failed) {
         fprintf(stderr, "%d dependencies failed to install.\n", failed);
         return 1;
@@ -703,14 +842,25 @@ static int cmd_install(void) {
 
 static int cmd_add(const char *url) {
     BrickManifest m;
-    if (brick_parse("brick.json", &m) != 0) {
-        fprintf(stderr, "error: no brick.json found (run 'clay bricks init' first)\n");
+    int prc = brick_parse("brick.json", &m);
+    if (prc != 0) {
+        if (prc == -1) fprintf(stderr, "error: no brick.json found (run 'clay bricks init' first)\n");
+        else fprintf(stderr, "error: brick.json is invalid\n");
+        return 1;
+    }
+
+    if (!brick_safe_url(url)) {
+        fprintf(stderr, "error: invalid brick URL '%s'\n", url);
         return 1;
     }
 
     /* Determine brick name */
     char name[BRICK_MAX_NAME];
     url_to_name(url, name, sizeof(name));
+    if (!brick_safe_path(name, 1)) {
+        fprintf(stderr, "error: invalid brick name '%s' derived from URL\n", name);
+        return 1;
+    }
 
     /* Check if already in deps */
     for (int i = 0; i < m.dep_count; i++) {
@@ -726,6 +876,7 @@ static int cmd_add(const char *url) {
 
     /* Install it */
     make_dir("bricks");
+    g_visited_count = 0;
     if (install_dep(url, name) != 0) return 1;
 
     /* Add to manifest */
@@ -740,8 +891,10 @@ static int cmd_add(const char *url) {
 
 static int cmd_remove(const char *name) {
     BrickManifest m;
-    if (brick_parse("brick.json", &m) != 0) {
-        fprintf(stderr, "error: no brick.json found\n");
+    int prc = brick_parse("brick.json", &m);
+    if (prc != 0) {
+        if (prc == -1) fprintf(stderr, "error: no brick.json found\n");
+        else fprintf(stderr, "error: brick.json is invalid\n");
         return 1;
     }
 
@@ -823,8 +976,10 @@ static int cmd_remove(const char *name) {
 
 static int cmd_list(void) {
     BrickManifest m;
-    if (brick_parse("brick.json", &m) != 0) {
-        fprintf(stderr, "error: no brick.json found\n");
+    int prc = brick_parse("brick.json", &m);
+    if (prc != 0) {
+        if (prc == -1) fprintf(stderr, "error: no brick.json found\n");
+        else fprintf(stderr, "error: brick.json is invalid\n");
         return 1;
     }
     printf("%s v%s\n", m.name, m.version);
@@ -888,8 +1043,10 @@ static int update_dep(const char *url, const char *name) {
 
 static int cmd_update(void) {
     BrickManifest m;
-    if (brick_parse("brick.json", &m) != 0) {
-        fprintf(stderr, "error: no brick.json found\n");
+    int prc = brick_parse("brick.json", &m);
+    if (prc != 0) {
+        if (prc == -1) fprintf(stderr, "error: no brick.json found\n");
+        else fprintf(stderr, "error: brick.json is invalid\n");
         return 1;
     }
     if (m.dep_count == 0) {
@@ -899,6 +1056,7 @@ static int cmd_update(void) {
     printf("Updating %d dependenc%s...\n", m.dep_count,
            m.dep_count == 1 ? "y" : "ies");
     int failures = 0;
+    g_visited_count = 0;
     for (int i = 0; i < m.dep_count; i++) {
         if (update_dep(m.deps[i].url, m.deps[i].name) != 0)
             failures++;

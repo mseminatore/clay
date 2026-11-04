@@ -40,7 +40,7 @@ Clay is a prototype-based OO language with two execution paths from a shared fro
 
 2. **Runtime** (`src/runtime/`): The object system used by both backends. `clay.h` is the central header. Core prototypes (`clay_Object`, `clay_Number`, `clay_String`, etc.) are global singletons initialized in `bootstrap.c`. Each type module (`string.c`, `number.c`, `array.c`, etc.) registers methods on its prototype via `clay_*_init_methods()`.
 
-3. **VM** (`src/vm/generated/`): Bytecode VM generated from `src/vm/clay.yaml` by an external tool (vmgen). Files in `src/vm/generated/` are marked "DO NOT EDIT" — modify the YAML spec or the generator instead.
+3. **VM** (`src/vm/generated/`): Bytecode VM generated from `src/vm/clay.yaml` by vmgen (`deps/vmgen` submodule). Files in `src/vm/generated/` are marked "DO NOT EDIT" — modify the YAML spec and regenerate with `cmake --build build --target regen_vm`.
 
 ### Key runtime concepts
 

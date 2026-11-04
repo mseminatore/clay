@@ -8,15 +8,18 @@ Clay programs run instantly via an embedded bytecode VM, or can be compiled to h
 ## Building
 
 Requires CMake 3.10+ and a C compiler. On Windows, Visual Studio is detected automatically.
+OpenSSL (HTTPS) and SDL2 (`Graphics`) are optional and picked up when installed.
 
 ```
+git clone --recurse-submodules https://github.com/mseminatore/clay.git
+cd clay
 cmake -S . -B build
 cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-This produces:
-- `build/Debug/clay.exe` — the Clay compiler
-- `build/Debug/test_runner.exe` — runtime unit tests
+This produces `build/clay` (the compiler/VM) and `build/test_runner` (runtime unit tests) —
+under `build/Debug/` with `.exe` suffixes on Windows / multi-config generators.
 
 ## Usage
 
@@ -636,7 +639,7 @@ arr setAt(0, "y")             // set element at index
 
 ### Numbers
 
-Integers are tagged values (fast, no allocation). Floats are heap-allocated objects. Mixed operations promote to float.
+Integers are tagged 62-bit values and floats are tagged 32-bit IEEE values — neither allocates. Mixed operations promote to float. Integer overflow currently wraps silently.
 
 ```clay
 42                            // integer
@@ -1191,7 +1194,7 @@ db close
 | Error | `message()`, `type()`, `line()`, `file()`, `stackTrace()`, `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
-| Console | `readLine()`, `prompt(msg)` |
+| Console | `print(args...)`, `println(args...)`, `readLine()`, `prompt(msg)` |
 | File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` |
 | System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
@@ -1398,6 +1401,7 @@ Included under `deps/`:
 - [jcwangxp/Crossline](https://github.com/jcwangxp/Crossline) — cross-platform readline for the REPL (arrow keys, tab completion, history on all platforms)
 - [SQLite](https://sqlite.org/) — embedded SQL database engine for the `Db` prototype
 - [cJSON](https://github.com/DaveGamble/cJSON) — lightweight JSON parser for the DAP debug adapter
+- [mseminatore/vmgen](https://github.com/mseminatore/vmgen) — generates the bytecode VM in `src/vm/generated/` from `src/vm/clay.yaml` (only needed when changing the VM: `cmake --build build --target regen_vm`)
 
 ## Editor Support
 

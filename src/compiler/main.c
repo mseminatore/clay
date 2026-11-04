@@ -156,128 +156,105 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
 #endif
 }
 
+/* Runtime sources compiled into every native binary. Keep in sync with
+ * RUNTIME_SOURCES in CMakeLists.txt (and the Makefile). Paths are relative to
+ * the Clay source tree and use '/' — converted for Windows below. */
+static const char *const clay_native_sources[] = {
+    "src/runtime/object.c",   "src/runtime/memory.c",   "src/runtime/dispatch.c",
+    "src/runtime/tagged.c",   "src/runtime/string.c",   "src/runtime/number.c",
+    "src/runtime/block.c",    "src/runtime/array.c",    "src/runtime/error.c",
+    "src/runtime/clay_dict.c","src/runtime/range.c",    "src/runtime/math.c",
+    "src/runtime/file.c",     "src/runtime/ffi.c",      "src/runtime/date.c",
+    "src/runtime/http.c",     "src/runtime/regex.c",    "src/runtime/db.c",
+    "src/runtime/bootstrap.c","src/runtime/intern.c",   "src/runtime/graphics.c",
+    "src/runtime/vec3.c",     "src/runtime/thread.c",   "src/runtime/plugin.c",
+    "src/runtime/fiber_ctx.c",
+#ifndef _WIN32
+#if defined(__x86_64__) || defined(_M_X64)
+    "src/runtime/fiber_amd64.S",
+#elif defined(__aarch64__)
+    "src/runtime/fiber_arm64.S",
+#endif
+#endif
+    "deps/hash/hash.c",
+    "deps/sqlite/sqlite3.c",
+    NULL
+};
+
+/* Append `"<clay_dir>/<rel>" ` to cmd (with '\' separators on Windows) */
+static int append_source(char *cmd, size_t sz, const char *clay_dir, const char *rel) {
+    size_t len = strlen(cmd);
+    int n = snprintf(cmd + len, sz - len, "\"%s/%s\" ", clay_dir, rel);
+    if (n < 0 || (size_t)n >= sz - len) return -1;
+#ifdef _WIN32
+    for (char *c = cmd + len; *c; c++) if (*c == '/') *c = '\\';
+#endif
+    return 0;
+}
+
 /* Compile a C file to an executable. Returns 0 on success. */
 static int compile_c_file(const char *c_file, const char *output_name,
                           const char *clay_dir, int quiet) {
-    char cmd[8192];
+    char cmd[16384];
 #ifdef _WIN32
+    char vs_path[512] = "";
     {
-        char vs_path[512] = "";
-        {
-            const char *pf86 = getenv("ProgramFiles(x86)");
-            if (!pf86) pf86 = "C:\\Program Files (x86)";
-            char vswhere_cmd[512];
-            snprintf(vswhere_cmd, sizeof(vswhere_cmd),
-                "\"%s\\Microsoft Visual Studio\\Installer\\vswhere.exe\" "
-                "-latest -property installationPath", pf86);
-            FILE *fp = _popen(vswhere_cmd, "r");
-            if (fp) {
-                if (fgets(vs_path, sizeof(vs_path), fp)) {
-                    size_t len = strlen(vs_path);
-                    while (len > 0 && (vs_path[len-1] == '\n' || vs_path[len-1] == '\r'))
-                        vs_path[--len] = '\0';
-                }
-                _pclose(fp);
+        const char *pf86 = getenv("ProgramFiles(x86)");
+        if (!pf86) pf86 = "C:\\Program Files (x86)";
+        char vswhere_cmd[512];
+        snprintf(vswhere_cmd, sizeof(vswhere_cmd),
+            "\"%s\\Microsoft Visual Studio\\Installer\\vswhere.exe\" "
+            "-latest -property installationPath", pf86);
+        FILE *fp = _popen(vswhere_cmd, "r");
+        if (fp) {
+            if (fgets(vs_path, sizeof(vs_path), fp)) {
+                size_t len = strlen(vs_path);
+                while (len > 0 && (vs_path[len-1] == '\n' || vs_path[len-1] == '\r'))
+                    vs_path[--len] = '\0';
             }
+            _pclose(fp);
         }
-        if (vs_path[0] == '\0') {
-            fprintf(stderr, "clay: cannot find Visual Studio installation\n");
-            return 1;
-        }
-        snprintf(cmd, sizeof(cmd),
-            "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
-            "cl /nologo %s /O2 /GF "
-            "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" /I\"%s\\deps\\sqlite\" "
-            "/D_CRT_SECURE_NO_WARNINGS "
-            "/Fo\"%%TEMP%%\\\\\" "
-            "\"%s\" "
-            "\"%s\\src\\runtime\\object.c\" "
-            "\"%s\\src\\runtime\\memory.c\" "
-            "\"%s\\src\\runtime\\dispatch.c\" "
-            "\"%s\\src\\runtime\\tagged.c\" "
-            "\"%s\\src\\runtime\\string.c\" "
-            "\"%s\\src\\runtime\\number.c\" "
-            "\"%s\\src\\runtime\\block.c\" "
-            "\"%s\\src\\runtime\\array.c\" "
-            "\"%s\\src\\runtime\\error.c\" "
-            "\"%s\\src\\runtime\\clay_dict.c\" "
-            "\"%s\\src\\runtime\\range.c\" "
-            "\"%s\\src\\runtime\\bootstrap.c\" "
-            "\"%s\\src\\runtime\\math.c\" "
-            "\"%s\\src\\runtime\\file.c\" "
-            "\"%s\\src\\runtime\\ffi.c\" "
-            "\"%s\\src\\runtime\\date.c\" "
-            "\"%s\\src\\runtime\\http.c\" "
-            "\"%s\\src\\runtime\\regex.c\" "
-            "\"%s\\src\\runtime\\db.c\" "
-            "\"%s\\src\\runtime\\intern.c\" "
-            "\"%s\\src\\runtime\\fiber_ctx.c\" "
-            "\"%s\\deps\\hash\\hash.c\" "
-            "\"%s\\deps\\sqlite\\sqlite3.c\" "
-            "/Fe:\"%s\" "
-            "winhttp.lib ws2_32.lib "
-            "%s\"",
-            vs_path,
-            quiet ? "/W0" : "/W3",
-            clay_dir, clay_dir, clay_dir,
-            c_file,
-            clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir, clay_dir,
-            clay_dir, clay_dir, clay_dir,
-            output_name,
-            quiet ? ">nul 2>&1" : "");
     }
+    if (vs_path[0] == '\0') {
+        fprintf(stderr, "clay: cannot find Visual Studio installation\n");
+        return 1;
+    }
+    snprintf(cmd, sizeof(cmd),
+        "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
+        "cl /nologo %s /O2 /GF "
+        "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" /I\"%s\\deps\\sqlite\" "
+        "/D_CRT_SECURE_NO_WARNINGS "
+        "/Fo\"%%TEMP%%\\\\\" "
+        "\"%s\" ",
+        vs_path, quiet ? "/W0" : "/W3",
+        clay_dir, clay_dir, clay_dir, c_file);
+    for (int i = 0; clay_native_sources[i]; i++)
+        if (append_source(cmd, sizeof(cmd), clay_dir, clay_native_sources[i]) != 0)
+            return 1;
+    size_t len = strlen(cmd);
+    snprintf(cmd + len, sizeof(cmd) - len,
+        "/Fe:\"%s\" winhttp.lib ws2_32.lib %s\"",
+        output_name, quiet ? ">nul 2>&1" : "");
 #else
-    char fiber_asm_src[512] = "";
-#if defined(__x86_64__) || defined(_M_X64)
-    snprintf(fiber_asm_src, sizeof(fiber_asm_src), "\"%s/src/runtime/fiber_amd64.S\" ", clay_dir);
-#elif defined(__aarch64__)
-    snprintf(fiber_asm_src, sizeof(fiber_asm_src), "\"%s/src/runtime/fiber_arm64.S\" ", clay_dir);
-#endif
-
     snprintf(cmd, sizeof(cmd),
         "cc -std=c99 -O2 %s "
+#ifdef __linux__
+        "-D_DEFAULT_SOURCE "   /* POSIX + BSD declarations under -std=c99 */
+#endif
         "-I\"%s/src/runtime\" -I\"%s/deps/hash\" -I\"%s/deps/sqlite\" "
-        "\"%s\" "
-        "\"%s/src/runtime/object.c\" "
-        "\"%s/src/runtime/memory.c\" "
-        "\"%s/src/runtime/dispatch.c\" "
-        "\"%s/src/runtime/tagged.c\" "
-        "\"%s/src/runtime/string.c\" "
-        "\"%s/src/runtime/number.c\" "
-        "\"%s/src/runtime/block.c\" "
-        "\"%s/src/runtime/array.c\" "
-        "\"%s/src/runtime/error.c\" "
-        "\"%s/src/runtime/clay_dict.c\" "
-        "\"%s/src/runtime/range.c\" "
-        "\"%s/src/runtime/bootstrap.c\" "
-        "\"%s/src/runtime/math.c\" "
-        "\"%s/src/runtime/file.c\" "
-        "\"%s/src/runtime/ffi.c\" "
-        "\"%s/src/runtime/date.c\" "
-        "\"%s/src/runtime/http.c\" "
-        "\"%s/src/runtime/regex.c\" "
-        "\"%s/src/runtime/db.c\" "
-        "\"%s/src/runtime/intern.c\" "
-        "\"%s/src/runtime/fiber_ctx.c\" "
-        "%s"
-        "\"%s/deps/hash/hash.c\" "
-        "\"%s/deps/sqlite/sqlite3.c\" "
-        "-lm -ldl -o \"%s\"",
+        "\"%s\" ",
         quiet ? "-w" : "-Wall",
-        clay_dir, clay_dir, clay_dir,
-        c_file,
-        clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir, clay_dir, clay_dir, clay_dir,
-        clay_dir,  /* fiber_ctx.c */
-        fiber_asm_src,
-        clay_dir, clay_dir,
+        clay_dir, clay_dir, clay_dir, c_file);
+    for (int i = 0; clay_native_sources[i]; i++)
+        if (append_source(cmd, sizeof(cmd), clay_dir, clay_native_sources[i]) != 0)
+            return 1;
+    size_t len = strlen(cmd);
+    snprintf(cmd + len, sizeof(cmd) - len,
+#ifdef __linux__
+        "-lm -ldl -lpthread -o \"%s\"",
+#else
+        "-lm -ldl -o \"%s\"",
+#endif
         output_name);
 #endif
     return system(cmd);
@@ -362,10 +339,11 @@ static int run_repl(const char *argv0) {
 
     /* Temp file paths */
     char c_path[1024], exe_path[1024];
-    snprintf(c_path, sizeof(c_path), "%s\\_clay_repl.c", clay_dir);
 #ifdef _WIN32
+    snprintf(c_path, sizeof(c_path), "%s\\_clay_repl.c", clay_dir);
     snprintf(exe_path, sizeof(exe_path), "%s\\_clay_repl.exe", clay_dir);
 #else
+    snprintf(c_path, sizeof(c_path), "%s/_clay_repl.c", clay_dir);
     snprintf(exe_path, sizeof(exe_path), "%s/_clay_repl", clay_dir);
 #endif
 
@@ -408,7 +386,9 @@ static int run_repl(const char *argv0) {
                 }
             }
 
-            open_depth += count_open(input_buf);
+            /* count_open scans the whole accumulated buffer, so assign rather
+             * than accumulate — otherwise a multi-line block never closes */
+            open_depth = count_open(input_buf);
             first_line = 0;
 
             if (open_depth <= 0) break;

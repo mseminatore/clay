@@ -8,6 +8,7 @@
  * The "self" pointer is a wrapper clone with _value slot for tagged dispatch.
  */
 #include "clay.h"
+#include <math.h>
 
 /* Float constructor — returns tagged float (no heap allocation) */
 ClayObject *clay_float_new(float v) {
@@ -55,50 +56,82 @@ static float arg_float_value(int argc, ClayValue *argv) {
     return clay_to_float(argv[0]);
 }
 
+/* Unwrap a numeric argument (tagged int/float, boxed float, or a tagged-dispatch
+ * wrapper carrying _value) to an integer. Returns 0 if v is not a number. */
+static int arg_int(ClayValue v, intptr_t *out) {
+    if (CLAY_IS_INT(v)) { *out = clay_to_int(v); return 1; }
+    if (CLAY_IS_TAGGED_FLOAT(v)) { *out = (intptr_t)clay_float_untag(v); return 1; }
+    if (!CLAY_IS_OBJ(v)) return 0;
+    ClayObject *o = CLAY_OBJ(v);
+    if (o->type == CLAY_TYPE_FLOAT) { *out = (intptr_t)o->as.number_float.value; return 1; }
+    if (o->parent != clay_Number && o != clay_Number) return 0;
+    ClayValue inner = clay_get_slot(o, "_value");
+    if (CLAY_IS_INT(inner)) { *out = clay_to_int(inner); return 1; }
+    if (CLAY_IS_TAGGED_FLOAT(inner)) { *out = (intptr_t)clay_float_untag(inner); return 1; }
+    return 0;
+}
+
+/* Float argument for arithmetic/ordering: raises TypeError for non-numbers */
+static float arg_float_or_raise(ClayValue v, const char *op) {
+    intptr_t ignored;
+    if (!arg_int(v, &ignored)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Number %s: argument is not a Number", op);
+        clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+    }
+    return clay_to_float(v);
+}
+
+/* Integer argument for arithmetic/ordering: raises TypeError for non-numbers */
+static intptr_t arg_int_or_raise(ClayValue v, const char *op) {
+    intptr_t n = 0;
+    if (!arg_int(v, &n)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Number %s: argument is not a Number", op);
+        clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+    }
+    return n;
+}
+
 static ClayValue number_add(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(self_int_value(self));
     if (is_float_arg(self, argc, argv)) {
-        return clay_float_tag(self_float_value(self) + arg_float_value(argc, argv));
+        return clay_float_tag(self_float_value(self) + arg_float_or_raise(argv[0], "+"));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b;
-    if (CLAY_IS_INT(argv[0])) {
-        b = clay_to_int(argv[0]);
-    } else {
-        b = clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
-    }
+    intptr_t b = arg_int_or_raise(argv[0], "+");
     return clay_int(a + b);
 }
 
 static ClayValue number_sub(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(-self_int_value(self));
     if (is_float_arg(self, argc, argv)) {
-        return clay_float_tag(self_float_value(self) - arg_float_value(argc, argv));
+        return clay_float_tag(self_float_value(self) - arg_float_or_raise(argv[0], "-"));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], "-");
     return clay_int(a - b);
 }
 
 static ClayValue number_mul(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(0);
     if (is_float_arg(self, argc, argv)) {
-        return clay_float_tag(self_float_value(self) * arg_float_value(argc, argv));
+        return clay_float_tag(self_float_value(self) * arg_float_or_raise(argv[0], "*"));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], "*");
     return clay_int(a * b);
 }
 
 static ClayValue number_div(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(0);
     if (is_float_arg(self, argc, argv)) {
-        float b = arg_float_value(argc, argv);
+        float b = arg_float_or_raise(argv[0], "/");
         if (b == 0.0f) clay_raise(CLAY_VAL(clay_error_new("division by zero", "DivisionByZero")));
         return clay_float_tag(self_float_value(self) / b);
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], "/");
     if (b == 0) {
         clay_raise(CLAY_VAL(clay_error_new("division by zero", "DivisionByZero")));
     }
@@ -107,9 +140,13 @@ static ClayValue number_div(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue number_mod(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(0);
-    /* modulo only works on integers */
+    if (is_float_arg(self, argc, argv)) {
+        float b = arg_float_or_raise(argv[0], "%");
+        if (b == 0.0f) clay_raise(CLAY_VAL(clay_error_new("modulo by zero", "DivisionByZero")));
+        return clay_float_tag(fmodf(self_float_value(self), b));
+    }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], "%");
     if (b == 0) {
         clay_raise(CLAY_VAL(clay_error_new("modulo by zero", "DivisionByZero")));
     }
@@ -119,60 +156,62 @@ static ClayValue number_mod(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue number_lt(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_FALSE;
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_BOOL(self_float_value(self) < arg_float_value(argc, argv));
+        return CLAY_BOOL(self_float_value(self) < arg_float_or_raise(argv[0], "<"));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], "<");
     return CLAY_BOOL(a < b);
 }
 
 static ClayValue number_gt(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_FALSE;
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_BOOL(self_float_value(self) > arg_float_value(argc, argv));
+        return CLAY_BOOL(self_float_value(self) > arg_float_or_raise(argv[0], ">"));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], ">");
     return CLAY_BOOL(a > b);
 }
 
 static ClayValue number_eq(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_FALSE;
+    intptr_t b;
+    if (!arg_int(argv[0], &b)) return CLAY_FALSE;  /* not a number: never equal */
     if (is_float_arg(self, argc, argv)) {
         return CLAY_BOOL(self_float_value(self) == arg_float_value(argc, argv));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
     return CLAY_BOOL(a == b);
 }
 
 static ClayValue number_lte(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_FALSE;
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_BOOL(self_float_value(self) <= arg_float_value(argc, argv));
+        return CLAY_BOOL(self_float_value(self) <= arg_float_or_raise(argv[0], "<="));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], "<=");
     return CLAY_BOOL(a <= b);
 }
 
 static ClayValue number_gte(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_FALSE;
     if (is_float_arg(self, argc, argv)) {
-        return CLAY_BOOL(self_float_value(self) >= arg_float_value(argc, argv));
+        return CLAY_BOOL(self_float_value(self) >= arg_float_or_raise(argv[0], ">="));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t b = arg_int_or_raise(argv[0], ">=");
     return CLAY_BOOL(a >= b);
 }
 
 static ClayValue number_neq(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_TRUE;
+    intptr_t b;
+    if (!arg_int(argv[0], &b)) return CLAY_TRUE;  /* not a number: never equal */
     if (is_float_arg(self, argc, argv)) {
         return CLAY_BOOL(self_float_value(self) != arg_float_value(argc, argv));
     }
     intptr_t a = self_int_value(self);
-    intptr_t b = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
     return CLAY_BOOL(a != b);
 }
 

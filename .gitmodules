@@ -4,3 +4,6 @@
 [submodule "deps/testy"]
 	path = deps/testy
 	url = https://github.com/mseminatore/testy.git
+[submodule "deps/vmgen"]
+	path = deps/vmgen
+	url = https://github.com/mseminatore/vmgen.git

@@ -3,6 +3,8 @@
  */
 #include "clay.h"
 
+void (*clay_ic_invalidate_hook)(void *methods_ptr) = NULL;
+
 /* Memory diagnostics counters */
 volatile long clay_alloc_count = 0;
 volatile long clay_dealloc_count = 0;
@@ -86,7 +88,7 @@ static void clay_dealloc(ClayObject *obj) {
     /* Free method keys and method structs */
     if (obj->methods) {
         clay_method_cache_invalidate(obj->methods);
-        clay_ic_invalidate(obj->methods);
+        if (clay_ic_invalidate_hook) clay_ic_invalidate_hook(obj->methods);
         size_t pos = 0;
         ht_key_t key;
         ht_value_t val;

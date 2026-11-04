@@ -255,6 +255,9 @@ void ast_print(AstNode *node, int indent) {
             if (node->as.try_catch.catch_block) {
                 print_indent(indent + 1); printf("catch: "); ast_print(node->as.try_catch.catch_block, indent + 2);
             }
+            if (node->as.try_catch.finally_block) {
+                print_indent(indent + 1); printf("finally: "); ast_print(node->as.try_catch.finally_block, indent + 2);
+            }
             break;
         case NODE_RAISE:
             printf("Raise\n");

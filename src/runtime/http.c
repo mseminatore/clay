@@ -193,6 +193,7 @@ static ClayValue do_http_request(const char *url, const char *method, const char
 #ifdef CLAY_HAS_SSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 #endif
 
 static ClayValue do_http_request(const char *url, const char *method, const char *req_body, size_t body_len) {
@@ -270,12 +271,33 @@ static ClayValue do_http_request(const char *url, const char *method, const char
     if (is_https) {
         ssl_ctx = SSL_CTX_new(TLS_client_method());
         if (!ssl_ctx) { close(fd); return make_error_response("SSL_CTX_new failed"); }
+        /* Verify the server certificate chain against the system trust store
+         * (honours SSL_CERT_FILE / SSL_CERT_DIR) and require TLS 1.2+. */
+        SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_2_VERSION);
+        SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
+        if (SSL_CTX_set_default_verify_paths(ssl_ctx) != 1) {
+            SSL_CTX_free(ssl_ctx); close(fd);
+            return make_error_response("SSL: could not load trusted CA certificates");
+        }
         ssl = SSL_new(ssl_ctx);
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, host);
-        if (SSL_connect(ssl) <= 0) {
+        /* Check that the certificate is actually for this host */
+        SSL_set_hostflags(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+        if (SSL_set1_host(ssl, host) != 1) {
             SSL_free(ssl); SSL_CTX_free(ssl_ctx); close(fd);
-            return make_error_response("SSL handshake failed");
+            return make_error_response("SSL: could not set expected hostname");
+        }
+        if (SSL_connect(ssl) <= 0 || SSL_get_verify_result(ssl) != X509_V_OK) {
+            long vr = SSL_get_verify_result(ssl);
+            char msg[256];
+            if (vr != X509_V_OK)
+                snprintf(msg, sizeof(msg), "SSL certificate verification failed: %s",
+                         X509_verify_cert_error_string(vr));
+            else
+                snprintf(msg, sizeof(msg), "SSL handshake failed");
+            SSL_free(ssl); SSL_CTX_free(ssl_ctx); close(fd);
+            return make_error_response(msg);
         }
     }
 #define HTTP_SEND(buf, len) (is_https ? SSL_write(ssl, buf, (int)(len)) : send(fd, buf, len, 0))

@@ -34,6 +34,13 @@ static ClayObject *string_new_prealloc(size_t len) {
 }
 
 const char *clay_string_data(ClayObject *obj) {
+    /* Callers commonly pass CLAY_OBJ(argv[i]) straight through; if the
+     * argument is a tagged int/float that "pointer" must not be dereferenced. */
+    if (!CLAY_IS_PTR((ClayValue)(uintptr_t)obj)) {
+        clay_raise(CLAY_VAL(clay_error_new("expected a String argument, got a Number",
+                                           "TypeError")));
+        return "";
+    }
     if (obj && obj->type == CLAY_TYPE_STRING) {
         return obj->as.string.data;
     }
@@ -45,9 +52,9 @@ const char *clay_string_data(ClayObject *obj) {
 static ClayValue string_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     if (clay_output_fn) {
-        char buf[1024];
-        snprintf(buf, sizeof(buf), "%s\n", self->as.string.data);
-        clay_output_fn(buf);
+        /* Send the full string (no fixed buffer — long lines must not be cut) */
+        clay_output_fn(self->as.string.data);
+        clay_output_fn("\n");
     } else {
         printf("%s\n", self->as.string.data);
     }
@@ -110,14 +117,14 @@ static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_equals(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_STRING) return CLAY_FALSE;
     return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) == 0);
 }
 
 static ClayValue string_neq(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_TRUE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_TRUE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_STRING) return CLAY_TRUE;
     return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) != 0);
@@ -143,14 +150,20 @@ static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
     }
 
     /* Original integer indexing */
-    intptr_t idx = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0])
-                 : clay_to_int(clay_get_slot(CLAY_OBJ(argv[0]), "_value"));
+    intptr_t idx;
+    if (CLAY_IS_INT(argv[0])) idx = clay_to_int(argv[0]);
+    else if (CLAY_IS_TAGGED_FLOAT(argv[0])) idx = (intptr_t)clay_float_untag(argv[0]);
+    else {
+        clay_raise(CLAY_VAL(clay_error_new("String at: index must be a Number or Range",
+                                           "TypeError")));
+        return CLAY_NIL;
+    }
     if (idx < 0 || (size_t)idx >= self->as.string.length) return CLAY_NIL;
     return CLAY_VAL(clay_string_new_len(self->as.string.data + idx, 1));
 }
 
 static ClayValue string_contains(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *sub = CLAY_OBJ(argv[0]);
     if (sub->type != CLAY_TYPE_STRING) return CLAY_FALSE;
     return CLAY_BOOL(strstr(self->as.string.data, sub->as.string.data) != NULL);
@@ -200,8 +213,8 @@ static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 2 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])
-                  || CLAY_IS_INT(argv[1]) || CLAY_IS_NIL(argv[1])) {
+    if (argc < 2 || !CLAY_IS_OBJ(argv[0])
+                  || !CLAY_IS_OBJ(argv[1])) {
         return CLAY_VAL(clay_retain(self));
     }
     ClayObject *old_str = CLAY_OBJ(argv[0]);
@@ -296,14 +309,14 @@ static ClayValue string_lower(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_startsWith(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING)) return CLAY_FALSE;
     ClayObject *prefix = CLAY_OBJ(argv[0]);
     if (prefix->as.string.length > self->as.string.length) return CLAY_FALSE;
     return CLAY_BOOL(memcmp(self->as.string.data, prefix->as.string.data, prefix->as.string.length) == 0);
 }
 
 static ClayValue string_endsWith(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING)) return CLAY_FALSE;
     ClayObject *suffix = CLAY_OBJ(argv[0]);
     if (suffix->as.string.length > self->as.string.length) return CLAY_FALSE;
     size_t offset = self->as.string.length - suffix->as.string.length;
@@ -322,7 +335,7 @@ static ClayValue string_reverse(ClayObject *self, int argc, ClayValue *argv) {
 
 /* String match(pattern) — returns first regex match or nil */
 static ClayValue string_match(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *pat_obj = CLAY_OBJ(argv[0]);
     if (pat_obj->type != CLAY_TYPE_STRING) return CLAY_NIL;
     int start, len;
@@ -334,7 +347,7 @@ static ClayValue string_match(ClayObject *self, int argc, ClayValue *argv) {
 
 /* String test(pattern) — returns true if regex matches */
 static ClayValue string_test(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *pat_obj = CLAY_OBJ(argv[0]);
     if (pat_obj->type != CLAY_TYPE_STRING) return CLAY_FALSE;
     int start, len;
@@ -342,7 +355,7 @@ static ClayValue string_test(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_indexOf(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return clay_int(-1);
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return clay_int(-1);
     ClayObject *sub = CLAY_OBJ(argv[0]);
     if (sub->type != CLAY_TYPE_STRING) return clay_int(-1);
     const char *found = strstr(self->as.string.data, sub->as.string.data);
@@ -351,7 +364,7 @@ static ClayValue string_indexOf(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_lastIndexOf(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return clay_int(-1);
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return clay_int(-1);
     ClayObject *sub = CLAY_OBJ(argv[0]);
     if (sub->type != CLAY_TYPE_STRING) return clay_int(-1);
     if (sub->as.string.length == 0) return clay_int((intptr_t)self->as.string.length);

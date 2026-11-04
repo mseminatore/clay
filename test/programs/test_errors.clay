@@ -84,4 +84,13 @@ f = 0
 try { 99 } finally { f = 3 }
 Test eq(f, 3)
 
+
+// Modulo by zero raises DivisionByZero (literal and variable divisor)
+m1 = try { 5 % 0 } catch { |e| e type() }
+Test eq(m1, "DivisionByZero")
+zero = 0
+m2 = try { 7 % zero } catch { |e| e type() }
+Test eq(m2, "DivisionByZero")
+Test eq(7 % 3, 1)
+
 Test done()

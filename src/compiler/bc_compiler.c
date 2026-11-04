@@ -794,7 +794,7 @@ typedef struct {
 static CLAY_THREAD_LOCAL SlotICEntry g_slot_ic[IC_TABLE_SIZE];
 
 /* Invalidate IC entries referencing a freed methods hash table */
-void clay_ic_invalidate(void *methods_ptr) {
+static void bc_ic_invalidate(void *methods_ptr) {
     HashTable *target = (HashTable *)methods_ptr;
     for (int i = 0; i < IC_TABLE_SIZE; i++) {
         if (g_ic_table[i].methods_key == target)
@@ -1670,6 +1670,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
 
     /* Register native functions */
     vm->arith_fallback = arith_fallback_fn;
+    clay_ic_invalidate_hook = bc_ic_invalidate;
     vm->retain_fn = vm_retain_cb;
     vm->release_fn = vm_release_cb;
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);

@@ -2,6 +2,7 @@
 clay
 test_*.txt
 brick.lock
+docs/prerelease-review.md
 
 # Directories
 build/

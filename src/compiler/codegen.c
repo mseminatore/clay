@@ -47,30 +47,48 @@ static void push_owned_temp(CodeGen *cg, const char *name) {
     cg->owned_temps[cg->owned_temp_count++] = strdup(name);
 }
 
-/* Emit clay_release_val() for all owned temps except result_temp.
- * Uses runtime alias check to handle methods that return self. */
-static void emit_temp_cleanup(CodeGen *cg, const char *result_temp) {
-    for (int i = 0; i < cg->owned_temp_count; i++) {
+/* Emit clay_release_val() for owned temps [from, count) except result_temp,
+ * and drop them from the list. Every owned temp holds its own reference (sends
+ * go through clay_send_owned, which retains aliased results), so an owned temp
+ * that happens to alias the result is still released unconditionally. */
+static void emit_temp_cleanup_from(CodeGen *cg, int from, const char *result_temp) {
+    for (int i = from; i < cg->owned_temp_count; i++) {
         if (result_temp && strcmp(cg->owned_temps[i], result_temp) == 0) {
-            free(cg->owned_temps[i]);
+            free(cg->owned_temps[i]);   /* ownership passes to the caller */
             continue;
         }
         emit_indent(cg);
-        if (result_temp) {
-            fprintf(cg->out, "if (%s != %s) clay_release_val(%s);\n",
-                    cg->owned_temps[i], result_temp, cg->owned_temps[i]);
-        } else {
-            fprintf(cg->out, "clay_release_val(%s);\n", cg->owned_temps[i]);
-        }
+        fprintf(cg->out, "clay_release_val(%s);\n", cg->owned_temps[i]);
         free(cg->owned_temps[i]);
     }
-    cg->owned_temp_count = 0;
+    cg->owned_temp_count = from;
+}
+
+static void emit_temp_cleanup(CodeGen *cg, const char *result_temp) {
+    emit_temp_cleanup_from(cg, 0, result_temp);
+}
+
+/* Make a Clay name usable inside a C identifier: operator methods such as
+ * `>=` or `+` become `_x3e_x3d` / `_x2b`. Alphanumerics and '_' pass through. */
+static void mangle_c_ident(const char *in, char *out, size_t sz) {
+    size_t o = 0;
+    for (const unsigned char *c = (const unsigned char *)(in ? in : "anon"); *c && o + 5 < sz; c++) {
+        if ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+            (*c >= '0' && *c <= '9') || *c == '_') {
+            out[o++] = (char)*c;
+        } else {
+            o += (size_t)snprintf(out + o, sz - o, "_x%02x", *c);
+        }
+    }
+    out[o] = '\0';
 }
 
 static char *method_func_name(CodeGen *cg, const char *obj_name, const char *method_name) {
-    char *buf = (char *)malloc(128);
-    snprintf(buf, 128, "_clay_method_%s_%s_%d", obj_name ? obj_name : "anon",
-             method_name, cg->method_counter++);
+    char *buf = (char *)malloc(160);
+    char obj_m[64], meth_m[64];
+    mangle_c_ident(obj_name ? obj_name : "anon", obj_m, sizeof(obj_m));
+    mangle_c_ident(method_name, meth_m, sizeof(meth_m));
+    snprintf(buf, 160, "_clay_method_%s_%s_%d", obj_m, meth_m, cg->method_counter++);
     return buf;
 }
 
@@ -274,10 +292,11 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             break;
         }
         case NODE_METHOD_DEF: {
-            char buf[128];
+            char buf[160], obj_m[64], meth_m[64];
+            mangle_c_ident(parent_name ? parent_name : "anon", obj_m, sizeof(obj_m));
+            mangle_c_ident(node->as.method_def.name, meth_m, sizeof(meth_m));
             snprintf(buf, sizeof(buf), "_clay_method_%s_%s_%d",
-                     parent_name ? parent_name : "anon",
-                     node->as.method_def.name, name_counter++);
+                     obj_m, meth_m, name_counter++);
             register_name(node, buf);
             for (int i = 0; i < node->as.method_def.body.count; i++)
                 prewalk_assign_names(node->as.method_def.body.items[i], buf);
@@ -315,6 +334,8 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             prewalk_assign_names(node->as.try_catch.try_block, parent_name);
             if (node->as.try_catch.catch_block)
                 prewalk_assign_names(node->as.try_catch.catch_block, parent_name);
+            if (node->as.try_catch.finally_block)
+                prewalk_assign_names(node->as.try_catch.finally_block, parent_name);
             break;
         case NODE_RAISE:
             prewalk_assign_names(node->as.raise.expr, parent_name);
@@ -592,6 +613,8 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             scan_free_vars(node->as.try_catch.try_block, block_params, param_count, caps, cg);
             if (node->as.try_catch.catch_block)
                 scan_free_vars(node->as.try_catch.catch_block, block_params, param_count, caps, cg);
+            if (node->as.try_catch.finally_block)
+                scan_free_vars(node->as.try_catch.finally_block, block_params, param_count, caps, cg);
             break;
         case NODE_RAISE:
             scan_free_vars(node->as.raise.expr, block_params, param_count, caps, cg);
@@ -680,10 +703,10 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
     if (node->as.send.is_super && cg->super_proto) {
         /* super send: start lookup from defining prototype's parent */
         if (argc == 0) {
-            fprintf(cg->out, "ClayValue %s = clay_send_super(%s, CLAY_OBJ(%s), \"%s\", 0, NULL);\n",
+            fprintf(cg->out, "ClayValue %s = clay_send_super_owned(%s, CLAY_OBJ(%s), \"%s\", 0, NULL);\n",
                     t, recv, cg->super_proto, node->as.send.message);
         } else {
-            fprintf(cg->out, "ClayValue %s = clay_send_super(%s, CLAY_OBJ(%s), \"%s\", %d, (ClayValue[]){",
+            fprintf(cg->out, "ClayValue %s = clay_send_super_owned(%s, CLAY_OBJ(%s), \"%s\", %d, (ClayValue[]){",
                     t, recv, cg->super_proto, node->as.send.message, argc);
             for (int i = 0; i < argc; i++) {
                 if (i > 0) fprintf(cg->out, ", ");
@@ -692,10 +715,10 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
             fprintf(cg->out, "});\n");
         }
     } else if (argc == 0) {
-        fprintf(cg->out, "ClayValue %s = clay_send_val(%s, \"%s\", 0, NULL);\n",
+        fprintf(cg->out, "ClayValue %s = clay_send_owned(%s, \"%s\", 0, NULL);\n",
                 t, recv, node->as.send.message);
     } else {
-        fprintf(cg->out, "ClayValue %s = clay_send_val(%s, \"%s\", %d, (ClayValue[]){",
+        fprintf(cg->out, "ClayValue %s = clay_send_owned(%s, \"%s\", %d, (ClayValue[]){",
                 t, recv, node->as.send.message, argc);
         for (int i = 0; i < argc; i++) {
             if (i > 0) fprintf(cg->out, ", ");
@@ -727,9 +750,11 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         emit_indent(cg);
         fprintf(cg->out, "if (CLAY_IS_TRUTHY(%s)) {\n", left);
         cg->indent++;
+        int mark = cg->owned_temp_count;   /* right-side temps live in this branch */
         char *right = emit_expr(cg, node->as.binary.right);
         emit_indent(cg);
         fprintf(cg->out, "%s = CLAY_BOOL(CLAY_IS_TRUTHY(%s));\n", t, right);
+        emit_temp_cleanup_from(cg, mark, NULL);
         free(right);
         cg->indent--;
         emit_indent(cg);
@@ -759,9 +784,11 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         emit_indent(cg);
         fprintf(cg->out, "} else {\n");
         cg->indent++;
+        int mark = cg->owned_temp_count;   /* right-side temps live in this branch */
         char *right = emit_expr(cg, node->as.binary.right);
         emit_indent(cg);
         fprintf(cg->out, "%s = CLAY_BOOL(CLAY_IS_TRUTHY(%s));\n", t, right);
+        emit_temp_cleanup_from(cg, mark, NULL);
         free(right);
         cg->indent--;
         emit_indent(cg);
@@ -781,19 +808,22 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         fprintf(cg->out, "if (%s != CLAY_NIL) {\n", left);
         cg->indent++;
         emit_indent(cg);
-        fprintf(cg->out, "%s = %s;\n", t, left);
+        fprintf(cg->out, "%s = %s; clay_retain_val(%s);\n", t, left, t);
         cg->indent--;
         emit_indent(cg);
         fprintf(cg->out, "} else {\n");
         cg->indent++;
+        int mark = cg->owned_temp_count;   /* right-side temps live in this branch */
         char *right = emit_expr(cg, node->as.binary.right);
         emit_indent(cg);
-        fprintf(cg->out, "%s = %s;\n", t, right);
+        fprintf(cg->out, "%s = %s; clay_retain_val(%s);\n", t, right, t);
+        emit_temp_cleanup_from(cg, mark, NULL);
         free(right);
         cg->indent--;
         emit_indent(cg);
         fprintf(cg->out, "}\n");
         free(left);
+        push_owned_temp(cg, t);
         return t;
     }
     /* Range literal: lhs..rhs */
@@ -839,7 +869,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         fprintf(cg->out, "if (clay_to_int(%s) == 0) clay_raise(CLAY_VAL(clay_error_new(\"division by zero\", \"DivisionByZero\")));\n", right);
         emit_indent(cg);
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) / clay_to_int(%s));\n", t, left, right);
-    } else if (strcmp(op, "%%") == 0) {
+    } else if (strcmp(op, "%") == 0) {
         fprintf(cg->out, "if (clay_to_int(%s) == 0) clay_raise(CLAY_VAL(clay_error_new(\"modulo by zero\", \"DivisionByZero\")));\n", right);
         emit_indent(cg);
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) %% clay_to_int(%s));\n", t, left, right);
@@ -856,7 +886,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     } else if (strcmp(op, ">=") == 0) {
         fprintf(cg->out, "%s = CLAY_BOOL(clay_to_int(%s) >= clay_to_int(%s));\n", t, left, right);
     } else {
-        fprintf(cg->out, "%s = clay_send_val(%s, \"%s\", 1, (ClayValue[]){%s});\n",
+        fprintf(cg->out, "%s = clay_send_owned(%s, \"%s\", 1, (ClayValue[]){%s});\n",
                 t, left, op, right);
     }
 
@@ -890,7 +920,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     } else if (strcmp(op, ">=") == 0) {
         fprintf(cg->out, "%s = CLAY_BOOL(clay_to_float(%s) >= clay_to_float(%s));\n", t, left, right);
     } else {
-        fprintf(cg->out, "%s = clay_send_val(%s, \"%s\", 1, (ClayValue[]){%s});\n",
+        fprintf(cg->out, "%s = clay_send_owned(%s, \"%s\", 1, (ClayValue[]){%s});\n",
                 t, left, op, right);
     }
 
@@ -899,7 +929,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     fprintf(cg->out, "} else {\n");
     cg->indent++;
     emit_indent(cg);
-    fprintf(cg->out, "%s = clay_send_val(%s, \"%s\", 1, (ClayValue[]){%s});\n",
+    fprintf(cg->out, "%s = clay_send_owned(%s, \"%s\", 1, (ClayValue[]){%s});\n",
             t, left, op, right);
     cg->indent--;
     emit_indent(cg);

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Clay is a prototype-based, pure object-oriented language ("everything is an object", message-passing,
 clone-to-create) written in C99. It has two execution paths from a shared frontend: compile to
 human-readable C (native binaries) or compile to bytecode for an embedded VM. See `README.md` for
-full language documentation and `plan.md` for original design rationale.
+full language documentation and `docs/prerelease-review.md` for the open bug/feature tracker.
 
 ## Build & Test
 
@@ -78,14 +78,17 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
    registers its methods on its prototype via a `clay_<type>_init_methods()` function called from
    `clay_bootstrap()`.
 
-3. **VM** (`src/vm/generated/`): Bytecode VM **generated from `src/vm/clay.yaml`** by an external tool
-   (vmgen — not in this repo). Files under `src/vm/generated/` are marked "DO NOT EDIT" — to change VM
-   behavior, modify `clay.yaml` (or the generator) and regenerate, don't hand-edit the generated `.c`/`.h`.
+3. **VM** (`src/vm/generated/`): Bytecode VM **generated from `src/vm/clay.yaml`** by vmgen
+   (`deps/vmgen` submodule). Files under `src/vm/generated/` are marked "DO NOT EDIT" — to change VM
+   behavior, modify `clay.yaml` and regenerate with `cmake --build build --target regen_vm`
+   (or `cmake -P cmake/regen_vm.cmake`; add `-- --check` to only verify). Known exception:
+   `vm.h`/`clayvm.h` carry a hand-added `CLAYVM_VAL_CELL` that vmgen cannot express yet, so
+   regenerating those two files currently breaks the build — see `docs/prerelease-review.md` §1.4.
 
 ### Key runtime concepts (in `clay.h`)
 
 - **Tagged values**: `ClayValue` is a `uintptr_t`. 2-bit tag scheme — `& 3 == 0` is a pointer/nil,
-  `== 1` is a small integer (`value >> 1`), `== 3` is a tagged 32-bit float. `CLAY_NIL` is 0.
+  `== 1` is a small 62-bit integer (`value >> 2`), `== 3` is a tagged 32-bit float. `CLAY_NIL` is 0.
   Booleans are global singletons (`clay_true_obj`/`clay_false_obj`, accessed via `CLAY_TRUE`/`CLAY_FALSE`).
 - **Message dispatch** (`dispatch.c`): everything goes through `clay_send_val()` (or the legacy
   `clay_send()` macro for object pointers). Tagged integers get a temporary `clay_Number` wrapper for
@@ -104,14 +107,20 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 ## Conventions
 
 - **Method signatures**: every runtime method is `ClayValue fn(ClayObject *self, int argc, ClayValue *argv)`;
-  cast unused parameters to `(void)`.
+  cast unused parameters to `(void)`. Dispatch pads `argv` to at least 4 slots with nil, but check
+  argument types before dereferencing: use `CLAY_IS_OBJ(v)` / `CLAY_IS_TYPE(v, CLAY_TYPE_STRING)`
+  (not `CLAY_IS_INT(v) || CLAY_IS_NIL(v)`, which misses tagged floats).
+- **Return ownership**: a method returns a new reference, *except* that returning the receiver or one
+  of its arguments (e.g. `return CLAY_VAL(self)`) is borrowed. Callers that need an owned result use
+  `clay_send_owned()` (generated C does); the VM applies the same rule in `native_send_fn`.
 - **Naming**: runtime API is `clay_*` (`clay_clone`, `clay_send`, `clay_string_new`, ...); VM API is
   `clayvm_*`; type constructors follow `clay_<type>_new()`.
 - **MSVC compatibility**: `_CRT_SECURE_NO_WARNINGS` is defined; `strdup` aliases to `_strdup` under
   `_MSC_VER`; the Windows console API is hand-declared in `main.c` to avoid `windows.h` conflicts.
 - **Dependencies** (`deps/`, some are git submodules — see `.gitmodules`): `hash` (slot/method hash
   table, has its own detailed `deps/hash/.github/copilot-instructions.md`), `testy` (test framework),
-  `crossline` (REPL line editing), `cjson` (DAP/JSON), `sqlite` (the `Db` prototype).
+  `crossline` (REPL line editing), `cjson` (DAP/JSON), `sqlite` (the `Db` prototype), `vmgen` (VM
+  generator, only needed to regenerate `src/vm/generated/`).
 
 ## Bricks (package manager)
 

@@ -54,7 +54,7 @@ static ClayValue vec3_z(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_add(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_NIL;
     return CLAY_VAL(clay_vec3_new(
@@ -64,7 +64,7 @@ static ClayValue vec3_add(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_sub(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_NIL;
     return CLAY_VAL(clay_vec3_new(
@@ -93,7 +93,7 @@ static ClayValue vec3_div_scalar(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_dot(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_NIL;
     float d = self->as.vec3.x * other->as.vec3.x +
@@ -103,7 +103,7 @@ static ClayValue vec3_dot(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_cross(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_NIL;
     float cx = self->as.vec3.y * other->as.vec3.z - self->as.vec3.z * other->as.vec3.y;
@@ -135,7 +135,7 @@ static ClayValue vec3_normalize(ClayObject *self, int argc, ClayValue *argv) {
 
 /* Component-wise multiply */
 static ClayValue vec3_mul(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_NIL;
     return CLAY_VAL(clay_vec3_new(
@@ -145,7 +145,7 @@ static ClayValue vec3_mul(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_reflect(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     ClayObject *n = CLAY_OBJ(argv[0]);
     if (n->type != CLAY_TYPE_VEC3) return CLAY_NIL;
     float d = self->as.vec3.x * n->as.vec3.x +
@@ -180,7 +180,7 @@ static ClayValue vec3_toString(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_eq(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_FALSE;
     return CLAY_BOOL(self->as.vec3.x == other->as.vec3.x &&
@@ -189,7 +189,7 @@ static ClayValue vec3_eq(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue vec3_neq(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_TRUE;
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_TRUE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_VEC3) return CLAY_TRUE;
     return CLAY_BOOL(self->as.vec3.x != other->as.vec3.x ||

@@ -211,18 +211,19 @@ int handle_DIV(clayvm_vm_t *vm) {
 }
 
 int handle_MOD(clayvm_vm_t *vm) {
-    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64 && b.as.i64 != 0) {
+        clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 % b.as.i64));
+    } else if (vm->arith_fallback) {
+        /* Non-int operands, or modulo by zero: let the runtime raise DivisionByZero */
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+    } else if (b.type == CLAYVM_VAL_INT64 && b.as.i64 == 0) {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "modulo by zero");
+        return -1;
     } else {
-        if (vm->arith_fallback) {
-            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
-        } else {
-            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
-            return -1;
-        }
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+        return -1;
     }
     return 0;
 }
@@ -656,15 +657,17 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64 && b.as.i64 != 0) {
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 % b.as.i64));
+        } else if (vm->arith_fallback) {
+            /* Non-int operands, or modulo by zero: let the runtime raise DivisionByZero */
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+        } else if (b.type == CLAYVM_VAL_INT64 && b.as.i64 == 0) {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "modulo by zero");
+            return -1;
         } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
-            } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
-                return -1;
-            }
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+            return -1;
         }
         DISPATCH();
     }
@@ -1073,15 +1076,17 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_MOD: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64 && b.as.i64 != 0) {
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 % b.as.i64));
+        } else if (vm->arith_fallback) {
+            /* Non-int operands, or modulo by zero: let the runtime raise DivisionByZero */
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+        } else if (b.type == CLAYVM_VAL_INT64 && b.as.i64 == 0) {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "modulo by zero");
+            return -1;
         } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
-            } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
-                return -1;
-            }
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+            return -1;
         }
         break;
     }

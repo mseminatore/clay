@@ -225,7 +225,7 @@ static ClayValue dap_evaluate_expr(const char *expr, int *found) {
         char *next_dot = strchr(rest, '.');
         if (next_dot) *next_dot = '\0';
 
-        if (CLAY_IS_NIL(cv) || CLAY_IS_INT(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE) {
+        if (!CLAY_IS_OBJ(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE) {
             *found = 0; return CLAY_NIL;
         }
         ClayObject *obj = CLAY_OBJ(cv);
@@ -346,7 +346,7 @@ static void dap_var_refs_reset(void) {
 
 /* Returns a variablesReference for an expandable ClayValue, or 0 if not expandable */
 static int dap_var_ref_for(ClayValue cv) {
-    if (CLAY_IS_NIL(cv) || CLAY_IS_INT(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE)
+    if (!CLAY_IS_OBJ(cv) || cv == CLAY_TRUE || cv == CLAY_FALSE)
         return 0;
     ClayObject *obj = CLAY_OBJ(cv);
     if (!obj) return 0;

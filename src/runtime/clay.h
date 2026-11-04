@@ -161,6 +161,11 @@ struct ClayObject {
 #define CLAY_NIL        ((ClayValue)0)
 #define CLAY_IS_NIL(v)  ((v) == CLAY_NIL)
 
+/* True only for a real heap object (not nil, not a tagged int/float) — check
+ * this before dereferencing CLAY_OBJ(v) on an argument of unknown type. */
+#define CLAY_IS_OBJ(v)      (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v))
+#define CLAY_IS_TYPE(v, t)  (CLAY_IS_OBJ(v) && CLAY_OBJ(v)->type == (t))
+
 /* Float type check: tagged float OR boxed float object */
 #define CLAY_IS_FLOAT(v) (CLAY_IS_TAGGED_FLOAT(v) || \
     (CLAY_IS_PTR(v) && !CLAY_IS_NIL(v) && CLAY_OBJ(v)->type == CLAY_TYPE_FLOAT))
@@ -207,8 +212,11 @@ const char *clay_intern(const char *name);
 void clay_method_cache_clear(void);
 void clay_method_cache_invalidate(void *methods_ptr);
 
-/* --- Inline cache (BC compiler) --- */
-void clay_ic_invalidate(void *methods_ptr);
+/* --- Inline cache invalidation hook ---
+ * Set by the bytecode VM (bc_compiler.c) so its per-callsite inline caches drop
+ * entries for a methods table that is being freed. NULL when no VM is linked
+ * in, e.g. in natively compiled programs. */
+extern void (*clay_ic_invalidate_hook)(void *methods_ptr);
 
 /* --- Memory management --- */
 ClayObject *clay_retain(ClayObject *obj);
@@ -239,6 +247,15 @@ ClayValue   clay_send_super(ClayValue receiver, ClayObject *defining_obj,
 
 /* Legacy API - still works for object pointers */
 #define clay_send(recv, sel, ac, av) clay_send_val(CLAY_VAL(recv), sel, ac, av)
+
+/* Ownership-normalizing sends, used by generated C (and matching the VM's
+ * native_send). A method's result is a new reference unless it *is* the
+ * receiver or one of the arguments (e.g. `println` returns self), in which case
+ * it is borrowed. These retain such aliased results, so the caller always owns
+ * exactly one reference to the returned value. */
+ClayValue   clay_send_owned(ClayValue receiver, const char *selector, int argc, ClayValue *argv);
+ClayValue   clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
+                                  const char *selector, int argc, ClayValue *argv);
 
 /* --- Bootstrap / core prototypes --- */
 extern ClayObject *clay_Object;
