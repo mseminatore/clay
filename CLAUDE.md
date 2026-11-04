@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Clay is a prototype-based, pure object-oriented language ("everything is an object", message-passing,
 clone-to-create) written in C99. It has two execution paths from a shared frontend: compile to
 human-readable C (native binaries) or compile to bytecode for an embedded VM. See `README.md` for
-full language documentation and `docs/prerelease-review.md` for the open bug/feature tracker.
+full language documentation.
 
 ## Build & Test
 
@@ -81,9 +81,9 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 3. **VM** (`src/vm/generated/`): Bytecode VM **generated from `src/vm/clay.yaml`** by vmgen
    (`deps/vmgen` submodule). Files under `src/vm/generated/` are marked "DO NOT EDIT" — to change VM
    behavior, modify `clay.yaml` and regenerate with `cmake --build build --target regen_vm`
-   (or `cmake -P cmake/regen_vm.cmake`; add `-- --check` to only verify). Known exception:
-   `vm.h`/`clayvm.h` carry a hand-added `CLAYVM_VAL_CELL` that vmgen cannot express yet, so
-   regenerating those two files currently breaks the build — see `docs/prerelease-review.md` §1.4.
+   (or `cmake -P cmake/regen_vm.cmake`; add `-- --check` to only verify — CI runs this). Clay-specific
+   value types are declared in `clay.yaml`'s `types` list (e.g. `cell` → `CLAYVM_VAL_CELL` /
+   `CLAYVM_CELL(v)`, used for by-reference captures).
 
 ### Key runtime concepts (in `clay.h`)
 

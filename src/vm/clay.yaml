@@ -13,6 +13,8 @@ vm:
     - bool
     - string
     - object
+    # Boxed variable (ClayCell *) for by-reference closure captures; see bc_compiler.c
+    - { name: cell, payload: pointer, comment: "ClayCell * for by-reference captures" }
 
   features:
     interned_strings: true

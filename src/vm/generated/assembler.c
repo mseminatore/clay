@@ -55,7 +55,7 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
 
     if (strcmp(mnemonic, "PUSH_CONST") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_PUSH_CONST);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "POP") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_POP);
     } else if (strcmp(mnemonic, "DUP") == 0) {
@@ -94,22 +94,22 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
         { int val = 0; sscanf(line, " %d", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "CALL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CALL);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
     } else if (strcmp(mnemonic, "CALL_NATIVE") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CALL_NATIVE);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
     } else if (strcmp(mnemonic, "RETURN") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_RETURN);
     } else if (strcmp(mnemonic, "HALT") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_HALT);
     } else if (strcmp(mnemonic, "GET_LOCAL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_GET_LOCAL);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "SET_LOCAL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "TRY_BEGIN") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_TRY_BEGIN);
         { int val = 0; sscanf(line, " %d", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }

@@ -73,6 +73,13 @@ int clayvm_optimize(uint8_t *code, size_t code_len,
                 clayvm_opt_stats_t *stats) {
     clayvm_opt_stats_t s;
     memset(&s, 0, sizeof(s));
+    /* Not every pass is generated for every spec (e.g. no constant
+     * folding when arithmetic uses typed_action), so mark the shared
+     * helpers and parameters as used to keep the output warning-free. */
+    (void)constants;
+    (void)read_u16;
+    (void)write_u16;
+    (void)nop_fill;
 
     /* Pass 2: Dead code elimination */
     s.dead_code_bytes = eliminate_dead_code(code, code_len);

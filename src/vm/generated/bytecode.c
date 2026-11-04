@@ -51,6 +51,9 @@ int clayvm_bc_save(const char *path, const clayvm_vm_t *vm,
             fwrite(&v, sizeof(v), 1, f);
             break;
         }
+        case CLAYVM_VAL_CELL:
+            fprintf(stderr, "bytecode save: constant %d has a custom type that cannot be serialized\n", i);
+            goto fail;
         default: {
             uint8_t tag = CLAYVM_BC_CONST_INT64;
             fwrite(&tag, 1, 1, f);

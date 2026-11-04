@@ -179,32 +179,6 @@ clayvm_string_t *clayvm_string_intern(clayvm_string_table_t *table, const char *
 clayvm_string_t *clayvm_string_find(clayvm_string_table_t *table, const char *str, size_t len);
 
 
-/* --- closures.h --- */
-
-
-#include <stdint.h>
-#include <stddef.h>
-
-typedef struct clayvm_upvalue {
-    clayvm_value_t *location;
-    clayvm_value_t closed;
-    int is_closed;
-    struct clayvm_upvalue *next;
-} clayvm_upvalue_t;
-
-typedef struct clayvm_closure {
-    uint16_t function_index;
-    clayvm_upvalue_t **upvalues;
-    int upvalue_count;
-} clayvm_closure_t;
-
-int  clayvm_init_closure(clayvm_closure_t *closure, uint16_t fn_index, int upvalue_count);
-void clayvm_free_closure(clayvm_closure_t *closure);
-clayvm_value_t clayvm_get_upvalue(clayvm_closure_t *closure, int index);
-void clayvm_set_upvalue(clayvm_closure_t *closure, int index, clayvm_value_t value);
-void clayvm_close_upvalue(clayvm_upvalue_t *upvalue);
-
-
 /* --- native.h --- */
 
 
@@ -248,7 +222,7 @@ typedef enum {
     CLAYVM_VAL_BOOL,
     CLAYVM_VAL_STRING,
     CLAYVM_VAL_OBJECT,
-    CLAYVM_VAL_CELL,
+    CLAYVM_VAL_CELL,  /* ClayCell * for by-reference captures */
 } clayvm_val_type_t;
 
 typedef struct {
@@ -266,7 +240,7 @@ typedef struct {
 #define CLAYVM_DOUBLE(v) ((clayvm_value_t){ .type = CLAYVM_VAL_DOUBLE, .as.f64 = (v) })
 #define CLAYVM_BOOL(v)   ((clayvm_value_t){ .type = CLAYVM_VAL_BOOL,   .as.boolean = (v) })
 #define CLAYVM_OBJ(v)    ((clayvm_value_t){ .type = CLAYVM_VAL_OBJECT, .as.obj = (void*)(v) })
-#define CLAYVM_CELL(v)   ((clayvm_value_t){ .type = CLAYVM_VAL_CELL,   .as.obj = (void*)(v) })
+#define CLAYVM_CELL(v)  ((clayvm_value_t){ .type = CLAYVM_VAL_CELL, .as.obj = (void*)(v) })
 
 typedef struct {
     clayvm_value_t *values;
@@ -582,51 +556,6 @@ clayvm_string_t *clayvm_string_intern(clayvm_string_table_t *table, const char *
     return s;
 }
 
-/* --- closures.c --- */
-
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-
-int clayvm_init_closure(clayvm_closure_t *closure, uint16_t fn_index, int upvalue_count) {
-    closure->function_index = fn_index;
-    closure->upvalue_count = upvalue_count;
-    closure->upvalues = NULL;
-    if (upvalue_count > 0) {
-        closure->upvalues = (clayvm_upvalue_t **)calloc((size_t)upvalue_count, sizeof(clayvm_upvalue_t *));
-        if (!closure->upvalues) {
-            fprintf(stderr, "closures: out of memory\n");
-            return -1;
-        }
-    }
-    return 0;
-}
-
-void clayvm_free_closure(clayvm_closure_t *closure) {
-    free(closure->upvalues);
-    closure->upvalues = NULL;
-    closure->upvalue_count = 0;
-}
-
-clayvm_value_t clayvm_get_upvalue(clayvm_closure_t *closure, int index) {
-    if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
-        return (clayvm_value_t){0};
-    return *closure->upvalues[index]->location;
-}
-
-void clayvm_set_upvalue(clayvm_closure_t *closure, int index, clayvm_value_t value) {
-    if (index < 0 || index >= closure->upvalue_count || !closure->upvalues[index])
-        return;
-    *closure->upvalues[index]->location = value;
-}
-
-void clayvm_close_upvalue(clayvm_upvalue_t *upvalue) {
-    if (!upvalue || upvalue->is_closed) return;
-    upvalue->closed = *upvalue->location;
-    upvalue->location = &upvalue->closed;
-    upvalue->is_closed = 1;
-}
-
 /* --- native.c --- */
 
 #include <stdlib.h>
@@ -787,18 +716,22 @@ void clayvm_vm_set_cleanup(clayvm_vm_t *vm, void (*cleanup)(clayvm_vm_t *vm)) {
 
 int handle_PUSH_CONST(clayvm_vm_t *vm) {
     uint16_t index = READ_UINT16();
-    clayvm_vm_push(vm, vm->constants.values[index]);
+    clayvm_value_t _val = vm->constants.values[index];
+    if (vm->retain_fn) vm->retain_fn(_val);
+    clayvm_vm_push(vm, _val);
     return 0;
 }
 
 int handle_POP(clayvm_vm_t *vm) {
-    (void)clayvm_vm_pop(vm);
+    clayvm_value_t _val = clayvm_vm_pop(vm);
+    if (vm->release_fn) vm->release_fn(_val);
     return 0;
 }
 
 int handle_DUP(clayvm_vm_t *vm) {
-    clayvm_value_t a = vm->stack[vm->sp - 1];
-    clayvm_vm_push(vm, a);
+    clayvm_value_t _val = vm->stack[vm->sp - 1];
+    if (vm->retain_fn) vm->retain_fn(_val);
+    clayvm_vm_push(vm, _val);
     return 0;
 }
 
@@ -885,18 +818,19 @@ int handle_DIV(clayvm_vm_t *vm) {
 }
 
 int handle_MOD(clayvm_vm_t *vm) {
-    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64 && b.as.i64 != 0) {
+        clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 % b.as.i64));
+    } else if (vm->arith_fallback) {
+        /* Non-int operands, or modulo by zero: let the runtime raise DivisionByZero */
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+    } else if (b.type == CLAYVM_VAL_INT64 && b.as.i64 == 0) {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "modulo by zero");
+        return -1;
     } else {
-        if (vm->arith_fallback) {
-            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
-        } else {
-            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
-            return -1;
-        }
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+        return -1;
     }
     return 0;
 }
@@ -1035,8 +969,10 @@ int handle_JUMP(clayvm_vm_t *vm) {
 
 int handle_JUMP_IF_FALSE(clayvm_vm_t *vm) {
     int16_t offset = READ_INT16();
-    clayvm_value_t a = clayvm_vm_pop(vm);
-    if (a.as.i64 == 0) vm->ip += offset;
+    clayvm_value_t _val = clayvm_vm_pop(vm);
+    int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+    if (vm->release_fn) vm->release_fn(_val);
+    if (_falsy) vm->ip += offset;
     return 0;
 }
 
@@ -1072,13 +1008,20 @@ int handle_HALT(clayvm_vm_t *vm) {
 
 int handle_GET_LOCAL(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
-    clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+    clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+    if (vm->retain_fn) vm->retain_fn(_val);
+    clayvm_vm_push(vm, _val);
     return 0;
 }
 
 int handle_SET_LOCAL(clayvm_vm_t *vm) {
     uint16_t slot = READ_UINT16();
-    vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+    uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+    clayvm_value_t _old = vm->stack[_base + slot];
+    clayvm_value_t _new = vm->stack[vm->sp - 1];
+    if (vm->retain_fn) vm->retain_fn(_new);
+    vm->stack[_base + slot] = _new;
+    if (vm->release_fn) vm->release_fn(_old);
     return 0;
 }
 
@@ -1199,7 +1142,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         uint16_t index = READ_UINT16();
-        clayvm_vm_push(vm, vm->constants.values[index]);
+        clayvm_value_t _val = vm->constants.values[index];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
         DISPATCH();
     }
 
@@ -1207,7 +1152,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        (void)clayvm_vm_pop(vm);
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        if (vm->release_fn) vm->release_fn(_val);
         DISPATCH();
     }
 
@@ -1215,8 +1161,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         if (vm->trace_enabled) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
-        clayvm_value_t a = vm->stack[vm->sp - 1];
-        clayvm_vm_push(vm, a);
+        clayvm_value_t _val = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
         DISPATCH();
     }
 
@@ -1317,15 +1264,17 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64 && b.as.i64 != 0) {
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 % b.as.i64));
+        } else if (vm->arith_fallback) {
+            /* Non-int operands, or modulo by zero: let the runtime raise DivisionByZero */
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+        } else if (b.type == CLAYVM_VAL_INT64 && b.as.i64 == 0) {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "modulo by zero");
+            return -1;
         } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
-            } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
-                return -1;
-            }
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+            return -1;
         }
         DISPATCH();
     }
@@ -1488,8 +1437,10 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         int16_t offset = READ_INT16();
-        clayvm_value_t a = clayvm_vm_pop(vm);
-        if (a.as.i64 == 0) vm->ip += offset;
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+        if (vm->release_fn) vm->release_fn(_val);
+        if (_falsy) vm->ip += offset;
         DISPATCH();
     }
 
@@ -1540,7 +1491,9 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         uint16_t slot = READ_UINT16();
-        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+        clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
         DISPATCH();
     }
 
@@ -1549,7 +1502,12 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         uint16_t slot = READ_UINT16();
-        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _old = vm->stack[_base + slot];
+        clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
+        vm->stack[_base + slot] = _new;
+        if (vm->release_fn) vm->release_fn(_old);
         DISPATCH();
     }
 
@@ -1631,16 +1589,20 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     switch (opcode) {
     case CLAYVM_OP_PUSH_CONST: {
         uint16_t index = READ_UINT16();
-        clayvm_vm_push(vm, vm->constants.values[index]);
+        clayvm_value_t _val = vm->constants.values[index];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
         break;
     }
     case CLAYVM_OP_POP: {
-        (void)clayvm_vm_pop(vm);
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        if (vm->release_fn) vm->release_fn(_val);
         break;
     }
     case CLAYVM_OP_DUP: {
-        clayvm_value_t a = vm->stack[vm->sp - 1];
-        clayvm_vm_push(vm, a);
+        clayvm_value_t _val = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
         break;
     }
     case CLAYVM_OP_ADD: {
@@ -1721,15 +1683,17 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_MOD: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 % b.as.i64)));
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64 && b.as.i64 != 0) {
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 % b.as.i64));
+        } else if (vm->arith_fallback) {
+            /* Non-int operands, or modulo by zero: let the runtime raise DivisionByZero */
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
+        } else if (b.type == CLAYVM_VAL_INT64 && b.as.i64 == 0) {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "modulo by zero");
+            return -1;
         } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_MOD);
-            } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
-                return -1;
-            }
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MOD");
+            return -1;
         }
         break;
     }
@@ -1852,8 +1816,10 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     }
     case CLAYVM_OP_JUMP_IF_FALSE: {
         int16_t offset = (int16_t)READ_UINT16();
-        clayvm_value_t a = clayvm_vm_pop(vm);
-        if (a.as.i64 == 0) vm->ip += offset;
+        clayvm_value_t _val = clayvm_vm_pop(vm);
+        int _falsy = (_val.type == CLAYVM_VAL_NIL) || (_val.as.i64 == 0);
+        if (vm->release_fn) vm->release_fn(_val);
+        if (_falsy) vm->ip += offset;
         break;
     }
     case CLAYVM_OP_CALL: {
@@ -1884,12 +1850,19 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     }
     case CLAYVM_OP_GET_LOCAL: {
         uint16_t slot = READ_UINT16();
-        clayvm_vm_push(vm, vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot]);
+        clayvm_value_t _val = vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot];
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
         break;
     }
     case CLAYVM_OP_SET_LOCAL: {
         uint16_t slot = READ_UINT16();
-        vm->stack[vm->frames[vm->frame_count - 1].base_sp + slot] = vm->stack[vm->sp - 1];
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _old = vm->stack[_base + slot];
+        clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
+        vm->stack[_base + slot] = _new;
+        if (vm->release_fn) vm->release_fn(_old);
         break;
     }
     case CLAYVM_OP_TRY_BEGIN: {
@@ -2008,7 +1981,7 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
 
     if (strcmp(mnemonic, "PUSH_CONST") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_PUSH_CONST);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "POP") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_POP);
     } else if (strcmp(mnemonic, "DUP") == 0) {
@@ -2047,22 +2020,22 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
         { int val = 0; sscanf(line, " %d", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "CALL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CALL);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
     } else if (strcmp(mnemonic, "CALL_NATIVE") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CALL_NATIVE);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_byte(as, (uint8_t)val); }
     } else if (strcmp(mnemonic, "RETURN") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_RETURN);
     } else if (strcmp(mnemonic, "HALT") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_HALT);
     } else if (strcmp(mnemonic, "GET_LOCAL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_GET_LOCAL);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "SET_LOCAL") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL);
-        { int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else if (strcmp(mnemonic, "TRY_BEGIN") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_TRY_BEGIN);
         { int val = 0; sscanf(line, " %d", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
@@ -2474,6 +2447,9 @@ int clayvm_bc_save(const char *path, const clayvm_vm_t *vm,
             fwrite(&v, sizeof(v), 1, f);
             break;
         }
+        case CLAYVM_VAL_CELL:
+            fprintf(stderr, "bytecode save: constant %d has a custom type that cannot be serialized\n", i);
+            goto fail;
         default: {
             uint8_t tag = CLAYVM_BC_CONST_INT64;
             fwrite(&tag, 1, 1, f);
@@ -2860,6 +2836,13 @@ int clayvm_optimize(uint8_t *code, size_t code_len,
                 clayvm_opt_stats_t *stats) {
     clayvm_opt_stats_t s;
     memset(&s, 0, sizeof(s));
+    /* Not every pass is generated for every spec (e.g. no constant
+     * folding when arithmetic uses typed_action), so mark the shared
+     * helpers and parameters as used to keep the output warning-free. */
+    (void)constants;
+    (void)read_u16;
+    (void)write_u16;
+    (void)nop_fill;
 
     /* Pass 2: Dead code elimination */
     s.dead_code_bytes = eliminate_dead_code(code, code_len);
