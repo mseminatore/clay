@@ -41,7 +41,7 @@ typedef enum {
     CLAYVM_OP_COUNT = 28
 } clayvm_opcode_t;
 
-static const char *clayvm_opcode_names[] = {
+static const char *const clayvm_opcode_names[] = {
     "PUSH_CONST",
     "POP",
     "DUP",

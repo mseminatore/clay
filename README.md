@@ -840,6 +840,51 @@ result = lib call("my_function", arg1, arg2)
 lib close
 ```
 
+### Native plugins
+
+Plugins are shared libraries that add new prototypes (or methods on existing
+ones) written in C. They use only the stable API in
+[`src/runtime/clay_plugin.h`](src/runtime/clay_plugin.h) — no Clay internals —
+and appear in Clay as ordinary objects:
+
+```c
+#include "clay_plugin.h"
+#include <math.h>
+
+static const ClayPluginAPI *api;
+
+static ClayPluginValue mathex_sqrt(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    (void)self;
+    if (argc < 1) { api->raise("sqrt requires 1 argument", "ArgumentError"); return 0; }
+    return api->make_float(sqrtf(api->to_float(argv[0])));
+}
+
+static ClayPluginMethod methods[] = { { "sqrt", mathex_sqrt }, { NULL, NULL } };
+
+CLAY_PLUGIN_EXPORT void clay_plugin_init(const ClayPluginAPI *clay_api) {
+    api = clay_api;
+    ClayPluginType def = { "MathEx", methods, NULL, 0 };
+    api->register_type(&def);
+}
+```
+
+```sh
+cc -shared -fPIC -I src/runtime mathex.c -o plugins/mathex.so -lm   # Linux / macOS
+cl /LD /I src\runtime mathex.c /Fe:plugins\mathex.dll                # Windows
+```
+
+```clay
+MathEx = System plugin("mathex")   // loads plugins/mathex.{so,dylib,dll}
+MathEx sqrt(16) println            // 4
+```
+
+`System plugin(name)` looks for `plugins/<name>` in the current directory, then
+next to the running script, then next to the `clay` executable; it also accepts
+a path. Every plugin in the `plugins/` folder beside the executable is loaded
+automatically at startup, so its prototypes are available without the call
+(loading the same plugin twice is harmless). The CMake build compiles the
+examples in [`examples/plugins/`](examples/plugins/) into `build/plugins/`.
+
 ### File operations
 
 ```clay
@@ -1409,6 +1454,11 @@ Included under `deps/`:
 
 **Syntax highlighting:** A TextMate grammar extension is included at `editors/vscode/clay-lang/`. To install:
 
+```sh
+# macOS / Linux — symlink into your extensions folder
+ln -s "$(pwd)/editors/vscode/clay-lang" ~/.vscode/extensions/clay-lang
+```
+
 ```powershell
 # Windows (PowerShell as Admin) — create a junction
 $ext = "$env:USERPROFILE\.vscode\extensions\clay-lang"
@@ -1433,3 +1483,9 @@ Then restart VS Code. See [`editors/vscode/clay-lang/README.md`](editors/vscode/
 The Clay extension includes a **Debug Adapter** that supports source-level debugging of `.clay` files. Set breakpoints, step through code, and inspect variables — all within VS Code. The adapter communicates with `clay --dap` over the Debug Adapter Protocol.
 
 In compiled mode, `#line` directives map generated C back to `.clay` source lines, so the Visual Studio debugger steps through Clay code directly.
+
+## License
+
+Clay is released under the [MIT License](LICENSE). Bundled and optional
+third-party components and their licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

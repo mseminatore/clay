@@ -196,7 +196,61 @@ static ClayValue do_http_request(const char *url, const char *method, const char
 #include <openssl/x509v3.h>
 #endif
 
+/* Case-insensitive prefix match */
+static int http_istarts(const char *s, const char *prefix) {
+    for (; *prefix; s++, prefix++) {
+        char a = *s, b = *prefix;
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+/* True if the header block [headers, end) has "Transfer-Encoding: ...chunked" */
+static int http_is_chunked(const char *headers, const char *end) {
+    const char *line = headers;
+    while (line < end) {
+        const char *eol = strstr(line, "\r\n");
+        if (!eol || eol > end) eol = end;
+        if (http_istarts(line, "transfer-encoding:")) {
+            for (const char *c = line + 18; c + 7 <= eol; c++)
+                if (http_istarts(c, "chunked")) return 1;
+        }
+        line = eol + 2;
+    }
+    return 0;
+}
+
+/* Decode a chunked body in place (output is never longer than input).
+ * Returns the decoded length; stops at the terminating 0-size chunk or at the
+ * first malformed chunk header. */
+static size_t http_dechunk(char *body, size_t len) {
+    size_t in = 0, out = 0;
+    while (in < len) {
+        char *endp = NULL;
+        unsigned long size = strtoul(body + in, &endp, 16);
+        if (endp == body + in) break;                      /* no hex digits */
+        char *crlf = strstr(endp, "\r\n");                 /* skip extensions */
+        if (!crlf || (size_t)(crlf - body) >= len) break;
+        in = (size_t)(crlf - body) + 2;
+        if (size == 0) break;
+        if (size > len - in) size = (unsigned long)(len - in);  /* truncated */
+        memmove(body + out, body + in, size);
+        out += size;
+        in += size;
+        if (in + 2 <= len && body[in] == '\r' && body[in + 1] == '\n') in += 2;
+    }
+    body[out] = '\0';
+    return out;
+}
+
 static ClayValue do_http_request(const char *url, const char *method, const char *req_body, size_t body_len) {
+    /* Reject control characters (CR/LF would let a URL inject request headers) */
+    for (const unsigned char *c = (const unsigned char *)url; *c; c++)
+        if (*c < 0x20 || *c == 0x7f)
+            return make_error_response("invalid URL: contains control characters");
+
     /* Parse URL */
     const char *p = url;
     int is_https = 0;
@@ -240,12 +294,17 @@ static ClayValue do_http_request(const char *url, const char *method, const char
     if (getaddrinfo(host, port_str, &hints, &res) != 0)
         return make_error_response("DNS lookup failed");
 
-    int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd < 0) { freeaddrinfo(res); return make_error_response("socket failed"); }
-    if (connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
-        freeaddrinfo(res); close(fd); return make_error_response("connect failed");
+    /* Try each resolved address (e.g. IPv6 then IPv4) until one connects */
+    int fd = -1;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) continue;
+        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
+        close(fd);
+        fd = -1;
     }
     freeaddrinfo(res);
+    if (fd < 0) return make_error_response("connect failed");
 
     /* Build HTTP request */
     char header[2048];
@@ -342,9 +401,14 @@ static ClayValue do_http_request(const char *url, const char *method, const char
     const char *body_start = buf ? strstr(buf, "\r\n\r\n") : NULL;
     size_t body_offset = 0;
     if (body_start) body_offset = (size_t)(body_start + 4 - buf);
+    size_t body_len_out = total > body_offset ? total - body_offset : 0;
+
+    /* Decode Transfer-Encoding: chunked */
+    if (body_start && http_is_chunked(buf, body_start))
+        body_len_out = http_dechunk(buf + body_offset, body_len_out);
 
     ClayValue result = make_response(status_code,
-        buf ? buf + body_offset : "", total > body_offset ? total - body_offset : 0);
+        buf ? buf + body_offset : "", body_len_out);
 
     free(buf);
     return result;
@@ -444,6 +508,69 @@ static ClayValue http_json_response(ClayObject *self, int argc, ClayValue *argv)
     return CLAY_VAL(resp);
 }
 
+/* A header value is safe to emit only if it has no CR/LF/control characters
+ * (otherwise it could inject extra headers — HTTP response splitting). */
+static int http_header_value_ok(const char *v) {
+    for (const unsigned char *c = (const unsigned char *)v; *c; c++)
+        if ((*c < 0x20 && *c != '\t') || *c == 0x7f) return 0;
+    return 1;
+}
+
+/* Largest request (headers + body) the server will buffer */
+#define HTTP_MAX_REQUEST (16u * 1024u * 1024u)
+
+/* Read one HTTP request: everything up to the end of the headers, then
+ * Content-Length bytes of body (TCP may deliver it in many pieces). `rd` reads
+ * up to `cap` bytes from the client socket, returning <= 0 on EOF/error.
+ * Returns a malloc'd, NUL-terminated buffer and its length, or NULL. */
+static char *http_read_request(int (*rd)(void *sock, char *dst, int cap), void *sock,
+                               size_t *out_len) {
+    size_t cap = 8192, len = 0, need = 0;   /* need: total bytes once headers seen */
+    char *buf = (char *)malloc(cap + 1);
+    if (!buf) return NULL;
+    for (;;) {
+        if (need && len >= need) break;
+        if (len == cap) {
+            if (cap >= HTTP_MAX_REQUEST) break;              /* too large: truncate */
+            cap *= 2;
+            char *nb = (char *)realloc(buf, cap + 1);
+            if (!nb) { free(buf); return NULL; }
+            buf = nb;
+        }
+        int n = rd(sock, buf + len, (int)(cap - len));
+        if (n <= 0) break;
+        len += (size_t)n;
+        buf[len] = '\0';
+        if (!need) {
+            char *hdr_end = strstr(buf, "\r\n\r\n");
+            if (!hdr_end) continue;
+            size_t body_at = (size_t)(hdr_end - buf) + 4;
+            size_t content_len = 0;
+            for (char *line = buf; line < hdr_end; ) {
+                char *eol = strstr(line, "\r\n");
+                if (!eol) break;
+                if (eol - line > 15) {
+                    char lower[16];
+                    for (int i = 0; i < 15; i++) {
+                        char c = line[i];
+                        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+                    }
+                    lower[15] = '\0';
+                    if (strcmp(lower, "content-length:") == 0)
+                        content_len = (size_t)strtoul(line + 15, NULL, 10);
+                }
+                line = eol + 2;
+            }
+            if (content_len > HTTP_MAX_REQUEST - body_at) content_len = HTTP_MAX_REQUEST - body_at;
+            need = body_at + content_len;
+        }
+    }
+    if (len == 0) { free(buf); return NULL; }
+    buf[len] = '\0';
+    *out_len = len;
+    return buf;
+}
+
 /* Parse an HTTP request from raw data. Modifies buf in-place (adds NULs). */
 static void parse_http_request(char *buf, size_t len,
                                 char **method_out, char **path_out,
@@ -532,6 +659,10 @@ __declspec(dllimport) int __stdcall shutdown(SOCKET, int);
 __declspec(dllimport) int __stdcall setsockopt(SOCKET, int, int, const char *, int);
 __declspec(dllimport) unsigned short __stdcall htons(unsigned short);
 
+static int win_sock_recv(void *sock, char *dst, int cap) {
+    return recv(*(SOCKET *)sock, dst, cap, 0);
+}
+
 static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 2) return CLAY_NIL;
@@ -575,17 +706,17 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         SOCKET client_fd = accept(server_fd, &client_addr, &client_len);
         if (client_fd == INVALID_SOCKET) continue;
 
-        /* Read request */
-        char buf[8192];
-        int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
-        if (n <= 0) { closesocket(client_fd); continue; }
-        buf[n] = '\0';
+        /* Read request (headers + full Content-Length body) */
+        size_t n = 0;
+        char *buf = http_read_request(win_sock_recv, &client_fd, &n);
+        if (!buf) { closesocket(client_fd); continue; }
 
         char *method_str, *path, *query, *body_data;
         size_t body_sz;
-        parse_http_request(buf, (size_t)n, &method_str, &path, &query, &body_data, &body_sz);
+        parse_http_request(buf, n, &method_str, &path, &query, &body_data, &body_sz);
 
         ClayValue req = make_request(method_str, path, query, body_data, body_sz);
+        free(buf);
 
         /* Call handler */
         ClayValue resp = clay_send(CLAY_OBJ(handler), "value", 1, &req);
@@ -604,6 +735,12 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
             if (ct != CLAY_NIL && CLAY_IS_PTR(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
             ClayValue loc = clay_get_slot(CLAY_OBJ(resp), "_location");
             if (loc != CLAY_NIL && CLAY_IS_PTR(loc)) location = clay_string_data(CLAY_OBJ(loc));
+        }
+        if (!http_header_value_ok(content_type)) content_type = "text/plain";
+        if (location && !http_header_value_ok(location)) {
+            location = NULL;
+            resp_status = 500;
+            resp_body = "Internal Server Error: invalid redirect location";
         }
 
         char http_header[512];
@@ -638,6 +775,10 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
 /* Unix/macOS server */
 #include <netinet/in.h>
 #include <signal.h>
+
+static int unix_sock_recv(void *sock, char *dst, int cap) {
+    return (int)recv(*(int *)sock, dst, (size_t)cap, 0);
+}
 
 static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
@@ -682,17 +823,17 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
         int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
         if (client_fd < 0) continue;
 
-        /* Read request */
-        char buf[8192];
-        ssize_t n = recv(client_fd, buf, sizeof(buf) - 1, 0);
-        if (n <= 0) { close(client_fd); continue; }
-        buf[n] = '\0';
+        /* Read request (headers + full Content-Length body) */
+        size_t n = 0;
+        char *buf = http_read_request(unix_sock_recv, &client_fd, &n);
+        if (!buf) { close(client_fd); continue; }
 
         char *method_str, *path, *query, *body_data;
         size_t body_sz;
-        parse_http_request(buf, (size_t)n, &method_str, &path, &query, &body_data, &body_sz);
+        parse_http_request(buf, n, &method_str, &path, &query, &body_data, &body_sz);
 
         ClayValue req = make_request(method_str, path, query, body_data, body_sz);
+        free(buf);
 
         /* Call handler */
         ClayValue resp = clay_send(CLAY_OBJ(handler), "value", 1, &req);
@@ -711,6 +852,12 @@ static ClayValue http_serve(ClayObject *self, int argc, ClayValue *argv) {
             if (ct != CLAY_NIL && CLAY_IS_PTR(ct)) content_type = clay_string_data(CLAY_OBJ(ct));
             ClayValue loc = clay_get_slot(CLAY_OBJ(resp), "_location");
             if (loc != CLAY_NIL && CLAY_IS_PTR(loc)) location = clay_string_data(CLAY_OBJ(loc));
+        }
+        if (!http_header_value_ok(content_type)) content_type = "text/plain";
+        if (location && !http_header_value_ok(location)) {
+            location = NULL;
+            resp_status = 500;
+            resp_body = "Internal Server Error: invalid redirect location";
         }
 
         char http_header[512];

@@ -46,10 +46,28 @@ static struct {
 } g_plugin_globals[MAX_PLUGIN_GLOBALS];
 static int g_plugin_global_count = 0;
 
-/* Loaded plugin handles for cleanup */
+/* Loaded plugin handles for cleanup, and the prototype each one registered
+ * last (returned by `System plugin(name)`, including on repeat loads) */
 #define MAX_PLUGIN_HANDLES 32
 static lib_handle_t g_plugin_handles[MAX_PLUGIN_HANDLES];
+static ClayObject *g_plugin_handle_proto[MAX_PLUGIN_HANDLES];
 static int g_plugin_handle_count = 0;
+
+/* Library suffixes to try, most specific first. CMake builds MODULE libraries
+ * as .so on macOS, so accept both there. */
+static const char *const g_plugin_exts[] = {
+#ifdef _WIN32
+    ".dll",
+#elif defined(__APPLE__)
+    ".dylib", ".so",
+#else
+    ".so",
+#endif
+    NULL
+};
+
+/* Directory holding the clay executable's plugins/ folder ("" = unknown) */
+static char g_exe_dir[512] = "";
 
 int clay_plugin_is_global(const char *name) {
     for (int i = 0; i < g_plugin_global_count; i++) {
@@ -256,9 +274,22 @@ static const ClayPluginAPI g_plugin_api = {
 /* ------------------------------------------------------------------ */
 
 /* Load a plugin shared library and call its init function */
-static int load_plugin_lib(const char *path) {
+/* Load a plugin library. Returns 1 on success (or if it was already loaded,
+ * in which case its init is not run again), 0 if it cannot be loaded. If
+ * proto_out is set, it receives the plugin's last registered prototype. */
+static int load_plugin_lib_ex(const char *path, ClayObject **proto_out) {
     lib_handle_t handle = LIB_OPEN(path);
     if (!handle) return 0;
+
+    /* Already loaded (dlopen/LoadLibrary return the same handle): drop the
+     * extra reference and don't re-run init, which would re-register types */
+    for (int i = 0; i < g_plugin_handle_count; i++) {
+        if (g_plugin_handles[i] == handle) {
+            LIB_CLOSE(handle);
+            if (proto_out) *proto_out = g_plugin_handle_proto[i];
+            return 1;
+        }
+    }
 
     ClayPluginInitFunc init_fn = (ClayPluginInitFunc)LIB_SYM(handle, "clay_plugin_init");
     if (!init_fn) {
@@ -267,13 +298,36 @@ static int load_plugin_lib(const char *path) {
     }
 
     /* Call plugin init — this registers types and methods */
+    int before = g_plugin_global_count;
     init_fn(&g_plugin_api);
+    ClayObject *proto = g_plugin_global_count > before
+        ? g_plugin_globals[g_plugin_global_count - 1].proto : NULL;
 
     /* Store handle for cleanup */
     if (g_plugin_handle_count < MAX_PLUGIN_HANDLES) {
+        g_plugin_handle_proto[g_plugin_handle_count] = proto;
         g_plugin_handles[g_plugin_handle_count++] = handle;
     }
+    if (proto_out) *proto_out = proto;
     return 1;
+}
+
+static int load_plugin_lib(const char *path) {
+    return load_plugin_lib_ex(path, NULL);
+}
+
+/* Copy the directory part of `path` (including the trailing separator) */
+static void dir_of(const char *path, char *out, size_t sz) {
+    out[0] = '\0';
+    if (!path) return;
+    const char *last_sep = NULL;
+    for (const char *p = path; *p; p++)
+        if (*p == '/' || *p == '\\') last_sep = p;
+    if (!last_sep) return;
+    size_t len = (size_t)(last_sep - path + 1);
+    if (len >= sz) len = sz - 1;
+    memcpy(out, path, len);
+    out[len] = '\0';
 }
 
 /* System plugin(name) — load a plugin by name from plugins/ directory */
@@ -287,34 +341,28 @@ static ClayValue system_plugin(ClayObject *self, int argc, ClayValue *argv) {
 
     const char *name = clay_string_data(CLAY_OBJ(argv[0]));
 
-    /* Build paths to try: plugins/<name>.dll, plugins/<name>.so, etc. */
-    char path[512];
-    const char *exts[] = {
-#ifdef _WIN32
-        ".dll",
-#elif defined(__APPLE__)
-        ".dylib", ".so",
-#else
-        ".so",
-#endif
-        NULL
-    };
+    /* Search plugins/ in: the current directory, the running script's
+     * directory, then the directory of the clay executable. */
+    char script_dir[512];
+    dir_of(clay_source_file, script_dir, sizeof(script_dir));
+    const char *dirs[] = { "", script_dir, g_exe_dir, NULL };
 
-    for (int i = 0; exts[i]; i++) {
-        snprintf(path, sizeof(path), "plugins/%s%s", name, exts[i]);
-        if (load_plugin_lib(path)) {
-            /* Return the last registered prototype (the one just loaded) */
-            if (g_plugin_global_count > 0)
-                return CLAY_VAL(g_plugin_globals[g_plugin_global_count - 1].proto);
-            return CLAY_TRUE;
+    char path[1024];
+    for (int d = 0; dirs[d]; d++) {
+        if (d > 0 && dirs[d][0] == '\0') continue;       /* unknown dir */
+        for (int i = 0; g_plugin_exts[i]; i++) {
+            snprintf(path, sizeof(path), "%splugins/%s%s", dirs[d], name, g_plugin_exts[i]);
+            ClayObject *proto = NULL;
+            if (load_plugin_lib_ex(path, &proto))
+                return proto ? CLAY_VAL(proto) : CLAY_TRUE;
         }
     }
 
     /* Try loading as an absolute/relative path */
-    if (load_plugin_lib(name)) {
-        if (g_plugin_global_count > 0)
-            return CLAY_VAL(g_plugin_globals[g_plugin_global_count - 1].proto);
-        return CLAY_TRUE;
+    {
+        ClayObject *proto = NULL;
+        if (load_plugin_lib_ex(name, &proto))
+            return proto ? CLAY_VAL(proto) : CLAY_TRUE;
     }
 
     char buf[512];
@@ -333,47 +381,33 @@ void clay_plugin_init_system(ClayObject *system_proto) {
     clay_set_method(system_proto, "plugin", system_plugin);
 }
 
+/* True if `fname` ends with one of the plugin library suffixes */
+static int has_plugin_ext(const char *fname) {
+    size_t nlen = strlen(fname);
+    for (int i = 0; g_plugin_exts[i]; i++) {
+        size_t elen = strlen(g_plugin_exts[i]);
+        if (nlen > elen && strcmp(fname + nlen - elen, g_plugin_exts[i]) == 0) return 1;
+    }
+    return 0;
+}
+
 /* Auto-discover and load plugins from directory next to executable */
 void clay_plugin_auto_load(const char *exe_path) {
-    char dir[512];
-    dir[0] = '\0';
+    dir_of(exe_path, g_exe_dir, sizeof(g_exe_dir));
 
-    /* Extract directory from exe path */
-    if (exe_path) {
-        const char *last_sep = NULL;
-        for (const char *p = exe_path; *p; p++) {
-            if (*p == '/' || *p == '\\') last_sep = p;
-        }
-        if (last_sep) {
-            size_t len = (size_t)(last_sep - exe_path + 1);
-            if (len >= sizeof(dir)) len = sizeof(dir) - 1;
-            memcpy(dir, exe_path, len);
-            dir[len] = '\0';
-        }
-    }
-
-    char plugins_dir[512];
-    snprintf(plugins_dir, sizeof(plugins_dir), "%splugins", dir);
-
-    const char *ext =
-#ifdef _WIN32
-        ".dll";
-#elif defined(__APPLE__)
-        ".dylib";
-#else
-        ".so";
-#endif
+    char plugins_dir[600];
+    snprintf(plugins_dir, sizeof(plugins_dir), "%splugins", g_exe_dir);
 
     /* Try to enumerate files in plugins_dir */
 #ifdef _WIN32
     {
-        char pattern[512];
-        snprintf(pattern, sizeof(pattern), "%s\\*%s", plugins_dir, ext);
+        char pattern[700];
+        snprintf(pattern, sizeof(pattern), "%s\\*.dll", plugins_dir);
         WIN32_FIND_DATAA fd;
         HANDLE hFind = FindFirstFileA(pattern, &fd);
         if (hFind == INVALID_HANDLE_VALUE) return;
         do {
-            char path[512];
+            char path[1024];
             snprintf(path, sizeof(path), "%s\\%s", plugins_dir, fd.cFileName);
             load_plugin_lib(path);
         } while (FindNextFileA(hFind, &fd));
@@ -383,12 +417,10 @@ void clay_plugin_auto_load(const char *exe_path) {
     {
         DIR *dp = opendir(plugins_dir);
         if (!dp) return;
-        size_t ext_len = strlen(ext);
         struct dirent *ent;
         while ((ent = readdir(dp))) {
-            size_t nlen = strlen(ent->d_name);
-            if (nlen > ext_len && strcmp(ent->d_name + nlen - ext_len, ext) == 0) {
-                char path[512];
+            if (has_plugin_ext(ent->d_name)) {
+                char path[1024];
                 snprintf(path, sizeof(path), "%s/%s", plugins_dir, ent->d_name);
                 load_plugin_lib(path);
             }

@@ -4,6 +4,12 @@
   "description": "Syntax highlighting, snippets, debugging, and language support for the Clay programming language",
   "version": "0.2.0",
   "publisher": "clay-lang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mseminatore/clay.git",
+    "directory": "editors/vscode/clay-lang"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },

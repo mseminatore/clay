@@ -495,6 +495,13 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
     vm->running = 1;
 
 #if defined(__GNUC__) || defined(__clang__)
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-label-as-value"
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
     static void *dispatch_table[] = {
         &&op_PUSH_CONST,
         &&op_POP,
@@ -955,6 +962,11 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
     }
 
 #undef DISPATCH
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#else
+#pragma GCC diagnostic pop
+#endif
 #else
     while (vm->running && vm->ip < vm->code_len) {
         uint8_t opcode = vm->code[vm->ip++];
