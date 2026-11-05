@@ -15,14 +15,18 @@
 #define BC_INITIAL_CHUNKS 64
 
 /* A compiled bytecode chunk (block or method body) */
+/* Most variables one block can capture from enclosing scopes (each name that
+ * may be an implicit slot also captures its hidden "?name" flag) */
+#define BC_MAX_CAPTURES 64
+
 typedef struct {
     uint8_t *code;       /* dynamically allocated */
     size_t  len;
     int     param_count;
     char   *param_names[16]; /* up to 16 params */
     int     capture_count;
-    char   *capture_names[16]; /* names of captured variables */
-    int     capture_slots[16]; /* enclosing scope slot index for each capture */
+    char   *capture_names[BC_MAX_CAPTURES]; /* names of captured variables */
+    int     capture_slots[BC_MAX_CAPTURES]; /* enclosing scope slot index for each capture */
     int     local_count;       /* total locals (params + temps) in this chunk */
     int    *line_map;    /* source line map: line_map[offset] = source line */
 } BcChunk;
@@ -79,6 +83,9 @@ typedef struct {
     int native_raise;
     int native_make_range;
     int native_load_self;
+    int native_self_has_slot;   /* self_has_slot(name) → 1/0 (implicit-slot fallback) */
+    int native_set_self_slot;   /* set_self_slot(value, name) → value */
+    int native_cell_set_rev;    /* cell_set_rev(value, cell) → value */
 
     int had_error;
 

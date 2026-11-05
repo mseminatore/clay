@@ -64,7 +64,11 @@ typedef uintptr_t ClayValue;
 #define CLAY_INT_MAX  (INTPTR_MAX >> 2)
 #define CLAY_INT_MIN  (INTPTR_MIN >> 2)
 
-ClayValue clay_int(intptr_t n);
+ClayValue clay_int(intptr_t n);          /* raises OverflowError outside the range */
+void      clay_format_float(float f, char *buf, size_t sz);  /* shortest round-trip text */
+intptr_t  clay_int_mul(intptr_t a, intptr_t b);   /* product; raises on overflow */
+intptr_t  clay_float_to_int(float f);  /* truncate; raises OverflowError if out of range */
+void      clay_raise_overflow(void);
 intptr_t  clay_to_int(ClayValue v);
 int       clay_is_int(ClayValue v);
 

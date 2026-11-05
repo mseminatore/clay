@@ -42,7 +42,7 @@ struct AstNode {
 
     union {
         /* NODE_INT_LIT */
-        struct { long value; } int_lit;
+        struct { long long value; } int_lit;
 
         /* NODE_FLOAT_LIT */
         struct { float value; } float_lit;

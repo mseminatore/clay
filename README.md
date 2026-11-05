@@ -328,14 +328,28 @@ Point = Object clone {
 }
 ```
 
-The lookup order is: local variable → upvalue (captured variable) → `self` slot → global. Slot writes also resolve implicitly — if a name matches a slot defined in the enclosing `clone` block, `x = val` writes to the slot (Io-style `updateSlot` semantics):
+The lookup order is: local variable → upvalue (captured variable) → `self` slot → global. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable:
 
 ```clay
 Point moveTo(nx, ny) {
   x = nx       // writes to slot — no self needed
   y = ny       // same here
 }
+
+Counter = Object clone {
+  new() {
+    c = self clone
+    c count = 0     // slot created at runtime, not declared in the clone block
+    c
+  }
+  bump() {
+    count = count + 1   // still a slot write: this Counter has a `count` slot
+    tmp = 1             // no `tmp` slot, so this is a local
+  }
+}
 ```
+
+The choice is made once per call, when the method (or a block inside it) starts.
 
 Use explicit `self` when a parameter name shadows a slot name:
 
@@ -639,14 +653,17 @@ arr setAt(0, "y")             // set element at index
 
 ### Numbers
 
-Integers are tagged 62-bit values and floats are tagged 32-bit IEEE values — neither allocates. Mixed operations promote to float. Integer overflow currently wraps silently.
+Integers and floats are stored directly in the value (no allocation). Mixed operations promote to float.
+
+- **Integers** are 62-bit signed: from −2⁶¹ to 2⁶¹ − 1 (±2,305,843,009,213,693,951). A result outside that range raises `OverflowError` rather than wrapping; convert with `toFloat` first if you need larger magnitudes. Integer literals beyond the range are a compile error.
+- **Floats** are 32-bit IEEE 754 *single* precision: about 7 significant decimal digits, magnitudes up to ~3.4 × 10³⁸. Integers above 2²⁴ (16,777,216) are not all exactly representable, and small decimal fractions are rounded (`1000000.0 + 0.1` is `1000000.125` internally). Floats print as the shortest text that reads back as the same value — `0.1`, `1000000.1`, `0.33333334` — in plain notation below 10⁹ and exponent notation beyond (`1e+20`).
 
 ```clay
 42                            // integer
 3.14                          // float
 10 / 3                        // 3 (integer division)
-10 toFloat / 3                // 3.33333 (float division)
-3.14 + 2                      // 5.14 (mixed → float)
+10 toFloat / 3                // 3.3333333 (float division)
+3.14 + 2                      // 5.1400003 (mixed → float; 32-bit rounding shows)
 3.14 toInt                    // 3 (truncation)
 (-5) abs                      // 5
 5 times { |i| i println }  // prints 0..4
@@ -767,7 +784,7 @@ try {
 }
 ```
 
-Error types include `DivisionByZero`, `MethodNotFound`, `NilError`, `TypeError`, and `RuntimeError` (for user-raised strings).
+Error types include `DivisionByZero`, `OverflowError` (integer results outside the 62-bit range), `MethodNotFound`, `NilError`, `TypeError` (e.g. a non-number passed to arithmetic), and `RuntimeError` (for user-raised strings).
 
 ### Stack traces
 

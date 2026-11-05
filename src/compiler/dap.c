@@ -282,7 +282,10 @@ static char *dap_format_clay_value(ClayValue cv) {
     if (CLAY_IS_NIL(cv)) {
         return strdup("nil");
     } else if (CLAY_IS_INT(cv)) {
-        snprintf(buf, sizeof(buf), "%ld", (long)clay_to_int(cv));
+        snprintf(buf, sizeof(buf), "%lld", (long long)clay_to_int(cv));
+        return strdup(buf);
+    } else if (CLAY_IS_TAGGED_FLOAT(cv)) {
+        clay_format_float(clay_float_untag(cv), buf, sizeof(buf));
         return strdup(buf);
     } else if (cv == CLAY_TRUE) {
         return strdup("true");
@@ -298,7 +301,7 @@ static char *dap_format_clay_value(ClayValue cv) {
                 return strdup(s ? s : "");
             }
             case CLAY_TYPE_FLOAT: {
-                snprintf(buf, sizeof(buf), "%g", obj->as.number_float.value);
+                clay_format_float(obj->as.number_float.value, buf, sizeof(buf));
                 return strdup(buf);
             }
             case CLAY_TYPE_ARRAY:

@@ -102,7 +102,13 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   lookup. Slot *writes* are always local to the receiving object (no chain walk).
 - **Error handling**: `clay_raise()`/`clay_try_push()`/`clay_try_pop()` implement try/catch via
   `setjmp`/`longjmp` over a linked list of frames on the C stack (no fixed nesting limit). Built-in
-  error types: `DivisionByZero`, `MethodNotFound`, `NilError`, `TypeError`, `RuntimeError`.
+  error types: `DivisionByZero`, `OverflowError`, `MethodNotFound`, `NilError`, `TypeError`, `RuntimeError`.
+- **Integer range**: always build tagged ints with `clay_int()` (raises `OverflowError` outside 62 bits),
+  multiply with `clay_int_mul()` and convert floats with `clay_float_to_int()`; never cast/shift by hand.
+  Format floats with `clay_format_float()` (shortest round-trip text), integers with `%lld` + `(long long)`.
+- **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
+  time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
+  codegen) set at method/block entry — keep the two in sync.
 
 ## Conventions
 

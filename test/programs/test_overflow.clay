@@ -1,0 +1,85 @@
+// test_overflow.clay — 62-bit integer range: overflow raises OverflowError,
+// slot fallback for bare assignments in methods
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    ok(v) {
+        (v == true) ifTrue { self _p = self _p + 1 }
+        (!(v == true)) ifTrue { self _f = self _f + 1; "FAIL: expected true" println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+max = 2305843009213693951          // 2^61 - 1, largest Clay integer
+min = 0 - max - 1                  // -2^61
+
+// In-range arithmetic is unaffected
+Test eq(max - 1 + 1, max)
+Test eq(min + 1 - 1, min)
+Test eq(1073741824 * 1073741824, 1152921504606846976)
+Test eq(0 - 7 * 3, 0 - 21)
+
+// Overflow raises instead of wrapping
+Test eq(try { max + 1 } catch { |e| e type() }, "OverflowError")
+Test eq(try { min - 1 } catch { |e| e type() }, "OverflowError")
+Test eq(try { max * 2 } catch { |e| e type() }, "OverflowError")
+Test eq(try { 3037000500 * 3037000500 } catch { |e| e type() }, "OverflowError")
+Test eq(try { min / (0 - 1) } catch { |e| e type() }, "OverflowError")
+
+// Repeated doubling in a VM local stops at the range limit
+y = 1
+i = 0
+r = try { { i < 70 } whileTrue { y = y * 2
+  i = i + 1 }
+  "no error" } catch { |e| e type() }
+Test eq(r, "OverflowError")
+Test eq(i, 60)        // 2^60 fits; the 61st doubling would exceed 2^61 - 1
+
+// Conversions that cannot be represented
+Test eq(try { 1e30 toInt } catch { |e| e type() }, "OverflowError")
+Test eq(try { "99999999999999999999" toInt } catch { |e| e type() }, "OverflowError")
+Test eq((max toFloat > 1e18), true)
+
+// Implicit-slot fallback: a bare assignment in a method writes a slot the
+// object already has (here created in the constructor), instead of a local
+Counter = Object clone {
+    new() {
+        c = self clone
+        c count = 0
+        c total = 0
+        c
+    }
+    bump() {
+        count = count + 1          // slot created in new(), not declared in clone block
+        self
+    }
+    add(x) {
+        (x > 0) ifTrue { total = total + x }   // inside a block within the method
+        self
+    }
+    scratch() {
+        tmp = 41                    // no such slot: stays a local
+        tmp + 1
+    }
+}
+k = Counter new
+k bump bump bump
+Test eq(k count, 3)
+k add(5) add(0 - 1) add(7)
+Test eq(k total, 12)
+Test eq(k scratch, 42)
+Test eq(k hasSlot("tmp"), false)
+
+Test done()

@@ -736,58 +736,78 @@ int handle_DUP(clayvm_vm_t *vm) {
 }
 
 int handle_ADD(clayvm_vm_t *vm) {
-    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
-    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
-    } else {
-        if (vm->arith_fallback) {
-            vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+        /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+         * the runtime fallback, which raises OverflowError */
+        const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+        int64_t r = a.as.i64 + b.as.i64;   /* in-range operands cannot overflow int64 */
+        if (r < lo || r > hi) {
+            if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+            else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
         } else {
-            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
-            return -1;
+            clayvm_vm_push(vm, CLAYVM_INT64(r));
         }
+    } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 + b.as.f64));
+    } else if (vm->arith_fallback) {
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+        return -1;
     }
     return 0;
 }
 
 int handle_SUB(clayvm_vm_t *vm) {
-    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
-    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
-    } else {
-        if (vm->arith_fallback) {
-            vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+        /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+         * the runtime fallback, which raises OverflowError */
+        const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+        int64_t r = a.as.i64 - b.as.i64;   /* in-range operands cannot overflow int64 */
+        if (r < lo || r > hi) {
+            if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+            else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
         } else {
-            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
-            return -1;
+            clayvm_vm_push(vm, CLAYVM_INT64(r));
         }
+    } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 - b.as.f64));
+    } else if (vm->arith_fallback) {
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+        return -1;
     }
     return 0;
 }
 
 int handle_MUL(clayvm_vm_t *vm) {
-    (void)vm;
     clayvm_value_t b = clayvm_vm_pop(vm);
     clayvm_value_t a = clayvm_vm_pop(vm);
-    if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-        clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
-    } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-        clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
-    } else {
-        if (vm->arith_fallback) {
-            vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+    if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+        /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+         * the runtime fallback, which raises OverflowError */
+        const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+        int64_t x = a.as.i64 < 0 ? -a.as.i64 : a.as.i64;
+        int64_t y = b.as.i64 < 0 ? -b.as.i64 : b.as.i64;
+        if (x != 0 && y != 0 && x > hi / y) {
+            if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+            else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
         } else {
-            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
-            return -1;
+            clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 * b.as.i64));
         }
+        (void)lo;
+    } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 * b.as.f64));
+    } else if (vm->arith_fallback) {
+        vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+        return -1;
     }
     return 0;
 }
@@ -803,6 +823,10 @@ int handle_DIV(clayvm_vm_t *vm) {
                 clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
                 return -1;
             }
+        } else if (a.as.i64 == -(INT64_C(1) << 61) && b.as.i64 == -1) {
+            /* MIN / -1 = 2^61 is out of Clay's 62-bit range → OverflowError */
+            if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+            else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
         } else {
             clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
         }
@@ -1180,17 +1204,24 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
-        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
-        } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+             * the runtime fallback, which raises OverflowError */
+            const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+            int64_t r = a.as.i64 + b.as.i64;   /* in-range operands cannot overflow int64 */
+            if (r < lo || r > hi) {
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
-                return -1;
+                clayvm_vm_push(vm, CLAYVM_INT64(r));
             }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 + b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+            return -1;
         }
         DISPATCH();
     }
@@ -1201,17 +1232,24 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
-        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
-        } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+             * the runtime fallback, which raises OverflowError */
+            const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+            int64_t r = a.as.i64 - b.as.i64;   /* in-range operands cannot overflow int64 */
+            if (r < lo || r > hi) {
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
-                return -1;
+                clayvm_vm_push(vm, CLAYVM_INT64(r));
             }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 - b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+            return -1;
         }
         DISPATCH();
     }
@@ -1222,17 +1260,26 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         }
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
-        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
-        } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+             * the runtime fallback, which raises OverflowError */
+            const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+            int64_t x = a.as.i64 < 0 ? -a.as.i64 : a.as.i64;
+            int64_t y = b.as.i64 < 0 ? -b.as.i64 : b.as.i64;
+            if (x != 0 && y != 0 && x > hi / y) {
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
-                return -1;
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 * b.as.i64));
             }
+            (void)lo;
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 * b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+            return -1;
         }
         DISPATCH();
     }
@@ -1251,6 +1298,10 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
                     clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
                     return -1;
                 }
+            } else if (a.as.i64 == -(INT64_C(1) << 61) && b.as.i64 == -1) {
+                /* MIN / -1 = 2^61 is out of Clay's 62-bit range → OverflowError */
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
                 clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
             }
@@ -1620,51 +1671,74 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     case CLAYVM_OP_ADD: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 + b.as.i64)));
-        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 + b.as.f64)));
-        } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+             * the runtime fallback, which raises OverflowError */
+            const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+            int64_t r = a.as.i64 + b.as.i64;   /* in-range operands cannot overflow int64 */
+            if (r < lo || r > hi) {
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
-                return -1;
+                clayvm_vm_push(vm, CLAYVM_INT64(r));
             }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 + b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_ADD);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in ADD");
+            return -1;
         }
         break;
     }
     case CLAYVM_OP_SUB: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 - b.as.i64)));
-        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 - b.as.f64)));
-        } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+             * the runtime fallback, which raises OverflowError */
+            const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+            int64_t r = a.as.i64 - b.as.i64;   /* in-range operands cannot overflow int64 */
+            if (r < lo || r > hi) {
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
-                return -1;
+                clayvm_vm_push(vm, CLAYVM_INT64(r));
             }
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 - b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_SUB);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in SUB");
+            return -1;
         }
         break;
     }
     case CLAYVM_OP_MUL: {
         clayvm_value_t b = clayvm_vm_pop(vm);
         clayvm_value_t a = clayvm_vm_pop(vm);
-        if (b.type == CLAYVM_VAL_INT64 && a.type == CLAYVM_VAL_INT64) {
-            clayvm_vm_push(vm, CLAYVM_INT64((a.as.i64 * b.as.i64)));
-        } else if (b.type == CLAYVM_VAL_DOUBLE && a.type == CLAYVM_VAL_DOUBLE) {
-            clayvm_vm_push(vm, CLAYVM_DOUBLE((a.as.f64 * b.as.f64)));
-        } else {
-            if (vm->arith_fallback) {
-                vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+        if (a.type == CLAYVM_VAL_INT64 && b.type == CLAYVM_VAL_INT64) {
+            /* Clay ints are 62-bit ([-2^61, 2^61-1]); out-of-range results go to
+             * the runtime fallback, which raises OverflowError */
+            const int64_t lo = -(INT64_C(1) << 61), hi = (INT64_C(1) << 61) - 1;
+            int64_t x = a.as.i64 < 0 ? -a.as.i64 : a.as.i64;
+            int64_t y = b.as.i64 < 0 ? -b.as.i64 : b.as.i64;
+            if (x != 0 && y != 0 && x > hi / y) {
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
-                clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
-                return -1;
+                clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 * b.as.i64));
             }
+            (void)lo;
+        } else if (a.type == CLAYVM_VAL_DOUBLE && b.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(a.as.f64 * b.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, b, CLAYVM_OP_MUL);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in MUL");
+            return -1;
         }
         break;
     }
@@ -1679,6 +1753,10 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
                     clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "division by zero");
                     return -1;
                 }
+            } else if (a.as.i64 == -(INT64_C(1) << 61) && b.as.i64 == -1) {
+                /* MIN / -1 = 2^61 is out of Clay's 62-bit range → OverflowError */
+                if (vm->arith_fallback) vm->arith_fallback(vm, a, b, CLAYVM_OP_DIV);
+                else { clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "integer overflow"); return -1; }
             } else {
                 clayvm_vm_push(vm, CLAYVM_INT64(a.as.i64 / b.as.i64));
             }

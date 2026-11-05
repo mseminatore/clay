@@ -161,6 +161,47 @@ static const char *c_safe_name(const char *name) {
     return name;
 }
 
+/* --- Implicit-slot fallback (mirrors bc_compiler.c) ---
+ * A bare assignment `x = v` in a method (or a block inside one) normally makes
+ * `x` a local. If self (or its prototype chain) already has a slot `x` when the
+ * method/block is entered, `x` refers to that slot instead. Each such local `x`
+ * gets a companion ClayValue flag `__isslot_x` (CLAY_TRUE/CLAY_FALSE), set at
+ * entry; reads and writes of `x` branch on it, and blocks that capture `x`
+ * also capture the flag and _method_self. */
+
+static int is_local(CodeGen *cg, const char *name);
+static int is_boxed(CodeGen *cg, const char *name);
+
+static void slot_flag_name(const char *name, char *out, size_t sz) {
+    snprintf(out, sz, "__isslot_%s", name);
+}
+
+/* True if `name` has an implicit-slot flag in scope */
+static int has_slot_flag(CodeGen *cg, const char *name) {
+    char flag[160];
+    slot_flag_name(name, flag, sizeof(flag));
+    return is_local(cg, flag);
+}
+
+/* C expression reading the flag for `name` */
+static void slot_flag_expr(CodeGen *cg, const char *name, char *out, size_t sz) {
+    char flag[160];
+    slot_flag_name(name, flag, sizeof(flag));
+    if (is_boxed(cg, flag)) snprintf(out, sz, "%s_cell->value", flag);
+    else snprintf(out, sz, "%s", flag);
+}
+
+/* C expression for the method's self as a ClayObject* */
+static const char *method_self_expr(CodeGen *cg) {
+    return is_boxed(cg, "_method_self") ? "CLAY_OBJ(_method_self_cell->value)" : "self";
+}
+
+/* C expression reading local `name` (boxed or not) */
+static void local_read_expr(CodeGen *cg, const char *name, char *out, size_t sz) {
+    if (is_boxed(cg, name)) snprintf(out, sz, "%s_cell->value", c_safe_name(name));
+    else snprintf(out, sz, "%s", c_safe_name(name));
+}
+
 /* --- Forward declarations for collecting methods/blocks --- */
 
 /* Capture list for blocks (closure-captured variables) */
@@ -367,7 +408,7 @@ static char *emit_expr(CodeGen *cg, AstNode *node);
 static char *emit_int_lit(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
-    fprintf(cg->out, "ClayValue %s = clay_int(%ld);\n", t, node->as.int_lit.value);
+    fprintf(cg->out, "ClayValue %s = clay_int((intptr_t)%lldLL);\n", t, node->as.int_lit.value);
     return t;
 }
 
@@ -513,6 +554,16 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
                            CaptureList *caps, CodeGen *cg);
 static int is_known_slot(CodeGen *cg, const char *name);
 
+/* When capturing a flagged name, also capture its flag and the method's self */
+static void capture_slot_flag(CaptureList *caps, const char *name, CodeGen *cg) {
+    if (!has_slot_flag(cg, name)) return;
+    char flag[160];
+    slot_flag_name(name, flag, sizeof(flag));
+    if (!capture_has(caps, flag)) capture_add(caps, flag);
+    if (is_local(cg, "_method_self") && !capture_has(caps, "_method_self"))
+        capture_add(caps, "_method_self");
+}
+
 static void scan_free_vars_list(NodeList *list, char **block_params, int param_count,
                                 CaptureList *caps, CodeGen *cg) {
     for (int i = 0; i < list->count; i++)
@@ -532,6 +583,7 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             /* If it's a local in the enclosing scope, it needs capture */
             if (is_local(cg, name)) {
                 capture_add(caps, name);
+                capture_slot_flag(caps, name, cg);
             } else if (is_local(cg, "_method_self") && !capture_has(caps, "_method_self")) {
                 /* Not a local — in a method context this will be a slot read
                  * from the method's self, so capture _method_self */
@@ -587,6 +639,15 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
                     !capture_has(caps, aname) &&
                     is_local(cg, aname)) {
                     capture_add(caps, aname);
+                    capture_slot_flag(caps, aname, cg);
+                }
+                /* A new bare assignment in a block inside a method may resolve to
+                 * a slot of the method's self (implicit-slot fallback) */
+                if (!is_builtin_global(aname) && !is_local(cg, aname) &&
+                    !name_in_list(aname, block_params, param_count) &&
+                    is_local(cg, "_method_self") &&
+                    !capture_has(caps, "_method_self")) {
+                    capture_add(caps, "_method_self");
                 }
                 /* Slot write in a block inside a method needs _method_self */
                 if (is_known_slot(cg, aname) &&
@@ -645,7 +706,13 @@ static int is_known_slot(CodeGen *cg, const char *name) {
 static char *emit_ident(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
-    if (is_boxed(cg, node->as.ident.name)) {
+    if (has_slot_flag(cg, node->as.ident.name)) {
+        char flag[200], local[200];
+        slot_flag_expr(cg, node->as.ident.name, flag, sizeof(flag));
+        local_read_expr(cg, node->as.ident.name, local, sizeof(local));
+        fprintf(cg->out, "ClayValue %s = CLAY_IS_TRUTHY(%s) ? clay_get_slot(%s, \"%s\") : %s;\n",
+                t, flag, method_self_expr(cg), node->as.ident.name, local);
+    } else if (is_boxed(cg, node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, c_safe_name(node->as.ident.name));
     } else if (is_local(cg, node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s;\n", t, c_safe_name(node->as.ident.name));
@@ -864,7 +931,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     } else if (strcmp(op, "-") == 0) {
         fprintf(cg->out, "%s = clay_int(clay_to_int(%s) - clay_to_int(%s));\n", t, left, right);
     } else if (strcmp(op, "*") == 0) {
-        fprintf(cg->out, "%s = clay_int(clay_to_int(%s) * clay_to_int(%s));\n", t, left, right);
+        fprintf(cg->out, "%s = clay_int(clay_int_mul(clay_to_int(%s), clay_to_int(%s)));\n", t, left, right);
     } else if (strcmp(op, "/") == 0) {
         fprintf(cg->out, "if (clay_to_int(%s) == 0) clay_raise(CLAY_VAL(clay_error_new(\"division by zero\", \"DivisionByZero\")));\n", right);
         emit_indent(cg);
@@ -1198,6 +1265,41 @@ static char *emit_expr(CodeGen *cg, AstNode *node) {
     }
 }
 
+/* At method/block entry: declare each local created by a top-level bare
+ * assignment, with its implicit-slot flag (does self already have the slot?) */
+static void emit_slot_fallback_decls(CodeGen *cg, NodeList *body) {
+    for (int i = 0; i < body->count; i++) {
+        AstNode *stmt = body->items[i];
+        if (!stmt || stmt->type != NODE_ASSIGN) continue;
+        const char *name = stmt->as.assign.name;
+        if (is_local(cg, name) || is_known_slot(cg, name) || is_builtin_global(name))
+            continue;
+        char flag[160], cname[160];
+        slot_flag_name(name, flag, sizeof(flag));
+        snprintf(cname, sizeof(cname), "%s", c_safe_name(name));
+        fprintf(cg->out, "    ClayValue %s = CLAY_NIL;\n", cname);
+        fprintf(cg->out, "    ClayValue %s = clay_has_slot(%s, \"%s\") ? CLAY_TRUE : CLAY_FALSE;\n",
+                flag, method_self_expr(cg), name);
+        push_local(cg, name);
+        push_local(cg, flag);
+    }
+}
+
+/* Emit a write of `val` to flagged name `name` (slot or local per its flag) */
+static void emit_flagged_write(CodeGen *cg, const char *name, const char *val) {
+    char flag[200];
+    slot_flag_expr(cg, name, flag, sizeof(flag));
+    fprintf(cg->out, "if (CLAY_IS_TRUTHY(%s)) { clay_set_slot(%s, \"%s\", %s); } else { ",
+            flag, method_self_expr(cg), name, val);
+    if (is_boxed(cg, name)) {
+        fprintf(cg->out, "%s_cell->value = %s; }\n", c_safe_name(name), val);
+    } else {
+        char cname[160];
+        snprintf(cname, sizeof(cname), "%s", c_safe_name(name));
+        fprintf(cg->out, "clay_release_val(%s); %s = %s; }\n", cname, cname, val);
+    }
+}
+
 /* --- Emit statements --- */
 
 static void emit_stmt(CodeGen *cg, AstNode *node) {
@@ -1437,6 +1539,7 @@ static void emit_method_bodies(CodeGen *cg) {
                 }
             }
             fprintf(cg->out, "    ClayValue __rv = CLAY_NIL;\n");
+            emit_slot_fallback_decls(cg, &node->as.method_def.body);
             int saved_indent = cg->indent;
             cg->indent = 1;
             for (int i = 0; i < node->as.method_def.body.count; i++) {
@@ -1445,7 +1548,9 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt->as.assign.value);
                     if (val) {
                         emit_indent(cg);
-                        if (is_boxed(cg, stmt->as.assign.name)) {
+                        if (has_slot_flag(cg, stmt->as.assign.name)) {
+                            emit_flagged_write(cg, stmt->as.assign.name, val);
+                        } else if (is_boxed(cg, stmt->as.assign.name)) {
                             fprintf(cg->out, "%s_cell->value = %s;\n", c_safe_name(stmt->as.assign.name), val);
                         } else if (is_method_local(cg, stmt->as.assign.name)) {
                             /* Reassignment to existing method local — release old value */
@@ -1501,6 +1606,9 @@ static void emit_method_bodies(CodeGen *cg) {
                 push_local(cg, param->as.ident.name);
             }
             fprintf(cg->out, "    ClayValue __rv = CLAY_NIL;\n");
+            /* Inside a method: new bare assignments may resolve to self's slots */
+            if (cg->in_method && is_boxed(cg, "_method_self"))
+                emit_slot_fallback_decls(cg, &node->as.block.body);
             int saved_indent = cg->indent;
             cg->indent = 1;
             for (int i = 0; i < node->as.block.body.count; i++) {
@@ -1509,7 +1617,10 @@ static void emit_method_bodies(CodeGen *cg) {
                     char *val = emit_expr(cg, stmt->as.assign.value);
                     if (val) {
                         emit_indent(cg);
-                        if (is_known_slot(cg, stmt->as.assign.name)) {
+                        if (has_slot_flag(cg, stmt->as.assign.name) &&
+                            !is_known_slot(cg, stmt->as.assign.name)) {
+                            emit_flagged_write(cg, stmt->as.assign.name, val);
+                        } else if (is_known_slot(cg, stmt->as.assign.name)) {
                             /* Slot write from block inside method — use _method_self */
                             if (is_boxed(cg, "_method_self")) {
                                 fprintf(cg->out, "clay_set_slot(CLAY_OBJ(_method_self_cell->value), \"%s\", %s);\n",

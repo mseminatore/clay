@@ -814,7 +814,7 @@ void clay_inspect(ClayObject *obj) {
             first = 0;
             fprintf(stderr, "%s=", (const char *)key);
             if (CLAY_IS_INT(cv)) {
-                fprintf(stderr, "%ld", (long)clay_to_int(cv));
+                fprintf(stderr, "%lld", (long long)clay_to_int(cv));
             } else if (CLAY_IS_NIL(cv)) {
                 fprintf(stderr, "nil");
             } else if (cv == CLAY_TRUE) {

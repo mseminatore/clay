@@ -131,4 +131,18 @@ Test near(x, 6.0)
 x /= 3.0
 Test near(x, 2.0)
 
+
+// Float formatting: shortest text that reads back as the same 32-bit float,
+// plain notation below 1e9 (floats are IEEE 754 single precision)
+Test eq(0.1 toString, "0.1")
+Test eq((0.1 + 0.2) toString, "0.3")
+Test eq(2.5 toString, "2.5")
+Test eq(50.0 toString, "50")
+Test eq(1000000.0 toString, "1000000")
+Test eq((1000000.0 + 0.1) toString, "1000000.1")
+Test eq(16777217.0 toString, "16777216")     // 2^24 + 1 is not representable
+Test eq((1.0 / 3) toString, "0.33333334")
+Test eq(1e20 toString, "1e+20")
+Test eq(0.00001 toString, "1e-05")
+
 Test done()

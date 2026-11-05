@@ -18,6 +18,8 @@
 #include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -85,6 +87,15 @@ static void parser_error(Parser *p, const char *msg) {
     fprintf(stderr, "%s:%d: error: %s (got '%.*s')\n",
             p->filename, p->current.line, msg,
             p->current.length, p->current.start);
+}
+
+/* Report an error about the token just consumed (p->previous) */
+static void parser_error_prev(Parser *p, const char *msg) {
+    if (p->had_error) return;
+    p->had_error = 1;
+    fprintf(stderr, "%s:%d: error: %s: %.*s\n",
+            p->filename, p->previous.line, msg,
+            p->previous.length, p->previous.start);
 }
 
 static void parser_advance(Parser *p) {
@@ -266,7 +277,15 @@ static AstNode *parse_primary(Parser *p) {
     if (match(p, TOK_INT)) {
         AstNode *node = ast_new(NODE_INT_LIT, p->previous.line);
         char *s = token_strdup(&p->previous);
-        node->as.int_lit.value = strtol(s, NULL, 10);
+        errno = 0;
+        long long v = strtoll(s, NULL, 10);
+        /* Integers are tagged 62-bit values (INTPTR_MAX >> 2 on 64-bit hosts) */
+        if (errno == ERANGE || v > (long long)(INTPTR_MAX >> 2)) {
+            free(s);
+            parser_error_prev(p, "integer literal is too large for a 62-bit integer (use a float, e.g. 1e19)");
+            return node;
+        }
+        node->as.int_lit.value = v;
         free(s);
         return node;
     }

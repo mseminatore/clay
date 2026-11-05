@@ -17,6 +17,32 @@ ClayObject *clay_float_new(float v) {
     return (ClayObject *)(uintptr_t)clay_float_tag(v);
 }
 
+/* Format a float as the shortest decimal that reads back as the same 32-bit
+ * value (at most 9 significant digits), in %g style: 0.1 → "0.1",
+ * 1000000.125 → "1000000.1", 16777216 → "16777216", 3.0 → "3". */
+void clay_format_float(float f, char *buf, size_t sz) {
+    if (f != f) { snprintf(buf, sz, "nan"); return; }
+    if (f > 3.4028235e38f) { snprintf(buf, sz, "inf"); return; }
+    if (f < -3.4028235e38f) { snprintf(buf, sz, "-inf"); return; }
+    int prec = 1;
+    for (; prec <= 9; prec++) {
+        snprintf(buf, sz, "%.*g", prec, (double)f);
+        if (strtof(buf, NULL) == f) break;
+    }
+    if (prec > 9) prec = 9;
+    /* %g switches to exponent form once the decimal exponent reaches the
+     * precision (50 at precision 1 is "5e+01"); for values below 1e9 widen the
+     * precision so they print in plain notation instead ("50", "1000000"). */
+    if (f != 0.0f) {
+        float a = f < 0 ? -f : f;
+        int exp10 = (int)floor(log10((double)a));
+        if (exp10 >= prec && exp10 < 9) {
+            prec = exp10 + 1;
+            snprintf(buf, sz, "%.*g", prec, (double)f);
+        }
+    }
+}
+
 float clay_to_float(ClayValue v) {
     if (CLAY_IS_TAGGED_FLOAT(v)) return clay_float_untag(v);
     if (CLAY_IS_INT(v)) return (float)clay_to_int(v);
@@ -29,9 +55,9 @@ float clay_to_float(ClayValue v) {
  * We store the actual int value in a slot named "_value". */
 
 static intptr_t self_int_value(ClayObject *self) {
-    if (self->type == CLAY_TYPE_FLOAT) return (intptr_t)self->as.number_float.value;
+    if (self->type == CLAY_TYPE_FLOAT) return clay_float_to_int(self->as.number_float.value);
     ClayValue v = clay_get_slot(self, "_value");
-    if (CLAY_IS_TAGGED_FLOAT(v)) return (intptr_t)clay_float_untag(v);
+    if (CLAY_IS_TAGGED_FLOAT(v)) return clay_float_to_int(clay_float_untag(v));
     return clay_to_int(v);
 }
 
@@ -60,14 +86,14 @@ static float arg_float_value(int argc, ClayValue *argv) {
  * wrapper carrying _value) to an integer. Returns 0 if v is not a number. */
 static int arg_int(ClayValue v, intptr_t *out) {
     if (CLAY_IS_INT(v)) { *out = clay_to_int(v); return 1; }
-    if (CLAY_IS_TAGGED_FLOAT(v)) { *out = (intptr_t)clay_float_untag(v); return 1; }
+    if (CLAY_IS_TAGGED_FLOAT(v)) { *out = clay_float_to_int(clay_float_untag(v)); return 1; }
     if (!CLAY_IS_OBJ(v)) return 0;
     ClayObject *o = CLAY_OBJ(v);
-    if (o->type == CLAY_TYPE_FLOAT) { *out = (intptr_t)o->as.number_float.value; return 1; }
+    if (o->type == CLAY_TYPE_FLOAT) { *out = clay_float_to_int(o->as.number_float.value); return 1; }
     if (o->parent != clay_Number && o != clay_Number) return 0;
     ClayValue inner = clay_get_slot(o, "_value");
     if (CLAY_IS_INT(inner)) { *out = clay_to_int(inner); return 1; }
-    if (CLAY_IS_TAGGED_FLOAT(inner)) { *out = (intptr_t)clay_float_untag(inner); return 1; }
+    if (CLAY_IS_TAGGED_FLOAT(inner)) { *out = clay_float_to_int(clay_float_untag(inner)); return 1; }
     return 0;
 }
 
@@ -120,7 +146,7 @@ static ClayValue number_mul(ClayObject *self, int argc, ClayValue *argv) {
     }
     intptr_t a = self_int_value(self);
     intptr_t b = arg_int_or_raise(argv[0], "*");
-    return clay_int(a * b);
+    return clay_int(clay_int_mul(a, b));
 }
 
 static ClayValue number_div(ClayObject *self, int argc, ClayValue *argv) {
@@ -219,9 +245,9 @@ static ClayValue number_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char buf[64];
     if (is_float_arg(self, 0, NULL)) {
-        snprintf(buf, sizeof(buf), "%g", self_float_value(self));
+        clay_format_float(self_float_value(self), buf, sizeof(buf));
     } else {
-        snprintf(buf, sizeof(buf), "%ld", (long)self_int_value(self));
+        snprintf(buf, sizeof(buf), "%lld", (long long)self_int_value(self));
     }
     return CLAY_VAL(clay_string_new(buf));
 }
@@ -230,9 +256,10 @@ static ClayValue number_println(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char buf[64];
     if (is_float_arg(self, 0, NULL)) {
-        snprintf(buf, sizeof(buf), "%g\n", self_float_value(self));
+        clay_format_float(self_float_value(self), buf, sizeof(buf) - 1);
+        strcat(buf, "\n");
     } else {
-        snprintf(buf, sizeof(buf), "%ld\n", (long)self_int_value(self));
+        snprintf(buf, sizeof(buf), "%lld\n", (long long)self_int_value(self));
     }
     if (clay_output_fn) {
         clay_output_fn(buf);

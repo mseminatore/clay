@@ -173,9 +173,11 @@ static ClayValue vec3_negated(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue vec3_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    char buf[128];
-    snprintf(buf, sizeof(buf), "Vec3(%g, %g, %g)",
-             self->as.vec3.x, self->as.vec3.y, self->as.vec3.z);
+    char buf[128], x[24], y[24], z[24];
+    clay_format_float(self->as.vec3.x, x, sizeof(x));
+    clay_format_float(self->as.vec3.y, y, sizeof(y));
+    clay_format_float(self->as.vec3.z, z, sizeof(z));
+    snprintf(buf, sizeof(buf), "Vec3(%s, %s, %s)", x, y, z);
     return CLAY_VAL(clay_string_new(buf));
 }
 

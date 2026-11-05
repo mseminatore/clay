@@ -775,7 +775,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
                 if (top.type != CLAYVM_VAL_NIL) {
                     ClayValue cv = vm_to_clay(top);
                     if (CLAY_IS_INT(cv)) {
-                        printf("%s=>%s %ld\n", C(C_GREEN), C(C_RESET), (long)clay_to_int(cv));
+                        printf("%s=>%s %lld\n", C(C_GREEN), C(C_RESET), (long long)clay_to_int(cv));
                     } else if (cv == CLAY_TRUE) {
                         printf("%s=>%s true\n", C(C_GREEN), C(C_RESET));
                     } else if (cv == CLAY_FALSE) {

@@ -87,7 +87,7 @@ static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
     /* Convert argument to string via toString */
     if (CLAY_IS_INT(argv[0])) {
         char buf[32];
-        snprintf(buf, sizeof(buf), "%ld", (long)clay_to_int(argv[0]));
+        snprintf(buf, sizeof(buf), "%lld", (long long)clay_to_int(argv[0]));
         size_t buf_len = strlen(buf);
         size_t new_len = self->as.string.length + buf_len;
         ClayObject *result = string_new_prealloc(new_len);
@@ -152,7 +152,7 @@ static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
     /* Original integer indexing */
     intptr_t idx;
     if (CLAY_IS_INT(argv[0])) idx = clay_to_int(argv[0]);
-    else if (CLAY_IS_TAGGED_FLOAT(argv[0])) idx = (intptr_t)clay_float_untag(argv[0]);
+    else if (CLAY_IS_TAGGED_FLOAT(argv[0])) idx = clay_float_to_int(clay_float_untag(argv[0]));
     else {
         clay_raise(CLAY_VAL(clay_error_new("String at: index must be a Number or Range",
                                            "TypeError")));

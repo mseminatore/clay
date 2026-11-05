@@ -844,7 +844,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
             intptr_t a = clay_to_int(receiver), b = clay_to_int(arg);
             if      (c0 == '+' && c1 == '\0') { fast_result = clay_int(a + b); handled = 1; }
             else if (c0 == '-' && c1 == '\0') { fast_result = clay_int(a - b); handled = 1; }
-            else if (c0 == '*' && c1 == '\0') { fast_result = clay_int(a * b); handled = 1; }
+            else if (c0 == '*' && c1 == '\0') { fast_result = clay_int(clay_int_mul(a, b)); handled = 1; }
             else if (c0 == '/' && c1 == '\0' && b != 0) { fast_result = clay_int(a / b); handled = 1; }
             else if (c0 == '%' && c1 == '\0' && b != 0) { fast_result = clay_int(a % b); handled = 1; }
             else if (c0 == '<' && c1 == '\0') { fast_result = CLAY_BOOL(a < b); handled = 1; }
@@ -898,7 +898,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
             else fast_result = receiver;
             handled = 1;
         } else if (strcmp(selector, "toInt") == 0) {
-            if (CLAY_IS_TAGGED_FLOAT(receiver)) fast_result = clay_int((intptr_t)clay_float_untag(receiver));
+            if (CLAY_IS_TAGGED_FLOAT(receiver)) fast_result = clay_int(clay_float_to_int(clay_float_untag(receiver)));
             else fast_result = receiver;
             handled = 1;
         }
@@ -1224,9 +1224,10 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
     ClayValue cv = vm_to_clay(val);
     char buf[256];
     if (CLAY_IS_INT(cv)) {
-        snprintf(buf, sizeof(buf), "%ld\n", (long)clay_to_int(cv));
+        snprintf(buf, sizeof(buf), "%lld\n", (long long)clay_to_int(cv));
     } else if (CLAY_IS_TAGGED_FLOAT(cv)) {
-        snprintf(buf, sizeof(buf), "%g\n", clay_float_untag(cv));
+        clay_format_float(clay_float_untag(cv), buf, sizeof(buf) - 1);
+        strcat(buf, "\n");
     } else if (CLAY_IS_NIL(cv)) {
         snprintf(buf, sizeof(buf), "nil\n");
     } else if (cv == CLAY_TRUE) {
@@ -1255,7 +1256,8 @@ static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
     int capture_count = (int)cc_val.as.i64;
 
     /* Pop captured values in reverse order */
-    clayvm_value_t captured[16];
+    clayvm_value_t captured[BC_MAX_CAPTURES];
+    if (capture_count > BC_MAX_CAPTURES) capture_count = BC_MAX_CAPTURES;  /* compiler rejects more */
     for (int i = capture_count - 1; i >= 0; i--) {
         captured[i] = clayvm_vm_pop(vm);
     }
@@ -1538,6 +1540,44 @@ static int native_set_method_fn(clayvm_vm_t *vm, int argc) {
 }
 
 /* native_load_self() — fast self access via cached global, no hash lookup */
+/* self_has_slot(name) — 1 if the current method's self (or its prototype
+ * chain) has a slot `name`, else 0. Used at method entry for the
+ * implicit-slot fallback: a bare assignment in a method writes an existing
+ * slot instead of creating a local. */
+static int native_self_has_slot_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t name_val = clayvm_vm_pop(vm);
+    int has = 0;
+    if (g_method_self && name_val.type == CLAYVM_VAL_OBJECT && name_val.as.obj)
+        has = clay_has_slot(g_method_self, clay_string_data((ClayObject *)name_val.as.obj));
+    vm_release_val(name_val);
+    clayvm_vm_push(vm, CLAYVM_INT64(has));
+    return 0;
+}
+
+/* set_self_slot(value, name) — self.name = value; leaves value on the stack */
+static int native_set_self_slot_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t name_val = clayvm_vm_pop(vm);
+    clayvm_value_t val_vm = clayvm_vm_pop(vm);
+    if (g_method_self && name_val.type == CLAYVM_VAL_OBJECT && name_val.as.obj) {
+        const char *name = clay_string_data((ClayObject *)name_val.as.obj);
+        clay_set_slot(g_method_self, name, vm_to_clay(val_vm));
+    }
+    vm_release_val(name_val);
+    clayvm_vm_push(vm, val_vm); /* transfer pop's ownership */
+    return 0;
+}
+
+/* cell_set_rev(value, cell) — cell_set with the operands swapped */
+static int native_cell_set_rev_fn(clayvm_vm_t *vm, int argc) {
+    clayvm_value_t cell_vm = clayvm_vm_pop(vm);
+    clayvm_value_t new_vm = clayvm_vm_pop(vm);
+    clayvm_vm_push(vm, cell_vm);
+    clayvm_vm_push(vm, new_vm);
+    return native_cell_set_fn(vm, argc);
+}
+
 static int native_load_self_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     if (g_method_self) {
@@ -1691,6 +1731,9 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_is_truthy = clayvm_native_register(&vm->natives, "is_truthy", native_is_truthy_fn, 1);
     bc->native_to_bool = clayvm_native_register(&vm->natives, "to_bool", native_to_bool_fn, 1);
     bc->native_is_nil = clayvm_native_register(&vm->natives, "is_nil", native_is_nil_fn, 1);
+    bc->native_self_has_slot = clayvm_native_register(&vm->natives, "self_has_slot", native_self_has_slot_fn, 1);
+    bc->native_set_self_slot = clayvm_native_register(&vm->natives, "set_self_slot", native_set_self_slot_fn, 2);
+    bc->native_cell_set_rev = clayvm_native_register(&vm->natives, "cell_set_rev", native_cell_set_rev_fn, 2);
     bc->native_stop_vm = clayvm_native_register(&vm->natives, "stop_vm", native_stop_vm_fn, 0);
     bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 3);
     bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
@@ -1852,6 +1895,77 @@ static int bc_add_local(BcCompiler *bc, const char *name) {
     return slot;
 }
 
+/* --- Implicit-slot fallback ---
+ * A bare assignment `x = v` at the top level of a method body normally makes
+ * `x` a method local. If, when the method is entered, self (or its prototype
+ * chain) already has a slot `x`, the name refers to that slot for the whole
+ * invocation instead (Io-style updateSlot). Each such local gets a hidden
+ * companion flag local named "?x" (not a valid identifier), set at entry;
+ * reads and writes of `x` branch on it. Nested blocks that capture `x` also
+ * capture "?x" so they make the same choice. */
+
+#define BC_SLOT_FLAG_MAX 136
+
+static void bc_slot_flag_name(const char *name, char *out, size_t sz) {
+    snprintf(out, sz, "?%s", name);
+}
+
+/* Slot index of the flag local for `name`, or -1 if `name` has none */
+static int bc_slot_flag_local(BcCompiler *bc, const char *name) {
+    char flag[BC_SLOT_FLAG_MAX];
+    bc_slot_flag_name(name, flag, sizeof(flag));
+    return bc_resolve_local(bc, flag);
+}
+
+/* Push the value of local `slot` (unwrapping its cell if captured) */
+static void bc_emit_get_local_value(BcCompiler *bc, int slot) {
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
+    if (bc_local_is_captured(bc, slot)) {
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_cell_get);
+        emit_byte(bc, 1);
+    }
+}
+
+/* Read `name`: flag ? (self name) : local */
+static void bc_emit_flagged_read(BcCompiler *bc, const char *name, int slot, int flag) {
+    bc_emit_get_local_value(bc, flag);
+    int to_local = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+    emit_u16(bc, (uint16_t)bc->native_load_self);
+    emit_byte(bc, 0);
+    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_string(bc, name));
+    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+    emit_u16(bc, (uint16_t)bc->native_send);
+    emit_byte(bc, 2);
+    int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
+    patch_jump(bc, to_local);
+    bc_emit_get_local_value(bc, slot);
+    patch_jump(bc, to_end);
+}
+
+/* Write the value on top of the stack to `name` (value stays on the stack):
+ * flag ? self.name = v : local = v */
+static void bc_emit_flagged_write(BcCompiler *bc, const char *name, int slot, int flag) {
+    bc_emit_get_local_value(bc, flag);
+    int to_local = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_string(bc, name));
+    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+    emit_u16(bc, (uint16_t)bc->native_set_self_slot);
+    emit_byte(bc, 2);
+    int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
+    patch_jump(bc, to_local);
+    if (bc_local_is_captured(bc, slot)) {
+        emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_cell_set_rev);
+        emit_byte(bc, 2);
+    } else {
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
+    }
+    patch_jump(bc, to_end);
+}
+
 static void bc_begin_scope(BcCompiler *bc) {
     bc->scope_depth++;
 }
@@ -1949,6 +2063,16 @@ static int bc_resolve_enclosing(BcCompiler *bc, const char *name) {
     return -1; /* not in enclosing scope */
 }
 
+/* Capture `name` and, if it has one, its implicit-slot flag local "?name" */
+static void bc_capture_add_with_flag(BcCaptureList *caps, const char *name, int slot,
+                                     BcCompiler *bc) {
+    bc_capture_add(caps, name, slot);
+    char flag[BC_SLOT_FLAG_MAX];
+    bc_slot_flag_name(name, flag, sizeof(flag));
+    int fslot = bc_resolve_enclosing(bc, flag);
+    if (fslot >= 0) bc_capture_add(caps, flag, fslot);
+}
+
 static void bc_scan_free_vars(AstNode *node, char **block_params, int param_count,
                               BcCaptureList *caps, BcCompiler *bc);
 
@@ -1970,7 +2094,7 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
             /* Check if it's a local in the enclosing scope */
             int slot = bc_resolve_enclosing(bc, name);
             if (slot >= 0) {
-                bc_capture_add(caps, name, slot);
+                bc_capture_add_with_flag(caps, name, slot, bc);
             }
             break;
         }
@@ -2018,7 +2142,7 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
                 !bc_name_in_list(name, block_params, param_count) &&
                 !bc_capture_has(caps, name)) {
                 int slot = bc_resolve_enclosing(bc, name);
-                if (slot >= 0) bc_capture_add(caps, name, slot);
+                if (slot >= 0) bc_capture_add_with_flag(caps, name, slot, bc);
             }
             bc_scan_free_vars(node->as.assign.value, block_params, param_count, caps, bc);
             break;
@@ -2230,7 +2354,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     /* Register captured variables as locals (slots after params).
      * Mark them as captured so reads/writes go through cell indirection. */
     if (captures) {
-        for (int i = 0; i < captures->count && i < 16; i++) {
+        for (int i = 0; i < captures->count && i < BC_MAX_CAPTURES; i++) {
             int slot = bc_add_local(bc, captures->names[i]);
             bc->locals[slot].is_captured = 1;
         }
@@ -2240,11 +2364,38 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
      * local variables (not params, captures, builtins, or user globals).
      * This ensures prescan can identify which locals nested blocks capture,
      * enabling proper cell-boxing for closures that escape their scope. */
+    int prereg_start = bc->local_count;
     bc_preregister_method_locals(bc, body);
+    int prereg_end = bc->local_count;
+
+    /* Implicit-slot fallback: give each local created by a bare assignment in
+     * a method (or in a block inside a method) a flag local, registered before
+     * the prescan so nested blocks can capture it too. */
+    int flag_start = bc->local_count;
+    if (bc->in_method) {
+        for (int i = prereg_start; i < prereg_end; i++) {
+            char flag[BC_SLOT_FLAG_MAX];
+            bc_slot_flag_name(bc->locals[i].name, flag, sizeof(flag));
+            bc_add_local(bc, flag);
+        }
+    }
+    int flag_end = bc->local_count;
 
     /* Pre-scan body for nested blocks to identify params that will be captured.
      * This must happen AFTER params are registered as locals. */
     bc_prescan_list(bc, body);
+
+    /* Set each flag at method entry: does self already have this slot?
+     * (Before cell boxing below, so a captured flag is boxed with its value.) */
+    for (int i = flag_start; i < flag_end; i++) {
+        const char *name = bc->locals[prereg_start + (i - flag_start)].name;
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_string(bc, name));
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_self_has_slot);
+        emit_byte(bc, 1);
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)i);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
 
     /* Box any locals that are marked as captured (params + method-created locals).
      * Skip capture locals (they're already cells from enclosing scope).
@@ -2383,7 +2534,11 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             const char *ident_name = node->as.ident.name;
             /* Check locals first */
             int slot = bc_resolve_local(bc, ident_name);
-            if (slot >= 0) {
+            int flag = slot >= 0 ? bc_slot_flag_local(bc, ident_name) : -1;
+            if (flag >= 0) {
+                /* Method local that may be an existing slot of self */
+                bc_emit_flagged_read(bc, ident_name, slot, flag);
+            } else if (slot >= 0) {
                 emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
                 /* If this local is boxed in a cell, unwrap it */
                 if (bc_local_is_captured(bc, slot)) {
@@ -2424,7 +2579,12 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         case NODE_ASSIGN: {
             /* Check if assigning to an existing local */
             int slot = bc_resolve_local(bc, node->as.assign.name);
-            if (slot >= 0) {
+            int flag = slot >= 0 ? bc_slot_flag_local(bc, node->as.assign.name) : -1;
+            if (flag >= 0) {
+                /* Method local that may be an existing slot of self */
+                bc_emit_expr(bc, node->as.assign.value);
+                bc_emit_flagged_write(bc, node->as.assign.name, slot, flag);
+            } else if (slot >= 0) {
                 if (bc_local_is_captured(bc, slot)) {
                     /* Cell-boxed local: GET_LOCAL(cell), value, cell_set */
                     emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
@@ -2606,6 +2766,12 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 bc_scan_free_vars(node->as.block.body.items[i],
                                   param_names, param_count, &caps, bc);
             free(param_names);
+            if (caps.count > BC_MAX_CAPTURES) {
+                fprintf(stderr, "%s:%d: error: block captures too many variables "
+                        "(%d, max %d)\n", clay_source_file ? clay_source_file : "<input>",
+                        node->line, caps.count, BC_MAX_CAPTURES);
+                bc->had_error = 1;
+            }
 
             /* Compile block body to a new chunk (with capture locals) */
             int chunk_id = bc_compile_chunk(bc, &node->as.block.body,
@@ -2619,7 +2785,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
 
             /* Store capture info in the chunk */
             BcChunk *chunk = bc->chunks[chunk_id];
-            chunk->capture_count = caps.count < 16 ? caps.count : 16;
+            chunk->capture_count = caps.count < BC_MAX_CAPTURES ? caps.count : BC_MAX_CAPTURES;
             for (int i = 0; i < chunk->capture_count; i++) {
                 chunk->capture_names[i] = strdup(caps.names[i]);
                 chunk->capture_slots[i] = caps.slots[i];
@@ -2835,7 +3001,11 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     if (node->type == NODE_ASSIGN) {
         /* Check if assigning to an existing local */
         int slot = bc_resolve_local(bc, node->as.assign.name);
-        if (slot >= 0) {
+        if (slot >= 0 && bc_slot_flag_local(bc, node->as.assign.name) >= 0) {
+            /* Possible implicit slot: the expression form handles the branch */
+            bc_emit_expr(bc, node);
+            emit_op(bc, CLAYVM_OP_POP);
+        } else if (slot >= 0) {
             if (bc_local_is_captured(bc, slot)) {
                 /* Cell-boxed local: GET_LOCAL(cell), value, cell_set, POP */
                 emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);

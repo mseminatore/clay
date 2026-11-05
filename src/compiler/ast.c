@@ -192,7 +192,7 @@ void ast_print(AstNode *node, int indent) {
     print_indent(indent);
     switch (node->type) {
         case NODE_INT_LIT:
-            printf("Int(%ld)\n", node->as.int_lit.value);
+            printf("Int(%lld)\n", node->as.int_lit.value);
             break;
         case NODE_FLOAT_LIT:
             printf("Float(%g)\n", node->as.float_lit.value);

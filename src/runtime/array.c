@@ -131,7 +131,7 @@ static ClayValue array_toString(ClayObject *self, int argc, ClayValue *argv) {
         char numbuf[32];
         ClayValue sv = CLAY_NIL;
         if (CLAY_IS_INT(item)) {
-            snprintf(numbuf, sizeof(numbuf), "%ld", (long)clay_to_int(item));
+            snprintf(numbuf, sizeof(numbuf), "%lld", (long long)clay_to_int(item));
             s = numbuf;
         } else if (CLAY_IS_NIL(item)) {
             s = "nil";
@@ -274,7 +274,7 @@ static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
         const char *s;
         char numbuf[32];
         if (CLAY_IS_INT(item)) {
-            snprintf(numbuf, sizeof(numbuf), "%ld", (long)clay_to_int(item));
+            snprintf(numbuf, sizeof(numbuf), "%lld", (long long)clay_to_int(item));
             s = numbuf;
         } else if (CLAY_IS_NIL(item)) {
             s = "nil";

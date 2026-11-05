@@ -171,7 +171,7 @@ static ClayValue dict_toString(ClayObject *self, int argc, ClayValue *argv) {
         char numbuf[32];
         ClayValue sv = CLAY_NIL;
         if (CLAY_IS_INT(cv)) {
-            snprintf(numbuf, sizeof(numbuf), "%ld", (long)clay_to_int(cv));
+            snprintf(numbuf, sizeof(numbuf), "%lld", (long long)clay_to_int(cv));
             vs = numbuf;
         } else if (CLAY_IS_NIL(cv)) {
             vs = "nil";

@@ -73,7 +73,7 @@ void clay_raise(ClayValue error) {
         ClayValue line = clay_get_slot(err, "_line");
         ClayValue trace = clay_get_slot(err, "_trace");
         if (!CLAY_IS_NIL(file) && !CLAY_IS_NIL(line)) {
-            fprintf(stderr, "%s:%ld: ", clay_string_data(CLAY_OBJ(file)), (long)clay_to_int(line));
+            fprintf(stderr, "%s:%lld: ", clay_string_data(CLAY_OBJ(file)), (long long)clay_to_int(line));
         }
         if (!CLAY_IS_NIL(msg)) {
             fprintf(stderr, "error: %s\n", clay_string_data(CLAY_OBJ(msg)));
