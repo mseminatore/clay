@@ -12,6 +12,12 @@
  * With no arguments, launches the VM REPL.
  * With a source file, runs it in the bytecode VM.
  */
+/* glibc only declares realpath() with _DEFAULT_SOURCE (or _XOPEN_SOURCE);
+ * the build defines just _POSIX_C_SOURCE, which would leave it implicitly
+ * declared as returning int — truncating the returned pointer. */
+#if defined(__linux__) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,17 +112,24 @@ static void resolve_exe_path(const char *argv0) {
     }
 #else
     char raw[1024] = "";
-#ifdef __APPLE__
+#if defined(__APPLE__)
     uint32_t size = (uint32_t)sizeof(raw);
-    if (_NSGetExecutablePath(raw, &size) != 0) raw[0] = '\0';
+    if (_NSGetExecutablePath(raw, &size) != 0) raw[0] = '\0';   /* may be relative */
 #else
     ssize_t len = readlink("/proc/self/exe", raw, sizeof(raw) - 1);
-    if (len > 0) raw[len] = '\0';
+    if (len > 0) {
+        raw[len] = '\0';
+        snprintf(path, sizeof(path), "%s", raw);   /* already canonical and absolute */
+    } else {
+        raw[0] = '\0';
+    }
 #endif
-    if (!raw[0] && argv0) snprintf(raw, sizeof(raw), "%s", argv0);
-    char *rp = raw[0] ? realpath(raw, NULL) : NULL;
-    snprintf(path, sizeof(path), "%s", rp ? rp : raw);
-    free(rp);
+    if (!path[0]) {
+        if (!raw[0] && argv0) snprintf(raw, sizeof(raw), "%s", argv0);
+        char *rp = raw[0] ? realpath(raw, NULL) : NULL;
+        snprintf(path, sizeof(path), "%s", rp ? rp : raw);
+        free(rp);
+    }
 #endif
     snprintf(g_exe_path_buf, sizeof(g_exe_path_buf), "%s", path);
     snprintf(g_exe_dir, sizeof(g_exe_dir), "%s", path);

@@ -64,3 +64,10 @@ clay_fiber_entry_stub:
     ud2
 
 #endif /* __x86_64__ */
+
+/* Mark the stack non-executable (ELF). Kept outside the architecture guard:
+ * this file is assembled on every platform, and an object without the note
+ * makes the linker fall back to an executable stack for the whole binary. */
+#if defined(__ELF__)
+.section .note.GNU-stack,"",%progbits
+#endif

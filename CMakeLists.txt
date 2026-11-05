@@ -54,6 +54,10 @@ endif()
 # Build hash library directly (avoid its CMakeLists which has subdirectory conflicts)
 add_library(ht STATIC deps/hash/hash.c)
 target_include_directories(ht PUBLIC deps/hash)
+# The runtime frees slot keys/values itself and then frees non-empty tables on
+# purpose, so hash's debug-build "freed with N entries" warning (on by default
+# when _DEBUG is defined, i.e. MSVC Debug) is a false positive here.
+target_compile_definitions(ht PRIVATE HT_WARN_FREE_NONEMPTY=0)
 if(UNIX)
     target_compile_definitions(ht PRIVATE _POSIX_C_SOURCE=200809L)
 endif()

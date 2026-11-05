@@ -4,6 +4,7 @@
 #include "clay.h"
 #include "range.h"
 #include <ctype.h>
+#include <errno.h>
 
 ClayObject *clay_string_new(const char *str) {
     return clay_string_new_len(str, strlen(str));
@@ -261,10 +262,15 @@ static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue string_toInt(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char *end;
-    long val = strtol(self->as.string.data, &end, 10);
+    /* strtoll, not strtol: `long` is 32-bit on Windows, which would clamp
+     * anything above 2^31 to LONG_MAX instead of parsing or overflowing */
+    errno = 0;
+    long long val = strtoll(self->as.string.data, &end, 10);
     if (end == self->as.string.data) {
         clay_raise(CLAY_VAL(clay_error_new("invalid integer string", "TypeError")));
     }
+    if (errno == ERANGE || val > (long long)CLAY_INT_MAX || val < (long long)CLAY_INT_MIN)
+        clay_raise_overflow();
     return clay_int((intptr_t)val);
 }
 

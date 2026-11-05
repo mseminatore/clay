@@ -109,7 +109,7 @@ libclay.a: $(RUNTIME_OBJS) $(HASH_OBJ) $(SQLITE_OBJ) $(FIBER_OBJS) $(FIBER_ASM_O
 	$(AR) rcs $@ $^
 
 $(HASH_OBJ): $(HASH_SRC)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -DHT_WARN_FREE_NONEMPTY=0 -c -o $@ $<
 
 $(CROSSLINE_OBJ): $(CROSSLINE_SRC)
 	$(CC) $(CFLAGS) -Wno-pedantic -c -o $@ $<

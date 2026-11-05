@@ -50,6 +50,8 @@ Test eq(i, 60)        // 2^60 fits; the 61st doubling would exceed 2^61 - 1
 // Conversions that cannot be represented
 Test eq(try { 1e30 toInt } catch { |e| e type() }, "OverflowError")
 Test eq(try { "99999999999999999999" toInt } catch { |e| e type() }, "OverflowError")
+Test eq("3000000000" toInt, 3000000000)                 // > 2^31: must not be clamped (Windows `long`)
+Test eq("-2305843009213693952" toInt, min)
 Test eq((max toFloat > 1e18), true)
 
 // Implicit-slot fallback: a bare assignment in a method writes a slot the
