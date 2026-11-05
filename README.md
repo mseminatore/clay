@@ -656,7 +656,7 @@ arr setAt(0, "y")             // set element at index
 Integers and floats are stored directly in the value (no allocation). Mixed operations promote to float.
 
 - **Integers** are 62-bit signed: from −2⁶¹ to 2⁶¹ − 1 (±2,305,843,009,213,693,951). A result outside that range raises `OverflowError` rather than wrapping; convert with `toFloat` first if you need larger magnitudes. Integer literals beyond the range are a compile error.
-- **Floats** are 32-bit IEEE 754 *single* precision: about 7 significant decimal digits, magnitudes up to ~3.4 × 10³⁸. Integers above 2²⁴ (16,777,216) are not all exactly representable, and small decimal fractions are rounded (`1000000.0 + 0.1` is `1000000.125` internally). Floats print as the shortest text that reads back as the same value — `0.1`, `1000000.1`, `0.33333334` — in plain notation below 10⁹ and exponent notation beyond (`1e+20`).
+- **Floats** are 32-bit IEEE 754 *single* precision: about 7 significant decimal digits, magnitudes up to ~3.4 × 10³⁸. Integers above 2²⁴ (16,777,216) are not all exactly representable, and small decimal fractions are rounded (`1000000.0 + 0.1` is `1000000.125` internally). Floats print as the shortest text that reads back as the same value — `0.1`, `1000000.1`, `0.33333334` — in plain notation below 10⁹ and exponent notation beyond (`1e+20`). Float arithmetic follows IEEE 754: dividing a float by zero gives `inf` or `nan`, while integer division (or `%`) by zero raises `DivisionByZero`.
 
 ```clay
 42                            // integer
@@ -1271,6 +1271,14 @@ db close
 | Graphics | `window(w,h,title)`, `close`, `clear`, `color(r,g,b)`, `setPixel(x,y,r,g,b)`, `drawLine(x1,y1,x2,y2)`, `drawRect(x,y,w,h)`, `fillRect(x,y,w,h)`, `drawCircle(x,y,r)`, `fillCircle(x,y,r)`, `drawText(x,y,text)`, `fontSize(n)`, `loadPPM(path)`, `drawImage(img,x,y)`, `drawImageEx(img,x,y,scale)`, `createSprite(img,x,y,w,h)`, `drawSprite(s,x,y)`, `createBuffer(w,h)`, `bufferPixel(buf,x,y,r,g,b)`, `drawBuffer(buf,x,y)`, `pollEvent`, `waitEvent`, `isKeyDown(key)`, `mouseX`, `mouseY`, `mouseDown`, `ticks`, `delay(ms)`, `fps`, `refresh`, `resize(w,h)`, `fullscreen`, `windowed`, `width`, `height` |
 
 ## Generated C
+
+`clay --compile` turns a program into C and links it against the prebuilt
+runtime libraries of the build that produced `clay` (recorded in
+`clay-native.cfg` next to the binary), so compiling takes a fraction of a
+second and the native program has the same features — HTTPS, Graphics,
+plugins — as `clay` itself. Native programs are typically 3–4× faster than the
+VM; use a Release build (`cmake -DCMAKE_BUILD_TYPE=Release`) so the runtime
+they link against is optimized too.
 
 Clay generates readable C. This Clay code:
 

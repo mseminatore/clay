@@ -25,8 +25,14 @@ typedef unsigned long DWORD;
 __declspec(dllimport) HANDLE __stdcall GetStdHandle(DWORD);
 __declspec(dllimport) int __stdcall GetConsoleMode(HANDLE, DWORD *);
 __declspec(dllimport) int __stdcall SetConsoleMode(HANDLE, DWORD);
+__declspec(dllimport) DWORD __stdcall GetModuleFileNameA(void *, char *, DWORD);
+#include <process.h>   /* _getpid */
 #else
 #include <unistd.h>
+#include <limits.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 /* Portable case-insensitive compare (avoids strcasecmp portability issues) */
@@ -84,76 +90,110 @@ static char *replace_ext(const char *path, const char *new_ext) {
     return result;
 }
 
-/* Resolve the Clay project root directory from argv[0] */
-static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
-    strncpy(clay_dir, ".", sz - 1);
-    clay_dir[sz - 1] = '\0';
+/* Absolute path of the running clay executable and its directory (with a
+ * trailing separator). Resolved from the OS rather than argv[0], so it also
+ * works when clay is found via PATH. Empty if unknown. */
+static char g_exe_path_buf[1024] = "";
+static char g_exe_dir[1024] = "";
+
+static void resolve_exe_path(const char *argv0) {
+    char path[1024] = "";
 #ifdef _WIN32
-    {
-        char exe_path[1024];
-        strncpy(exe_path, argv0, sizeof(exe_path) - 1);
-        exe_path[sizeof(exe_path) - 1] = '\0';
-        char full[1024];
-        if (_fullpath(full, exe_path, sizeof(full))) {
-            strncpy(exe_path, full, sizeof(exe_path) - 1);
-        }
-        /* Strip binary name */
-        char *sep = strrchr(exe_path, '\\');
-        if (!sep) sep = strrchr(exe_path, '/');
-        if (sep) *sep = '\0';
-        /* Check if parent is "Debug" or "Release" (multi-config generators) */
-        sep = strrchr(exe_path, '\\');
-        if (!sep) sep = strrchr(exe_path, '/');
-        if (sep) {
-            if (_stricmp(sep + 1, "Debug") == 0 || _stricmp(sep + 1, "Release") == 0) {
-                *sep = '\0';
-                sep = strrchr(exe_path, '\\');
-                if (!sep) sep = strrchr(exe_path, '/');
-            }
-        }
-        /* Now at build/ — go up one more */
-        if (sep) *sep = '\0';
-        strncpy(clay_dir, exe_path, sz - 1);
+    DWORD n = GetModuleFileNameA(NULL, path, (DWORD)sizeof(path));
+    if (n == 0 || n >= sizeof(path)) {
+        path[0] = '\0';
+        if (argv0) _fullpath(path, argv0, sizeof(path));
     }
 #else
-    {
-        /* Resolve from argv[0] — walk up from binary to project root */
-        char exe_path[1024];
-        if (argv0[0] == '/') {
-            strncpy(exe_path, argv0, sizeof(exe_path) - 1);
-        } else {
-            /* Try /proc/self/exe first (Linux) */
-            ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-            if (len > 0) {
-                exe_path[len] = '\0';
-            } else {
-                /* Fall back to realpath of argv[0] */
-                char *rp = realpath(argv0, NULL);
-                if (rp) {
-                    strncpy(exe_path, rp, sizeof(exe_path) - 1);
-                    exe_path[sizeof(exe_path) - 1] = '\0';
-                    free(rp);
-                } else {
-                    return; /* keep "." default */
-                }
-            }
-        }
-        /* Strip binary name + up to project root (bin is at build/clay or build/Debug/clay) */
-        char *sep = strrchr(exe_path, '/');
-        if (sep) *sep = '\0';
-        /* Check if parent is "Debug" or "Release" (multi-config) */
-        sep = strrchr(exe_path, '/');
-        if (sep) {
-            if (ci_streq(sep + 1, "Debug") || ci_streq(sep + 1, "Release")) {
-                *sep = '\0';
-                sep = strrchr(exe_path, '/');
-            }
-        }
-        /* Now at build/ — go up one more */
-        if (sep) *sep = '\0';
-        strncpy(clay_dir, exe_path, sz - 1);
-    }
+    char raw[1024] = "";
+#ifdef __APPLE__
+    uint32_t size = (uint32_t)sizeof(raw);
+    if (_NSGetExecutablePath(raw, &size) != 0) raw[0] = '\0';
+#else
+    ssize_t len = readlink("/proc/self/exe", raw, sizeof(raw) - 1);
+    if (len > 0) raw[len] = '\0';
 #endif
+    if (!raw[0] && argv0) snprintf(raw, sizeof(raw), "%s", argv0);
+    char *rp = raw[0] ? realpath(raw, NULL) : NULL;
+    snprintf(path, sizeof(path), "%s", rp ? rp : raw);
+    free(rp);
+#endif
+    snprintf(g_exe_path_buf, sizeof(g_exe_path_buf), "%s", path);
+    snprintf(g_exe_dir, sizeof(g_exe_dir), "%s", path);
+    char *sep = strrchr(g_exe_dir, '/');
+#ifdef _WIN32
+    char *bsep = strrchr(g_exe_dir, '\\');
+    if (bsep && (!sep || bsep > sep)) sep = bsep;
+#endif
+    if (sep) sep[1] = '\0'; else g_exe_dir[0] = '\0';
+}
+
+/* Pointer to the last path separator in `p` ('/' or, on Windows, '\') */
+static char *last_sep(char *p) {
+    char *sep = strrchr(p, '/');
+#ifdef _WIN32
+    char *bsep = strrchr(p, '\\');
+    if (bsep && (!sep || bsep > sep)) sep = bsep;
+#endif
+    return sep;
+}
+
+/* Resolve the Clay source tree root. The binary lives at build/clay or, with
+ * multi-config generators, build/<Config>/clay — the root is build's parent. */
+static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
+    (void)argv0;
+    snprintf(clay_dir, sz, ".");
+    if (!g_exe_dir[0]) return;
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", g_exe_dir);
+    size_t len = strlen(dir);
+    if (len > 0) dir[len - 1] = '\0';                 /* drop trailing separator */
+    char *sep = last_sep(dir);
+    if (sep && (ci_streq(sep + 1, "Debug") || ci_streq(sep + 1, "Release") ||
+                ci_streq(sep + 1, "RelWithDebInfo") || ci_streq(sep + 1, "MinSizeRel"))) {
+        *sep = '\0';                                   /* build/<Config> → build */
+    }
+    sep = last_sep(dir);
+    if (!sep) return;
+    *sep = '\0';                                       /* build → source root */
+    snprintf(clay_dir, sz, "%s", dir);
+}
+
+/* --- Native compile configuration (clay-native.cfg next to the binary) ---
+ * Written by CMake: the C compiler, flags and prebuilt runtime libraries of
+ * this build, so --compile links instead of recompiling the runtime. */
+typedef struct {
+    int  loaded;
+    char kind[16];      /* "cc" or "msvc" */
+    char cc[1024];
+    char cflags[4096];
+    char libs[4096];
+} NativeCfg;
+
+static int load_native_cfg(NativeCfg *cfg) {
+    memset(cfg, 0, sizeof(*cfg));
+    if (!g_exe_dir[0]) return 0;
+    char path[1200];
+    snprintf(path, sizeof(path), "%sclay-native.cfg", g_exe_dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char line[4200];
+    while (fgets(line, sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
+        if (line[0] == '#' || !line[0]) continue;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        const char *val = eq + 1;
+        if (strcmp(line, "kind") == 0)        snprintf(cfg->kind, sizeof(cfg->kind), "%s", val);
+        else if (strcmp(line, "cc") == 0)     snprintf(cfg->cc, sizeof(cfg->cc), "%s", val);
+        else if (strcmp(line, "cflags") == 0) snprintf(cfg->cflags, sizeof(cfg->cflags), "%s", val);
+        else if (strcmp(line, "libs") == 0)   snprintf(cfg->libs, sizeof(cfg->libs), "%s", val);
+    }
+    fclose(f);
+    cfg->loaded = cfg->cc[0] && cfg->libs[0];
+    return cfg->loaded;
 }
 
 /* Runtime sources compiled into every native binary. Keep in sync with
@@ -168,6 +208,7 @@ static const char *const clay_native_sources[] = {
     "src/runtime/http.c",     "src/runtime/regex.c",    "src/runtime/db.c",
     "src/runtime/bootstrap.c","src/runtime/intern.c",   "src/runtime/graphics.c",
     "src/runtime/vec3.c",     "src/runtime/thread.c",   "src/runtime/plugin.c",
+    "src/runtime/fiber.c",
     "src/runtime/fiber_ctx.c",
 #ifndef _WIN32
 #if defined(__x86_64__) || defined(_M_X64)
@@ -192,33 +233,63 @@ static int append_source(char *cmd, size_t sz, const char *clay_dir, const char 
     return 0;
 }
 
-/* Compile a C file to an executable. Returns 0 on success. */
-static int compile_c_file(const char *c_file, const char *output_name,
-                          const char *clay_dir, int quiet) {
-    char cmd[16384];
 #ifdef _WIN32
-    char vs_path[512] = "";
-    {
-        const char *pf86 = getenv("ProgramFiles(x86)");
-        if (!pf86) pf86 = "C:\\Program Files (x86)";
-        char vswhere_cmd[512];
-        snprintf(vswhere_cmd, sizeof(vswhere_cmd),
-            "\"%s\\Microsoft Visual Studio\\Installer\\vswhere.exe\" "
-            "-latest -property installationPath", pf86);
-        FILE *fp = _popen(vswhere_cmd, "r");
-        if (fp) {
-            if (fgets(vs_path, sizeof(vs_path), fp)) {
-                size_t len = strlen(vs_path);
-                while (len > 0 && (vs_path[len-1] == '\n' || vs_path[len-1] == '\r'))
-                    vs_path[--len] = '\0';
-            }
-            _pclose(fp);
+/* Locate the newest Visual Studio installation (for vcvarsall.bat) */
+static int find_vs_path(char *vs_path, size_t sz) {
+    vs_path[0] = '\0';
+    const char *pf86 = getenv("ProgramFiles(x86)");
+    if (!pf86) pf86 = "C:\\Program Files (x86)";
+    char vswhere_cmd[512];
+    snprintf(vswhere_cmd, sizeof(vswhere_cmd),
+        "\"%s\\Microsoft Visual Studio\\Installer\\vswhere.exe\" "
+        "-latest -property installationPath", pf86);
+    FILE *fp = _popen(vswhere_cmd, "r");
+    if (fp) {
+        if (fgets(vs_path, (int)sz, fp)) {
+            size_t len = strlen(vs_path);
+            while (len > 0 && (vs_path[len-1] == '\n' || vs_path[len-1] == '\r'))
+                vs_path[--len] = '\0';
         }
+        _pclose(fp);
     }
     if (vs_path[0] == '\0') {
         fprintf(stderr, "clay: cannot find Visual Studio installation\n");
-        return 1;
+        return -1;
     }
+    return 0;
+}
+#endif
+
+/* Compile a C file to an executable. Returns 0 on success.
+ * Uses clay-native.cfg (written by the CMake build) to link the prebuilt
+ * runtime; without it, falls back to compiling the runtime from source. */
+static int compile_c_file(const char *c_file, const char *output_name,
+                          const char *clay_dir, int quiet) {
+    char cmd[16384];
+    NativeCfg cfg;
+    if (load_native_cfg(&cfg)) {
+#ifdef _WIN32
+        if (strcmp(cfg.kind, "msvc") == 0) {
+            char vs_path[512];
+            if (find_vs_path(vs_path, sizeof(vs_path)) != 0) return 1;
+            snprintf(cmd, sizeof(cmd),
+                "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
+                "\"%s\" %s %s /Fo\"%%TEMP%%\\\\\" \"%s\" /Fe:\"%s\" %s %s\"",
+                vs_path, cfg.cc, cfg.cflags, quiet ? "/W0" : "/W3",
+                c_file, output_name, cfg.libs, quiet ? ">nul 2>&1" : "");
+            fflush(stdout);
+            return system(cmd);
+        }
+#endif
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s %s \"%s\" %s -o \"%s\"",
+                 cfg.cc, cfg.cflags, quiet ? "-w" : "-Wall", c_file, cfg.libs, output_name);
+        fflush(stdout);
+        return system(cmd);
+    }
+
+#ifdef _WIN32
+    char vs_path[512];
+    if (find_vs_path(vs_path, sizeof(vs_path)) != 0) return 1;
     snprintf(cmd, sizeof(cmd),
         "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
         "cl /nologo %s /O2 /GF "
@@ -257,6 +328,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
 #endif
         output_name);
 #endif
+    fflush(stdout);
     return system(cmd);
 }
 
@@ -337,14 +409,18 @@ static int run_repl(const char *argv0) {
     AstNode *accumulated = ast_new(NODE_PROGRAM, 1);
     nodelist_init(&accumulated->as.program.stmts);
 
-    /* Temp file paths */
+    /* Temp file paths — in the system temp directory, not the source tree */
     char c_path[1024], exe_path[1024];
 #ifdef _WIN32
-    snprintf(c_path, sizeof(c_path), "%s\\_clay_repl.c", clay_dir);
-    snprintf(exe_path, sizeof(exe_path), "%s\\_clay_repl.exe", clay_dir);
+    const char *tmp = getenv("TEMP");
+    if (!tmp) tmp = ".";
+    snprintf(c_path, sizeof(c_path), "%s\\_clay_repl_%d.c", tmp, (int)_getpid());
+    snprintf(exe_path, sizeof(exe_path), "%s\\_clay_repl_%d.exe", tmp, (int)_getpid());
 #else
-    snprintf(c_path, sizeof(c_path), "%s/_clay_repl.c", clay_dir);
-    snprintf(exe_path, sizeof(exe_path), "%s/_clay_repl", clay_dir);
+    const char *tmp = getenv("TMPDIR");
+    if (!tmp || !*tmp) tmp = "/tmp";
+    snprintf(c_path, sizeof(c_path), "%s/_clay_repl_%d.c", tmp, (int)getpid());
+    snprintf(exe_path, sizeof(exe_path), "%s/_clay_repl_%d", tmp, (int)getpid());
 #endif
 
     char line_buf[4096];
@@ -471,6 +547,7 @@ static int run_repl(const char *argv0) {
         /* Run */
         char run_cmd[2048];
         snprintf(run_cmd, sizeof(run_cmd), "\"%s\"", exe_path);
+        fflush(stdout);  /* keep our output ordered before the child's */
         system(run_cmd);
 
         /* Success! Accumulate only assignments (state-preserving statements) */
@@ -903,7 +980,8 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 }
 
 int main(int argc, char *argv[]) {
-    g_exe_path = argv[0];
+    resolve_exe_path(argv[0]);
+    g_exe_path = g_exe_path_buf[0] ? g_exe_path_buf : argv[0];
     clay_set_args(argc, argv);
     const char *source_file = NULL;
     const char *output_name = NULL;
@@ -1068,6 +1146,7 @@ int main(int argc, char *argv[]) {
 
     CodeGen cg;
     codegen_init(&cg, out, source_file);
+    cg.plugin_exe_path = g_exe_path_buf;   /* native program loads clay's plugins/ */
     codegen_emit(&cg, program);
     fclose(out);
 
@@ -1079,7 +1158,7 @@ int main(int argc, char *argv[]) {
 #ifdef _WIN32
             output_name = replace_ext(source_file, ".exe");
 #else
-            output_name = "a.out";
+            output_name = replace_ext(source_file, "");   /* hello.clay → hello */
 #endif
         }
 

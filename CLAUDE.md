@@ -34,6 +34,11 @@ make test-clay
 - Individual unit tests cannot be run in isolation — `test_main()` in `test/test_runtime.c` runs all
   suites sequentially (`MODULE`/`SUITE`/`TEST`/`TESTEX` macros from the `testy` framework). To focus on
   one area, temporarily comment out the other `test_*()` calls in `test_main`.
+- Native backend: every test program is also compiled with `clay --compile` and run as
+  `clay_native_<name>` (label `native`; `ctest -L native`). `--compile` reads `clay-native.cfg`, which
+  CMake writes next to the binary (compiler, flags incl. `CMAKE_C_FLAGS`, prebuilt runtime libs), so
+  an ASan build of clay produces ASan native binaries. Without the cfg (e.g. Makefile builds) it falls
+  back to compiling the runtime sources listed in `clay_native_sources[]` in `main.c`.
 - `.clay` integration programs live in `test/programs/` and are each registered individually in
   `CMakeLists.txt` as `add_test(NAME clay_test_<name> COMMAND clay_compiler <path>.clay)` — running the
   program with a zero exit code is the test.
@@ -106,6 +111,14 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 - **Integer range**: always build tagged ints with `clay_int()` (raises `OverflowError` outside 62 bits),
   multiply with `clay_int_mul()` and convert floats with `clay_float_to_int()`; never cast/shift by hand.
   Format floats with `clay_format_float()` (shortest round-trip text), integers with `%lld` + `(long long)`.
+- **Generated-C ownership** (`codegen.c`): every C variable, cell and `__rv` owns one reference;
+  stores emit retains *before* releasing old values; params are retained on entry; each function
+  releases its variables and the cells it created before `return clay_return_value(...)`. Methods
+  return results that alias self/args as borrowed (same as C natives); blocks always return owned
+  values because runtime callers (`each`, `map`, `ifTrue`) release them. Debug with an ASan build
+  configured with `-DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON` (SDL2 + ASan hangs on macOS).
+- **Fibers** live in `src/runtime/fiber.c` (C-stack switching); the VM swaps its own stacks via
+  `clay_fiber_hooks` registered in `bc_compiler.c`.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.

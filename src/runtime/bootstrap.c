@@ -237,9 +237,10 @@ static ClayValue block_method_trampoline(ClayObject *self, int argc, ClayValue *
     /* The block is stored as the method context */
     ClayObject *block = (ClayObject *)clay_method_context;
     if (!block || block->type != CLAY_TYPE_BLOCK || !block->as.block.func) return CLAY_NIL;
+    ClayObject *prev_self = clay_slot_method_self;  /* restore: may nest */
     clay_slot_method_self = self;
     ClayValue result = block->as.block.func(block, argc, argv);
-    clay_slot_method_self = NULL;
+    clay_slot_method_self = prev_self;
     return result;
 }
 

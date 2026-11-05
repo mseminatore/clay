@@ -153,7 +153,8 @@ static ClayValue number_div(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(0);
     if (is_float_arg(self, argc, argv)) {
         float b = arg_float_or_raise(argv[0], "/");
-        if (b == 0.0f) clay_raise(CLAY_VAL(clay_error_new("division by zero", "DivisionByZero")));
+        /* Float division follows IEEE 754 (x / 0.0 is inf or nan); only
+         * integer division by zero raises DivisionByZero */
         return clay_float_tag(self_float_value(self) / b);
     }
     intptr_t a = self_int_value(self);
@@ -168,7 +169,7 @@ static ClayValue number_mod(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return clay_int(0);
     if (is_float_arg(self, argc, argv)) {
         float b = arg_float_or_raise(argv[0], "%");
-        if (b == 0.0f) clay_raise(CLAY_VAL(clay_error_new("modulo by zero", "DivisionByZero")));
+        /* IEEE 754, like float division: fmodf(x, 0) is nan */
         return clay_float_tag(fmodf(self_float_value(self), b));
     }
     intptr_t a = self_int_value(self);

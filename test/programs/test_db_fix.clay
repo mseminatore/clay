@@ -1,5 +1,5 @@
 "Starting test..." println
-db = Db open("test_fix.db")
+db = Db open(":memory:")   // in-memory: each run starts empty
 db exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT, price REAL)")
 
 escaped = db escape("O'Brien")

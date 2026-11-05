@@ -261,6 +261,12 @@ ClayValue   clay_send_owned(ClayValue receiver, const char *selector, int argc, 
 ClayValue   clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
                                   const char *selector, int argc, ClayValue *argv);
 
+/* Used by generated functions on return: `rv` holds a reference owned by the
+ * function; if it is the receiver (or, for methods, an argument), give that
+ * reference up so the result is borrowed — the convention above. Blocks pass
+ * argc = 0: callers of blocks (each, map, ifTrue, ...) always own the result. */
+ClayValue   clay_return_value(ClayValue rv, ClayValue self, int argc, ClayValue *argv);
+
 /* --- Bootstrap / core prototypes --- */
 extern ClayObject *clay_Object;
 extern ClayObject *clay_Number;
@@ -280,6 +286,16 @@ extern ClayObject *clay_Date;
 extern ClayObject *clay_Http;
 extern ClayObject *clay_Regex;
 extern ClayObject *clay_Fiber;
+
+/* Fiber engine hooks: the bytecode VM gives each fiber its own VM stack and
+ * frames and swaps them on resume/yield. NULL for natively compiled programs. */
+typedef struct {
+    void *(*create)(void);                  /* per-fiber engine state */
+    void  (*enter)(void *state, int first); /* save caller's state, switch to the fiber's */
+    void  (*leave)(void *state, int done);  /* save the fiber's state, restore the caller's */
+    void  (*destroy)(void *state);
+} ClayFiberHooks;
+extern const ClayFiberHooks *clay_fiber_hooks;
 extern ClayObject *clay_Db;
 extern ClayObject *clay_Range;
 
@@ -311,6 +327,7 @@ void clay_set_args(int argc, char **argv);
 int clay_plugin_is_global(const char *name);
 /* Get a plugin-registered prototype by name (or NULL) */
 ClayObject *clay_plugin_get_global(const char *name);
+void        clay_plugin_auto_load(const char *exe_path);   /* load every plugin in <exe dir>/plugins */
 
 /* --- String helpers --- */
 ClayObject *clay_string_new(const char *str);

@@ -24,6 +24,20 @@ typedef struct {
     char **owned_temps;  /* temps holding owned references (need release) */
     int owned_temp_count;
     int owned_temp_capacity;
+    /* Ownership in the method/block function being emitted (not main):
+     * C variables that hold a reference, and cells created here — all released
+     * when the function returns. */
+    const char *plugin_exe_path; /* clay binary whose plugins/ native programs load */
+    int in_function;
+    int fn_is_block;     /* emitting a block function (always returns an owned value) */
+    int use_slot_recv;   /* top-level block: self is the receiver it was invoked
+                          * as a method on (clay_slot_method_self), held in __recv */
+    char **fn_vars;
+    int fn_var_count;
+    int fn_var_capacity;
+    char **fn_cells;
+    int fn_cell_count;
+    int fn_cell_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen *cg, FILE *out, const char *source_file);

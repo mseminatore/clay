@@ -35,7 +35,13 @@ jobs:
         run: cmake --build build --config ${{ matrix.build_type }}
 
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -LE bricks
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -LE "bricks|native"
+
+      # Every test program compiled with `clay --compile` and run. Allowed to
+      # fail on Windows until the MSVC native path has been verified there.
+      - name: Native backend tests
+        continue-on-error: ${{ matrix.os == 'windows-latest' }}
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -L native -LE bricks
 
   asan:
     runs-on: ubuntu-latest

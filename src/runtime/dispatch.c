@@ -238,9 +238,10 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
             ClayObject *slot_obj = CLAY_OBJ(slot_val);
             if (slot_obj && slot_obj->type == CLAY_TYPE_BLOCK && slot_obj->as.block.func) {
+                ClayObject *prev_self = clay_slot_method_self;  /* restore: may nest */
                 clay_slot_method_self = obj;
                 ClayValue result = slot_obj->as.block.func(slot_obj, argc, argv);
-                clay_slot_method_self = NULL;
+                clay_slot_method_self = prev_self;
                 clay_trace_pop();
                 return result;
             }
@@ -321,4 +322,13 @@ ClayValue clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
                                 const char *selector, int argc, ClayValue *argv) {
     return own_result(clay_send_super(receiver, defining_obj, selector, argc, argv),
                       receiver, argc, argv);
+}
+
+ClayValue clay_return_value(ClayValue rv, ClayValue self, int argc, ClayValue *argv) {
+    if (!CLAY_IS_OBJ(rv) || rv == CLAY_TRUE || rv == CLAY_FALSE) return rv;
+    int aliased = (rv == self);
+    for (int i = 0; i < argc && !aliased; i++)
+        if (rv == argv[i]) aliased = 1;
+    if (aliased) clay_release(CLAY_OBJ(rv));   /* caller still holds self/args */
+    return rv;
 }

@@ -119,6 +119,12 @@ Test near(Math pow(4.0, 0.5), 2.0)
 // --- Float division by zero (VM produces inf per IEEE 754) ---
 x = 1.0 / 0.0
 Test ok(x toString() == "inf")
+// ...the same with an integer zero divisor, negative, and modulo (nan);
+// only integer division by zero raises
+Test eq((1.0 / 0) toString, "inf")
+Test eq(((0.0 - 1.0) / 0.0) toString, "-inf")
+Test eq((5.5 % 0.0) toString, "nan")
+Test eq(try { 1 / 0 } catch { |e| e type() }, "DivisionByZero")
 
 // --- Float in compound assignment ---
 x = 1.5

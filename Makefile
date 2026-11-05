@@ -29,7 +29,7 @@ RUNTIME_SRCS = src/runtime/object.c src/runtime/memory.c src/runtime/dispatch.c 
                src/runtime/regex.c src/runtime/db.c \
                src/runtime/bootstrap.c src/runtime/intern.c \
                src/runtime/graphics.c src/runtime/vec3.c src/runtime/thread.c \
-               src/runtime/plugin.c
+               src/runtime/plugin.c src/runtime/fiber.c
 RUNTIME_OBJS = $(RUNTIME_SRCS:.c=.o)
 
 VM_SRCS = src/vm/generated/vm.c src/vm/generated/native.c \
