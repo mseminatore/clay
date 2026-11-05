@@ -1,0 +1,10 @@
+{
+  "lockfile_version": 1,
+  "locked": {
+    "clay-stdlib": {
+      "url": "github.com/mseminatore/clay-stdlib",
+      "version": "latest",
+      "resolved": "e5b74117df7a061fa6ec526238bc4f07229d7b75"
+    }
+  }
+}

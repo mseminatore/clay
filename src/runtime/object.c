@@ -175,6 +175,19 @@ ClayObject *clay_clone(ClayObject *proto) {
 }
 
 void clay_set_slot(ClayObject *obj, const char *name, ClayValue value) {
+    /* `x foo = v` on nil or a number: raise instead of dereferencing */
+    if (!obj) {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "cannot set slot '%s' on nil", name);
+        clay_raise(CLAY_VAL(clay_error_new(msg, "NilError")));
+        return;
+    }
+    if (((uintptr_t)obj & 3) != 0) {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "cannot set slot '%s' on a number", name);
+        clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+        return;
+    }
     /* Check if key already exists — update in-place to avoid remove+insert+strdup */
     ht_value_t old;
     if (ht_lookup(obj->slots, (ht_key_t)name, &old)) {

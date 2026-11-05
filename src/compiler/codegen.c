@@ -1717,6 +1717,13 @@ static void emit_method_bodies(CodeGen *cg) {
         cg->known_slot_count = cur->clone_slot_count;
 
         if (node->type == NODE_METHOD_DEF) {
+            /* Too many arguments is an error (same as the VM); fewer is fine */
+            fprintf(cg->out, "    if (argc > %d) clay_raise_arity(\"", node->as.method_def.params.count);
+            for (const char *c = node->as.method_def.name; *c; c++) {
+                if (*c == '"' || *c == '\\') fputc('\\', cg->out);
+                fputc(*c, cg->out);
+            }
+            fprintf(cg->out, "\", %d, argc);\n", node->as.method_def.params.count);
             /* Make method's self available for capture by nested blocks */
             push_local(cg, "_method_self");
             /* Register params as locals (each holds its own reference) */

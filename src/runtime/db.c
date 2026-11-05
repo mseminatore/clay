@@ -20,10 +20,7 @@
 /* Db open(path) — open or create a database */
 static ClayValue db_open(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || argv[0] == CLAY_NIL)
-        return CLAY_NIL;
-
-    const char *path = clay_string_data(CLAY_OBJ(argv[0]));
+    const char *path = clay_arg_string(argc, argv, 0, "Db open");
     sqlite3 *db = NULL;
     int rc = sqlite3_open(path, &db);
     if (rc != SQLITE_OK) {
@@ -49,8 +46,7 @@ static sqlite3 *get_db(ClayObject *self) {
 
 /* db exec(sql) — execute non-query SQL */
 static ClayValue db_exec(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || argv[0] == CLAY_NIL)
-        return CLAY_NIL;
+    clay_arg_string(argc, argv, 0, "Db exec");   /* raises unless a SQL String */
 
     sqlite3 *db = get_db(self);
     if (!db) {
@@ -71,8 +67,7 @@ static ClayValue db_exec(ClayObject *self, int argc, ClayValue *argv) {
 
 /* db query(sql) — execute SELECT, return Array of Dicts */
 static ClayValue db_query(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || CLAY_IS_INT(argv[0]) || argv[0] == CLAY_NIL)
-        return CLAY_VAL(clay_array_new());
+    clay_arg_string(argc, argv, 0, "Db query");   /* raises unless a SQL String */
 
     sqlite3 *db = get_db(self);
     if (!db) {

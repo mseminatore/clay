@@ -330,6 +330,7 @@ typedef struct {
     int chunk_id;
     int param_count;
     ClayObject *defining_obj; /* prototype where this method was defined */
+    char *name;               /* selector, for error messages */
 } MethodSlot;
 
 /* Dynamic array of method slots (heap-allocated, grows as needed) */
@@ -347,6 +348,7 @@ static int alloc_method_slot(void) {
     ms->chunk_id = -1;
     ms->param_count = 0;
     ms->defining_obj = NULL;
+    ms->name = NULL;
     g_method_slots[g_method_slot_count] = ms;
     return g_method_slot_count++;
 }
@@ -359,6 +361,12 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     if (ms->chunk_id < 0 || ms->chunk_id >= g_bc->chunk_count) return CLAY_NIL;
 
     BcChunk *chunk = g_bc->chunks[ms->chunk_id];
+
+    /* Too many arguments for a method written in Clay (before any VM state
+     * changes, so raising leaves the VM consistent). Fewer is fine: missing
+     * parameters are nil or take their defaults. */
+    if (argc > ms->param_count)
+        clay_raise_arity(ms->name ? ms->name : "method", ms->param_count, argc);
 
     /* Save and set super prototype context */
     ClayObject *saved_super_proto = g_super_proto;
@@ -2762,6 +2770,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     int slot_idx = alloc_method_slot();
                     g_method_slots[slot_idx]->chunk_id = chunk_id;
                     g_method_slots[slot_idx]->param_count = member->as.method_def.params.count;
+                    g_method_slots[slot_idx]->name = strdup(member->as.method_def.name);
 
                     /* Emit: DUP obj, push name, push slot_idx, call set_method */
                     emit_op(bc, CLAYVM_OP_DUP);

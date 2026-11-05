@@ -62,13 +62,19 @@ static ClayValue object_clone(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue object_new(ClayObject *self, int argc, ClayValue *argv) {
-    ClayObject *obj = clay_clone(self);
     /* Call init(args) if the clone has an init method */
-    if (clay_lookup_method(obj, "init")) {
+    if (clay_lookup_method(self, "init")) {
+        ClayObject *obj = clay_clone(self);
         ClayValue init_result = clay_send(obj, "init", argc, argv);
         clay_release_val(init_result);
+        return CLAY_VAL(obj);
     }
-    return CLAY_VAL(obj);
+    if (argc > 0) {
+        /* e.g. Date new("2026-01-01") — the arguments would be silently dropped */
+        clay_raise_argument_error("new", "this prototype has no init method to receive arguments");
+        return CLAY_NIL;
+    }
+    return CLAY_VAL(clay_clone(self));
 }
 
 static ClayValue object_toString(ClayObject *self, int argc, ClayValue *argv) {
@@ -79,7 +85,10 @@ static ClayValue object_toString(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue object_println(ClayObject *self, int argc, ClayValue *argv) {
-    (void)argc; (void)argv;
+    (void)argv;
+    if (argc > 0) clay_raise_argument_error("println",
+        "takes no arguments — it prints the receiver (to print a value, use Console println(value))");
+
     ClayValue s = clay_send(self, "toString", 0, NULL);
     ClayValue pr = clay_send(CLAY_OBJ(s), "println", 0, NULL);
     /* pr is often the same object as s (string_println returns self),

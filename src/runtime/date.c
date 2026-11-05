@@ -24,9 +24,8 @@ static ClayValue date_now(ClayObject *self, int argc, ClayValue *argv) {
 
 /* Date fromTimestamp(ts) - create a Date from epoch seconds */
 static ClayValue date_fromTimestamp(ClayObject *self, int argc, ClayValue *argv) {
-    (void)argc;
+    intptr_t ts = clay_arg_integer(argc, argv, 0, "Date fromTimestamp");
     ClayObject *d = clay_clone(self);
-    intptr_t ts = clay_to_int(argv[0]);
     clay_set_slot(d, "_timestamp", clay_int(ts));
     return CLAY_VAL(d);
 }

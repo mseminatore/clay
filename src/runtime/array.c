@@ -49,7 +49,7 @@ static ClayValue array_append(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue array_at(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_NIL;
+    if (argc < 1) clay_raise_argument_error("Array at", "missing argument");
 
     /* Range-based slicing: arr at(1..4) → sub-array */
     if (CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
@@ -72,9 +72,8 @@ static ClayValue array_at(ClayObject *self, int argc, ClayValue *argv) {
         }
     }
 
-    /* Original integer indexing */
-    if (!CLAY_IS_INT(argv[0])) return CLAY_NIL;
-    intptr_t idx = clay_to_int(argv[0]);
+    /* Integer indexing (a non-number index is a TypeError, not nil) */
+    intptr_t idx = clay_arg_integer(argc, argv, 0, "Array at");
     if (idx < 0) return CLAY_NIL;
     ClayValue result = clay_array_at(self, (size_t)idx);
     clay_retain_val(result);
@@ -259,7 +258,8 @@ static ClayValue array_reverse(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
-    const char *sep = (argc > 0 && !CLAY_IS_NIL(argv[0])) ? clay_string_data(CLAY_OBJ(argv[0])) : "";
+    /* No argument (or nil) joins with no separator; otherwise it must be a String */
+    const char *sep = (argc > 0 && !CLAY_IS_NIL(argv[0])) ? clay_arg_string(argc, argv, 0, "Array join") : "";
     size_t sep_len = strlen(sep);
     char *buf = (char *)malloc(256);
     size_t cap = 256, len = 0;

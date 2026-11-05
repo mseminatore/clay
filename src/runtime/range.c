@@ -141,11 +141,11 @@ static ClayValue range_toString(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue range_step(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(self);
+    intptr_t new_step = clay_arg_integer(argc, argv, 0, "Range step");
+    if (new_step == 0) clay_raise_argument_error("Range step", "step must not be 0");
     intptr_t start, end, step;
     range_read_slots(self, &start, &end, &step);
     (void)step;
-    intptr_t new_step = clay_to_int(argv[0]);
     return CLAY_VAL(clay_range_new(start, end, new_step));
 }
 

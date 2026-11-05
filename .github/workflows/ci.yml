@@ -37,11 +37,9 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -LE "bricks|native"
 
-      # Every test program compiled with `clay --compile` and run. Allowed to
-      # fail on Windows until the MSVC native path has been verified there.
+      # Every test program compiled with `clay --compile` and run
       - name: Native backend tests
         if: ${{ !cancelled() }}          # report native results even if VM tests failed
-        continue-on-error: ${{ matrix.os == 'windows-latest' }}
         run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -L native -LE bricks
 
   asan:

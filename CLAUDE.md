@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Clay is a prototype-based, pure object-oriented language ("everything is an object", message-passing,
 clone-to-create) written in C99. It has two execution paths from a shared frontend: compile to
-human-readable C (native binaries) or compile to bytecode for an embedded VM. See `README.md` for
-full language documentation.
+human-readable C (native binaries) or compile to bytecode for an embedded VM. The user guide lives
+in `docs/` (start at `docs/README.md`); `README.md` is a short landing page.
 
 ## Build & Test
 
@@ -42,6 +42,9 @@ make test-clay
 - `.clay` integration programs live in `test/programs/` and are each registered individually in
   `CMakeLists.txt` as `add_test(NAME clay_test_<name> COMMAND clay_compiler <path>.clay)` — running the
   program with a zero exit code is the test.
+- Docs tests: every ```` ```clay ```` block in `docs/*.md` and `README.md` is run by `doc_test`
+  (`tools/doc_test.c`; CTest label `docs`, 30 s limit per block). Mark fragments and examples that
+  block or need the network/a window/installed bricks as ```` ```clay norun ````.
 - There is no linter configured.
 - Optional CMake flag: `-DCLAY_THREAD_SAFE=ON` enables atomic refcounting + TLS (needed for
   `Thread`/`parallelMap` examples like `examples/raytrace_parallel.clay --live`, which also needs SDL2).
@@ -146,7 +149,7 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 Clay has a built-in package manager: packages ("bricks") are plain Git repos with a `brick.json`
 manifest, resolved via the `bricks/` directory (gitignored, recreated by `clay bricks install`).
 Monorepo bricks (e.g. `clay-stdlib`) are imported with slash paths like
-`import("clay-stdlib/clay-collections")`. See the "Bricks" section of `README.md` for the full
+`import("clay-stdlib/clay-collections")`. See `docs/bricks.md` for the full
 manifest format and CLI (`clay bricks init|add|install|update|list|remove`).
 
 ## Editor integration

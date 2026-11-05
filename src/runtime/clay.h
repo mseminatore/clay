@@ -69,6 +69,16 @@ void      clay_format_float(float f, char *buf, size_t sz);  /* shortest round-t
 intptr_t  clay_int_mul(intptr_t a, intptr_t b);   /* product; raises on overflow */
 intptr_t  clay_float_to_int(float f);  /* truncate; raises OverflowError if out of range */
 void      clay_raise_overflow(void);
+
+/* Argument helpers for native methods: return argv[i] converted, or raise —
+ * ArgumentError if the argument is missing, TypeError if it has the wrong
+ * type. `who` names the method in the message, e.g. "Math sqrt". */
+float       clay_arg_float(int argc, ClayValue *argv, int i, const char *who);
+intptr_t    clay_arg_integer(int argc, ClayValue *argv, int i, const char *who); /* floats truncate */
+const char *clay_arg_string(int argc, ClayValue *argv, int i, const char *who);
+void        clay_raise_argument_error(const char *who, const char *problem);
+/* A method written in Clay was called with more arguments than it declares */
+void        clay_raise_arity(const char *method, int expected, int got);
 intptr_t  clay_to_int(ClayValue v);
 int       clay_is_int(ClayValue v);
 

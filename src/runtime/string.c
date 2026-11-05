@@ -51,7 +51,10 @@ const char *clay_string_data(ClayObject *obj) {
 /* --- String methods --- */
 
 static ClayValue string_println(ClayObject *self, int argc, ClayValue *argv) {
-    (void)argc; (void)argv;
+    (void)argv;
+    if (argc > 0) clay_raise_argument_error("println",
+        "takes no arguments — it prints the receiver (to print a value, use Console println(value))");
+
     if (clay_output_fn) {
         /* Send the full string (no fixed buffer — long lines must not be cut) */
         clay_output_fn(self->as.string.data);
@@ -63,7 +66,10 @@ static ClayValue string_println(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_print(ClayObject *self, int argc, ClayValue *argv) {
-    (void)argc; (void)argv;
+    (void)argv;
+    if (argc > 0) clay_raise_argument_error("print",
+        "takes no arguments — it prints the receiver (to print a value, use Console print(value))");
+
     if (clay_output_fn) {
         clay_output_fn(self->as.string.data);
     } else {
@@ -184,11 +190,8 @@ static ClayValue string_slice(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *arr = clay_array_new();
-    const char *delim = " ";
-    if (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
-        ClayObject *d = CLAY_OBJ(argv[0]);
-        if (d->type == CLAY_TYPE_STRING) delim = d->as.string.data;
-    }
+    /* No argument splits on spaces; anything else must be a String */
+    const char *delim = argc > 0 ? clay_arg_string(argc, argv, 0, "String split") : " ";
     size_t delim_len = strlen(delim);
     if (delim_len == 0) {
         /* Split into individual characters */
@@ -385,8 +388,7 @@ static ClayValue string_lastIndexOf(ClayObject *self, int argc, ClayValue *argv)
 }
 
 static ClayValue string_repeat(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(clay_string_new(""));
-    intptr_t n = clay_to_int(argv[0]);
+    intptr_t n = clay_arg_integer(argc, argv, 0, "String repeat");
     if (n <= 0) return CLAY_VAL(clay_string_new(""));
     size_t total = self->as.string.length * (size_t)n;
     ClayObject *result = string_new_prealloc(total);
@@ -400,9 +402,8 @@ static ClayValue string_repeat(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(clay_retain(self));
-    intptr_t width = clay_to_int(argv[0]);
-    if ((size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
+    intptr_t width = clay_arg_integer(argc, argv, 0, "String padLeft");
+    if (width < 0 || (size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
     char pad = ' ';
     if (argc > 1 && CLAY_IS_PTR(argv[1]) && !CLAY_IS_NIL(argv[1])) {
         ClayObject *ps = CLAY_OBJ(argv[1]);
@@ -418,9 +419,8 @@ static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(clay_retain(self));
-    intptr_t width = clay_to_int(argv[0]);
-    if ((size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
+    intptr_t width = clay_arg_integer(argc, argv, 0, "String padRight");
+    if (width < 0 || (size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
     char pad = ' ';
     if (argc > 1 && CLAY_IS_PTR(argv[1]) && !CLAY_IS_NIL(argv[1])) {
         ClayObject *ps = CLAY_OBJ(argv[1]);

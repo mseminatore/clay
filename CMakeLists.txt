@@ -373,6 +373,24 @@ foreach(prog ${CLAY_NATIVE_TEST_PROGRAMS})
 endforeach()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/native_tests)
 
+# Documentation tests: every ```clay block in the guide (docs/*.md) and README
+# must run without error (blocks marked ```clay norun are skipped)
+add_executable(doc_test tools/doc_test.c)
+target_compile_definitions(doc_test PRIVATE _CRT_SECURE_NO_WARNINGS)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc_tests)
+foreach(doc getting-started language-tour core-objects native-and-plugins bricks debugging)
+    add_test(NAME clay_docs_${doc}
+             COMMAND doc_test $<TARGET_FILE:clay_compiler>
+                     ${CMAKE_CURRENT_SOURCE_DIR}/docs/${doc}.md ${CMAKE_CURRENT_BINARY_DIR}/doc_tests)
+    set_tests_properties(clay_docs_${doc} PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc_tests LABELS "docs")
+endforeach()
+add_test(NAME clay_docs_readme
+         COMMAND doc_test $<TARGET_FILE:clay_compiler>
+                 ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${CMAKE_CURRENT_BINARY_DIR}/doc_tests)
+set_tests_properties(clay_docs_readme PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc_tests LABELS "docs")
+
 # Smoke tests: programs without assertions — they pass if they run to completion
 # (no crash, no uncaught error). Excluded: bench_dispatch (benchmark), dap_test
 # (debugger fixture), math/math_lib (libraries imported by import_test).

@@ -93,4 +93,32 @@ m2 = try { 7 % zero } catch { |e| e type() }
 Test eq(m2, "DivisionByZero")
 Test eq(7 % 3, 1)
 
+
+// Bad arguments raise instead of silently coercing
+Test eq(try { Math sqrt("x") } catch { |e| e type() }, "TypeError")
+Test eq(try { Math max(1, "z") } catch { |e| e type() }, "TypeError")
+Test eq(try { "abc" split(5) } catch { |e| e type() }, "TypeError")
+Test eq(try { [1, 2] at("x") } catch { |e| e type() }, "TypeError")
+Test eq(try { Regex test("abc", 5) } catch { |e| e type() }, "TypeError")
+Test eq(try { (1..10) step(0) } catch { |e| e type() }, "ArgumentError")
+Test eq(try { Date new("2026-01-01") } catch { |e| e type() }, "ArgumentError")
+Test eq(try { 42 println(1) } catch { |e| e type() }, "ArgumentError")
+
+// Methods written in Clay reject extra arguments; blocks accept them
+Arity = Object clone {
+    two(a, b) { a + b }
+    opt(a, b = 5) { a + b }
+}
+Test eq(Arity two(1, 2), 3)
+Test eq(Arity opt(1), 6)
+Test eq(try { Arity two(1, 2, 3) } catch { |e| e type() }, "ArgumentError")
+Test eq(try { Arity two(1, 2, 3) } catch { |e| e message() }, "two takes 2 arguments, but 3 were given")
+Test eq({ |a| a } value(7, 8, 9), 7)
+
+
+// Slot assignment on nil / a number raises (was a segfault)
+nothing = nil
+Test eq(try { nothing x = 1 } catch { |e| e type() }, "NilError")
+Test eq(try { 5 x = 1 } catch { |e| e type() }, "TypeError")
+
 Test done()

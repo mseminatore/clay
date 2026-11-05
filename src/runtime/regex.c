@@ -352,12 +352,8 @@ static int re_search(const char *pat, const char *text, int *match_start, int *m
 /* Regex match(str, pattern) -> first match string or nil */
 static ClayValue regex_match(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 2) return CLAY_NIL;
-    if (!CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
-    if (!CLAY_IS_OBJ(argv[1])) return CLAY_NIL;
-
-    const char *text = clay_string_data(CLAY_OBJ(argv[0]));
-    const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
+    const char *text = clay_arg_string(argc, argv, 0, "Regex match");
+    const char *pat = clay_arg_string(argc, argv, 1, "Regex match");
 
     int start, len;
     if (re_search(pat, text, &start, &len)) {
@@ -369,12 +365,8 @@ static ClayValue regex_match(ClayObject *self, int argc, ClayValue *argv) {
 /* Regex test(str, pattern) -> true/false */
 static ClayValue regex_test(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 2) return CLAY_FALSE;
-    if (!CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
-    if (!CLAY_IS_OBJ(argv[1])) return CLAY_FALSE;
-
-    const char *text = clay_string_data(CLAY_OBJ(argv[0]));
-    const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
+    const char *text = clay_arg_string(argc, argv, 0, "Regex test");
+    const char *pat = clay_arg_string(argc, argv, 1, "Regex test");
 
     int start, len;
     return CLAY_BOOL(re_search(pat, text, &start, &len));
@@ -383,14 +375,9 @@ static ClayValue regex_test(ClayObject *self, int argc, ClayValue *argv) {
 /* Regex replace(str, pattern, replacement) -> new string */
 static ClayValue regex_replace(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 3) return argc > 0 ? argv[0] : CLAY_NIL;
-    if (!CLAY_IS_OBJ(argv[0])) return argv[0];
-    if (!CLAY_IS_OBJ(argv[1])) return argv[0];
-    if (!CLAY_IS_OBJ(argv[2])) return argv[0];
-
-    const char *text = clay_string_data(CLAY_OBJ(argv[0]));
-    const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
-    const char *rep = clay_string_data(CLAY_OBJ(argv[2]));
+    const char *text = clay_arg_string(argc, argv, 0, "Regex replace");
+    const char *pat = clay_arg_string(argc, argv, 1, "Regex replace");
+    const char *rep = clay_arg_string(argc, argv, 2, "Regex replace");
     size_t rep_len = strlen(rep);
 
     /* Build result by replacing all matches */
@@ -437,12 +424,8 @@ static ClayValue regex_replace(ClayObject *self, int argc, ClayValue *argv) {
 /* Regex find(str, pattern) -> array of all match strings */
 static ClayValue regex_find(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 2) return CLAY_VAL(clay_array_new());
-    if (!CLAY_IS_OBJ(argv[0])) return CLAY_VAL(clay_array_new());
-    if (!CLAY_IS_OBJ(argv[1])) return CLAY_VAL(clay_array_new());
-
-    const char *text = clay_string_data(CLAY_OBJ(argv[0]));
-    const char *pat = clay_string_data(CLAY_OBJ(argv[1]));
+    const char *text = clay_arg_string(argc, argv, 0, "Regex find");
+    const char *pat = clay_arg_string(argc, argv, 1, "Regex find");
 
     ClayObject *arr = clay_array_new();
     const char *cursor = text;

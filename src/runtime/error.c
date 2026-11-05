@@ -157,3 +157,48 @@ void clay_error_init_methods(ClayObject *proto) {
     clay_set_method(proto, "stackTrace", error_stackTrace);
     clay_set_method(proto, "toString", error_toString);
 }
+
+/* --- Argument helpers (see clay.h) --- */
+
+void clay_raise_argument_error(const char *who, const char *problem) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s: %s", who, problem);
+    clay_raise(CLAY_VAL(clay_error_new(msg, "ArgumentError")));
+}
+
+static void raise_arg_type(const char *who, int i, const char *expected) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s: argument %d must be %s", who, i + 1, expected);
+    clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+}
+
+static int arg_is_number(ClayValue v) {
+    return CLAY_IS_INT(v) || CLAY_IS_FLOAT(v);
+}
+
+float clay_arg_float(int argc, ClayValue *argv, int i, const char *who) {
+    if (i >= argc) { clay_raise_argument_error(who, "missing argument"); return 0.0f; }
+    if (!arg_is_number(argv[i])) { raise_arg_type(who, i, "a Number"); return 0.0f; }
+    return clay_to_float(argv[i]);
+}
+
+intptr_t clay_arg_integer(int argc, ClayValue *argv, int i, const char *who) {
+    if (i >= argc) { clay_raise_argument_error(who, "missing argument"); return 0; }
+    if (CLAY_IS_INT(argv[i])) return clay_to_int(argv[i]);
+    if (CLAY_IS_FLOAT(argv[i])) return clay_float_to_int(clay_to_float(argv[i]));
+    raise_arg_type(who, i, "an integer");
+    return 0;
+}
+
+const char *clay_arg_string(int argc, ClayValue *argv, int i, const char *who) {
+    if (i >= argc) { clay_raise_argument_error(who, "missing argument"); return ""; }
+    if (!CLAY_IS_TYPE(argv[i], CLAY_TYPE_STRING)) { raise_arg_type(who, i, "a String"); return ""; }
+    return clay_string_data(CLAY_OBJ(argv[i]));
+}
+
+void clay_raise_arity(const char *method, int expected, int got) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s takes %d argument%s, but %d %s given",
+             method, expected, expected == 1 ? "" : "s", got, got == 1 ? "was" : "were");
+    clay_raise(CLAY_VAL(clay_error_new(msg, "ArgumentError")));
+}

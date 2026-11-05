@@ -254,7 +254,10 @@ static ClayValue number_toString(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue number_println(ClayObject *self, int argc, ClayValue *argv) {
-    (void)argc; (void)argv;
+    (void)argv;
+    if (argc > 0) clay_raise_argument_error("println",
+        "takes no arguments — it prints the receiver (to print a value, use Console println(value))");
+
     char buf[64];
     if (is_float_arg(self, 0, NULL)) {
         clay_format_float(self_float_value(self), buf, sizeof(buf) - 1);
