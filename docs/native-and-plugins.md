@@ -14,6 +14,10 @@ plugins — as `clay` itself. Native programs are typically 3–4× faster than 
 VM; use a Release build (`cmake -DCMAKE_BUILD_TYPE=Release`) so the runtime
 they link against is optimized too.
 
+The C file is kept: next to the source (`hello.clay` → `hello.c`), or next to
+the binary when `-o` names one (`clay --compile -o build/hello hello.clay`
+writes `build/hello.c`). `clay -c hello.clay` writes only the C.
+
 Clay generates readable C. This Clay code:
 
 ```clay norun

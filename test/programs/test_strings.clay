@@ -60,4 +60,17 @@ Test eq(false toString(), "false")
 // String + number
 Test eq("val: " + 42, "val: 42")
 
+// Characters that need care in generated C: "??'" is a C trigraph for '^',
+// and a control character followed by a hex digit must stay two characters
+Test eq("(did you mean '??'?)" length, 20)
+Test eq("??'" at(2), "'")
+Test eq("a??=b??/c" length, 9)
+Test eq(("x" + (String chr(1)) + "a") length, 3)
+
+// byteAt: the byte at an index, nil out of range
+Test eq("abc" byteAt(0), 97)
+Test eq("abc" byteAt(2), 99)
+Test eq("abc" byteAt(3), nil)
+Test eq("abc" byteAt(0 - 1), nil)
+
 Test done()

@@ -1,0 +1,246 @@
+// clay-lexer -- the Clay tokenizer, written in Clay
+//
+// Usage:
+//   import("clay-lexer")          // as an installed brick, or
+//   import("../clay-lexer/src/main.clay")
+//
+//   lx = Lexer new(source)
+//   tok = lx next                 // a Token: kind, text, line
+//   toks = Lexer tokenize(source) // every token up to EOF or the first ERROR
+//
+// This is a port of src/compiler/lexer.c and produces exactly the same tokens
+// (CTest clay_selfhost_lexer compares the two on every .clay file in the
+// repository). Token kinds use the C lexer's type names: "INT", "FLOAT", "STRING",
+// "INTERP_STRING", "IDENT", the keywords in upper case ("SELF", "RETURN",
+// ...), punctuation and operators as their own text ("(", "==", "+=", "#{",
+// ...), and "NEWLINE", "EOF", "ERROR".
+//
+// Token text is the source text of the token, except: strings hold the raw
+// text between the quotes (escapes not processed), and ERROR holds the
+// message. A token's line is the line the lexer is on after reading it (so a
+// NEWLINE token reports the following line), as in the C lexer.
+
+Token = Object clone {
+    kind = "EOF"     // (not `type`: that is Object's prototype-name method)
+    text = ""
+    line = 0
+
+    init(k, x, l) {
+        kind = k
+        text = x
+        line = l
+    }
+
+    is(k) { kind == k }
+
+    // "<line> <type> <text>" with \, newline, CR and tab escaped
+    // (the format of `clay --tokens`)
+    dump() {
+        esc = text replace("\\", "\\\\") replace("\n", "\\n") replace("\r", "\\r") replace("\t", "\\t")
+        line toString + " " + kind + " " + esc
+    }
+
+    toString() { self dump }
+}
+
+Lexer = Object clone {
+    src = ""
+    pos = 0
+    len = 0
+    line = 1
+
+    keywords = #{
+        "self": "SELF", "super": "SUPER", "import": "IMPORT", "try": "TRY",
+        "catch": "CATCH", "finally": "FINALLY", "raise": "RAISE",
+        "return": "RETURN", "break": "BREAK", "continue": "CONTINUE", "as": "AS"
+    }
+
+    // Single-character tokens
+    singles = #{
+        "(": "(", ")": ")", "{": "{", "}": "}", "[": "[", "]": "]",
+        ",": ",", ":": ":", ";": ";"
+    }
+
+    // Tokens that may continue with a second character:
+    //   first char: [second char, two-char type, one-char type or nil, error if nil]
+    pairs = #{
+        ".": [".", "..", ".", nil],
+        "|": ["|", "||", "|", nil],
+        "+": ["=", "+=", "+", nil],
+        "-": ["=", "-=", "-", nil],
+        "*": ["=", "*=", "*", nil],
+        "/": ["=", "/=", "/", nil],
+        "%": ["=", "%=", "%", nil],
+        "=": ["=", "==", "=", nil],
+        "!": ["=", "!=", "!", nil],
+        "<": ["=", "<=", "<", nil],
+        ">": ["=", ">=", ">", nil],
+        "&": ["&", "&&", nil, "Unexpected character '&' (did you mean '&&'?)"],
+        "?": ["?", "??", nil, "Unexpected character '?' (did you mean '??'?)"],
+        "#": ["{", "#{", nil, "Unexpected character '#' (did you mean '#{' for a dict literal?)"]
+    }
+
+    init(source) {
+        src = source
+        pos = 0
+        len = source length
+        line = 1
+    }
+
+    // Every token of source, ending with EOF (or the first ERROR)
+    tokenize(source) {
+        lx = Lexer new(source)
+        out = []
+        { true } whileTrue {
+            tok = lx next
+            out push(tok)
+            (tok kind == "EOF" || tok kind == "ERROR") ifTrue { return out }
+        }
+    }
+
+    // --- character helpers (bytes; 0 past the end, like C's NUL) ---
+
+    peek(offset) { (src byteAt(pos + offset)) ?? 0 }
+
+    isDigit(c) { c >= 48 && c <= 57 }
+    isAlpha(c) { (c >= 65 && c <= 90) || (c >= 97 && c <= 122) }
+    isIdentChar(c) { (self isAlpha(c)) || (self isDigit(c)) || c == 95 }
+
+    make(k, start) { Token new(k, src slice(start, pos), line) }
+    error(msg) { Token new("ERROR", msg, line) }
+
+    // --- the scanner ---
+
+    next() {
+        self skipSpace
+        start = pos
+        c = self peek(0)
+        (c == 0) ifTrue { return self make("EOF", start) }
+        pos = pos + 1
+
+        (c == 10) ifTrue {
+            line = line + 1
+            return self make("NEWLINE", start)
+        }
+        (c == 34) ifTrue {
+            ((self peek(0)) == 34 && (self peek(1)) == 34) ifTrue {
+                pos = pos + 2
+                return self tripleString
+            }
+            return self string
+        }
+        (self isDigit(c)) ifTrue { return self number(start) }
+        ((self isAlpha(c)) || c == 95) ifTrue { return self identifier(start) }
+        self operator(start)
+    }
+
+    skipSpace() {
+        { true } whileTrue {
+            c = self peek(0)
+            (c == 32 || c == 9 || c == 13) ifTrue {
+                pos = pos + 1
+                continue
+            }
+            (c == 47 && (self peek(1)) == 47) ifTrue {
+                // line comment
+                { (self peek(0)) != 10 && (self peek(0)) != 0 } whileTrue { pos = pos + 1 }
+                continue
+            }
+            (c == 47 && (self peek(1)) == 42) ifTrue {
+                // block comment (an unterminated one runs to the end)
+                pos = pos + 2
+                { ((self peek(0)) == 42 && (self peek(1)) == 47) == false } whileTrue {
+                    (self peek(0) == 0) ifTrue { return nil }
+                    (self peek(0) == 10) ifTrue { line = line + 1 }
+                    pos = pos + 1
+                }
+                pos = pos + 2
+                continue
+            }
+            return nil
+        }
+    }
+
+    string() {
+        start = pos
+        interp = false
+        { true } whileTrue {
+            c = self peek(0)
+            (c == 34 || c == 0) ifTrue { break }
+            (c == 10) ifTrue { line = line + 1 }
+            (c == 92) ifTrue {
+                // skip the escaped character (an escaped newline is still a line)
+                pos = pos + 1
+                (self peek(0) == 0) ifTrue { break }
+                (self peek(0) == 10) ifTrue { line = line + 1 }
+                pos = pos + 1
+                continue
+            }
+            (c == 36 && (self peek(1)) == 123) ifTrue { interp = true }
+            pos = pos + 1
+        }
+        (self peek(0) == 0) ifTrue { return self error("Unterminated string") }
+        body = src slice(start, pos)
+        pos = pos + 1
+        Token new(interp ifTrue { "INTERP_STRING" } ifFalse { "STRING" }, body, line)
+    }
+
+    tripleString() {
+        start = pos
+        interp = false
+        { ((self peek(0)) == 34 && (self peek(1)) == 34 && (self peek(2)) == 34) == false } whileTrue {
+            c = self peek(0)
+            (c == 0) ifTrue { return self error("Unterminated triple-quoted string") }
+            (c == 10) ifTrue { line = line + 1 }
+            (c == 36 && (self peek(1)) == 123) ifTrue { interp = true }
+            pos = pos + 1
+        }
+        body = src slice(start, pos)
+        pos = pos + 3
+        Token new(interp ifTrue { "INTERP_STRING" } ifFalse { "STRING" }, body, line)
+    }
+
+    number(start) {
+        self skipDigits
+        isFloat = false
+        ((self peek(0)) == 46 && (self isDigit(self peek(1)))) ifTrue {
+            pos = pos + 1
+            self skipDigits
+            isFloat = true
+        }
+        e = self peek(0)
+        n1 = self peek(1)
+        ((e == 101 || e == 69) &&
+         ((self isDigit(n1)) || ((n1 == 43 || n1 == 45) && (self isDigit(self peek(2)))))) ifTrue {
+            pos = pos + 1
+            ((self peek(0)) == 43 || (self peek(0)) == 45) ifTrue { pos = pos + 1 }
+            self skipDigits
+            isFloat = true
+        }
+        self make(isFloat ifTrue { "FLOAT" } ifFalse { "INT" }, start)
+    }
+
+    skipDigits() {
+        { self isDigit(self peek(0)) } whileTrue { pos = pos + 1 }
+    }
+
+    identifier(start) {
+        { self isIdentChar(self peek(0)) } whileTrue { pos = pos + 1 }
+        word = src slice(start, pos)
+        self make((keywords get(word)) ?? "IDENT", start)
+    }
+
+    operator(start) {
+        ch = src slice(start, pos)
+        single = singles get(ch)
+        (single != nil) ifTrue { return self make(single, start) }
+        pair = pairs get(ch)
+        (pair == nil) ifTrue { return self error("Unexpected character") }
+        (src slice(pos, pos + 1) == pair at(0)) ifTrue {
+            pos = pos + 1
+            return self make(pair at(1), start)
+        }
+        (pair at(2) == nil) ifTrue { return self error(pair at(3)) }
+        self make(pair at(2), start)
+    }
+}

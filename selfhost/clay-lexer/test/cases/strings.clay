@@ -1,0 +1,7 @@
+s = "line1\
+line2" t
+u = "q\"uote \\ ${a} $b"
+v = """multi
+${x}
+line"""
+w = ""

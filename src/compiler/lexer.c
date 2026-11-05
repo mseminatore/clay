@@ -96,7 +96,14 @@ static Token lex_string(Lexer *lexer) {
     int has_interp = 0;
     while (peek(lexer) != '"' && peek(lexer) != '\0') {
         if (peek(lexer) == '\n') lexer->line++;
-        if (peek(lexer) == '\\') { advance(lexer); advance(lexer); continue; }
+        if (peek(lexer) == '\\') {
+            /* skip the escaped character (an escaped newline is still a line) */
+            advance(lexer);
+            if (peek(lexer) == '\0') break;
+            if (peek(lexer) == '\n') lexer->line++;
+            advance(lexer);
+            continue;
+        }
         if (peek(lexer) == '$' && lexer->current[1] == '{') has_interp = 1;
         advance(lexer);
     }
@@ -272,6 +279,7 @@ const char *token_type_name(TokenType type) {
         case TOK_RETURN:     return "RETURN";
         case TOK_BREAK:      return "BREAK";
         case TOK_CONTINUE:   return "CONTINUE";
+        case TOK_AS:         return "AS";
         case TOK_LPAREN:     return "(";
         case TOK_RPAREN:     return ")";
         case TOK_LBRACE:     return "{";

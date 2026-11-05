@@ -6,6 +6,7 @@
  *   -o <output>   Output binary name (implies --compile)
  *   -c            Emit C code only (implies --compile)
  *   --ast         Print AST and exit
+ *   --tokens      Print the lexer's tokens and exit
  *   --repl        Interactive REPL (C compilation)
  *   --vm-repl     Interactive REPL (bytecode VM, faster)
  *
@@ -88,7 +89,11 @@ static char *read_file(const char *path) {
 
 /* Replace .clay extension with new extension */
 static char *replace_ext(const char *path, const char *new_ext) {
-    const char *dot = strrchr(path, '.');
+    /* the extension is a dot in the last path component only */
+    const char *base = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    const char *dot = strrchr(base, '.');
     size_t base_len = dot ? (size_t)(dot - path) : strlen(path);
     char *result = (char *)malloc(base_len + strlen(new_ext) + 1);
     memcpy(result, path, base_len);
@@ -1002,6 +1007,7 @@ int main(int argc, char *argv[]) {
     int c_only = 0;
     int compile_mode = 0;
     int print_ast = 0;
+    int print_tokens = 0;
     int repl_mode = 0;
     int vm_repl_mode = 0;
     int trace_mode = 0;
@@ -1026,6 +1032,8 @@ int main(int argc, char *argv[]) {
             compile_mode = 1;
         } else if (strcmp(argv[i], "--ast") == 0) {
             print_ast = 1;
+        } else if (strcmp(argv[i], "--tokens") == 0) {
+            print_tokens = 1;
         } else if (strcmp(argv[i], "--repl") == 0) {
             repl_mode = 1;
         } else if (strcmp(argv[i], "--vm-repl") == 0) {
@@ -1045,6 +1053,7 @@ int main(int argc, char *argv[]) {
             printf("  -o <output>   Output binary name (implies --compile)\n");
             printf("  -c            Emit C code only, no compile (implies --compile)\n");
             printf("  --ast         Print AST and exit\n");
+            printf("  --tokens      Print the lexer's tokens and exit\n");
             printf("  --repl        Launch interactive REPL (compiles to C)\n");
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
             printf("  --trace       Bytecode tracing (VM REPL or file execution)\n");
@@ -1072,6 +1081,10 @@ int main(int argc, char *argv[]) {
         for (int i = 1; i < argc; i++) {
             if (argv[i] == source_file) { script_arg_start = i + 1; break; }
         }
+        /* `clay prog.clay -- args`: the separator is not an argument */
+        if (script_arg_start > 0 && script_arg_start < argc &&
+            strcmp(argv[script_arg_start], "--") == 0)
+            script_arg_start++;
         clay_set_args(argc - script_arg_start, argv + script_arg_start);
     }
 
@@ -1099,6 +1112,33 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "  -c            Emit C code only\n");
         fprintf(stderr, "  --ast         Print AST and exit\n");
         return 1;
+    }
+
+    /* --tokens: one token per line, "<line> <type> <text>" with \\, \n, \r
+     * and \t escaped in the text (strings: the raw text between the quotes;
+     * ERROR: the message). Stops after EOF or the first ERROR. The Clay lexer
+     * (selfhost/clay-lexer) prints the same format; CTest compares them. */
+    if (print_tokens) {
+        char *source = read_file(source_file);
+        if (!source) { fprintf(stderr, "clay: cannot read %s\n", source_file); return 1; }
+        Lexer lexer;
+        lexer_init(&lexer, source);
+        for (;;) {
+            Token t = lexer_next(&lexer);
+            printf("%d %s ", t.line, token_type_name(t.type));
+            for (int k = 0; k < t.length; k++) {
+                char ch = t.start[k];
+                if (ch == '\\') fputs("\\\\", stdout);
+                else if (ch == '\n') fputs("\\n", stdout);
+                else if (ch == '\r') fputs("\\r", stdout);
+                else if (ch == '\t') fputs("\\t", stdout);
+                else putchar(ch);
+            }
+            putchar('\n');
+            if (t.type == TOK_EOF || t.type == TOK_ERROR) break;
+        }
+        free(source);
+        return 0;
     }
 
     /* --ast: parse and print AST, then exit */
@@ -1150,8 +1190,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Generate C code */
-    char *c_file = replace_ext(source_file, ".c");
+    /* Generate C code: next to the binary when -o names one (keeps source
+     * trees clean), else next to the source */
+    char *c_file = (output_name && !c_only) ? replace_ext(output_name, ".c")
+                                            : replace_ext(source_file, ".c");
     FILE *out = fopen(c_file, "w");
     if (!out) {
         fprintf(stderr, "clay: cannot write '%s'\n", c_file);

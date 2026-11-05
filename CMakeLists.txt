@@ -323,6 +323,7 @@ add_test(NAME clay_test_new_methods COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE
 add_test(NAME clay_test_trailing_blocks COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_trailing_blocks.clay)
 add_test(NAME clay_test_return COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_return.clay)
 add_test(NAME clay_test_init_globals COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_init_globals.clay)
+add_test(NAME clay_test_c_names COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_c_names.clay)
 add_test(NAME clay_test_break_continue COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_break_continue.clay)
 add_test(NAME clay_test_dict_literal COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_dict_literal.clay)
 add_test(NAME clay_test_null_coalesce COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_null_coalesce.clay)
@@ -373,6 +374,23 @@ foreach(prog ${CLAY_NATIVE_TEST_PROGRAMS})
     endif()
 endforeach()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/native_tests)
+
+# Self-hosting: the Clay lexer (selfhost/clay-lexer, written in Clay) must
+# tokenize every .clay file exactly like the C lexer (`clay --tokens`); in the
+# VM and compiled natively
+add_test(NAME clay_selfhost_lexer
+         COMMAND ${CMAKE_COMMAND}
+             -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lexer_compare.cmake)
+add_test(NAME clay_selfhost_lexer_native
+         COMMAND ${CMAKE_COMMAND}
+             -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+             -DNATIVE=${CMAKE_CURRENT_BINARY_DIR}/native_tests/clay_tokens${CMAKE_EXECUTABLE_SUFFIX}
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lexer_compare.cmake)
+set_tests_properties(clay_selfhost_lexer PROPERTIES LABELS "selfhost")
+set_tests_properties(clay_selfhost_lexer_native PROPERTIES LABELS "selfhost;native")
 
 # Documentation tests: every ```clay block in the guide (docs/*.md) and README
 # must run without error (blocks marked ```clay norun are skipped)

@@ -1,0 +1,27 @@
+// Clay names that are reserved in the generated C (C library functions and
+// macros, the generated code's own names) must still work natively.
+// `log` as a top-level variable broke the MSVC build (log() from math.h).
+log = []
+errno = 1
+EOF_ = 2
+stdin = "in"
+time = 3
+self_ = 4
+_t5 = 5
+x_cell = 6
+__weird = 7
+clay_thing = 8
+_clay_block_1 = 0
+M = Object clone {
+  go(argc, errno) {
+    exp = argc + errno
+    [1] each { |log| exp = exp + log }
+    exp
+  }
+}
+[1, 2] each { |time| log push(time + errno) }
+(log == [2, 3]) ifFalse { raise("log") }
+((M go(10, 20)) == 31) ifFalse { raise("go") }
+((errno + EOF_ + time + self_ + _t5 + x_cell + __weird + clay_thing) == 36) ifFalse { raise("sum") }
+(stdin == "in") ifFalse { raise("stdin") }
+"PASS: C-reserved names" println

@@ -436,6 +436,14 @@ static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 /* chr(code) — return a single-character string from an ASCII/Unicode code point */
+/* "abc" byteAt(1) → 98: the byte at an index (0..255), or nil out of range */
+static ClayValue string_byteAt(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_INT(argv[0])) clay_raise_argument_error("byteAt", "expects an integer index");
+    intptr_t i = clay_to_int(argv[0]);
+    if (i < 0 || (size_t)i >= self->as.string.length) return CLAY_NIL;
+    return clay_int((unsigned char)self->as.string.data[i]);
+}
+
 static ClayValue string_chr(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 1) return CLAY_NIL;
@@ -474,4 +482,5 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "padLeft", string_padLeft);
     clay_set_method(proto, "padRight", string_padRight);
     clay_set_method(proto, "chr", string_chr);
+    clay_set_method(proto, "byteAt", string_byteAt);
 }

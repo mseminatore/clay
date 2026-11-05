@@ -193,10 +193,11 @@ static void emit_c_string(CodeGen *cg, const char *s) {
             case '\n': fprintf(cg->out, "\\n"); break;
             case '\t': fprintf(cg->out, "\\t"); break;
             case '\r': fprintf(cg->out, "\\r"); break;
-            case '\0': fprintf(cg->out, "\\0"); break;
+            case '?':  fprintf(cg->out, "\\?"); break;   /* no trigraphs ("??'" is '^') */
             default:
                 if ((unsigned char)*s < 0x20 || (unsigned char)*s == 0x7f) {
-                    fprintf(cg->out, "\\x%02x", (unsigned char)*s);
+                    /* octal: at most 3 digits, so a following digit can't join it */
+                    fprintf(cg->out, "\\%03o", (unsigned char)*s);
                 } else {
                     fputc(*s, cg->out);
                 }
@@ -222,28 +223,92 @@ static const char *op_func_suffix(const char *op) {
 }
 
 /* Sanitize Clay identifiers that clash with C keywords */
+/* Names a Clay identifier can't use as-is in the generated C: C keywords,
+ * library names the runtime headers (or the platform's) may declare or
+ * #define -- a file-scope `static ClayValue log` clashes with log() under
+ * MSVC, and `errno` / `EOF` are macros -- and the generated code's own names. */
+static const char *c_reserved_names[] = {
+    /* C keywords */
+    "auto", "break", "case", "char", "const", "continue", "default", "do",
+    "double", "else", "enum", "extern", "float", "for", "goto", "if", "int",
+    "long", "register", "return", "short", "signed", "sizeof", "static",
+    "struct", "switch", "typedef", "union", "unsigned", "void", "volatile",
+    "while", "inline", "restrict", "_Bool", "_Complex", "_Imaginary",
+    "bool", "true", "false", "asm", "near", "far", "min", "max",
+    /* generated code */
+    "self", "argc", "argv", "main",
+    /* stdio.h */
+    "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
+    "vsprintf", "vsnprintf", "scanf", "fscanf", "sscanf", "fopen", "fclose",
+    "freopen", "fread", "fwrite", "fgets", "fputs", "fgetc", "fputc", "getc",
+    "putc", "getchar", "putchar", "gets", "puts", "ungetc", "fflush", "fseek",
+    "ftell", "rewind", "fgetpos", "fsetpos", "remove", "rename", "tmpfile",
+    "tmpnam", "feof", "ferror", "clearerr", "perror", "setbuf", "setvbuf",
+    "stdin", "stdout", "stderr", "EOF", "FILE", "BUFSIZ", "fpos_t",
+    /* stdlib.h */
+    "malloc", "calloc", "realloc", "free", "abort", "exit", "atexit",
+    "_Exit", "getenv", "system", "atoi", "atol", "atoll", "atof", "strtol",
+    "strtoll", "strtoul", "strtoull", "strtod", "strtof", "strtold", "rand",
+    "srand", "qsort", "bsearch", "abs", "labs", "llabs", "div", "ldiv",
+    "lldiv", "mblen", "mbtowc", "wctomb", "mbstowcs", "wcstombs", "RAND_MAX",
+    "EXIT_SUCCESS", "EXIT_FAILURE", "NULL", "size_t", "wchar_t", "environ",
+    /* string.h */
+    "memcpy", "memmove", "memset", "memcmp", "memchr", "strcpy", "strncpy",
+    "strcat", "strncat", "strcmp", "strncmp", "strcoll", "strxfrm", "strchr",
+    "strrchr", "strstr", "strspn", "strcspn", "strpbrk", "strtok", "strlen",
+    "strerror", "strdup", "index", "rindex",
+    /* math.h */
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh",
+    "tanh", "exp", "exp2", "log", "log10", "log2", "pow", "sqrt", "ceil",
+    "floor", "fabs", "fmod", "frexp", "ldexp", "modf", "round", "trunc",
+    "fmin", "fmax", "hypot", "cbrt", "expm1", "log1p", "erf", "erfc",
+    "lgamma", "tgamma", "gamma", "nan", "isnan", "isinf", "isfinite",
+    "signbit", "copysign", "remainder", "INFINITY", "NAN", "HUGE_VAL", "j0",
+    "j1", "jn", "y0", "y1", "yn",
+    /* setjmp.h, stdint.h, stddef.h */
+    "setjmp", "longjmp", "jmp_buf", "offsetof", "ptrdiff_t", "intptr_t",
+    "uintptr_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t",
+    "uint16_t", "uint32_t", "uint64_t",
+    /* ctype.h, time.h, errno.h, assert.h, signal.h, POSIX */
+    "isalpha", "isdigit", "isalnum", "isspace", "isupper", "islower",
+    "ispunct", "isprint", "toupper", "tolower", "time", "clock", "difftime",
+    "mktime", "localtime", "gmtime", "strftime", "asctime", "ctime", "errno",
+    "assert", "signal", "raise", "read", "write", "open", "close", "select",
+    "sleep", "usleep", "fork", "kill", "pipe", "dup", "link", "unlink", "stat",
+    "access", "getpid", "optarg",
+    NULL
+};
+
+static int c_name_is_reserved(const char *name) {
+    /* internal names the code generator itself emits */
+    if (strcmp(name, "_method_self") == 0 || strcmp(name, "__ret_id") == 0 ||
+        strncmp(name, "__isslot_", 9) == 0)
+        return 0;
+    for (int i = 0; c_reserved_names[i]; i++)
+        if (strcmp(name, c_reserved_names[i]) == 0) return 1;
+    size_t n = strlen(name);
+    /* runtime / generated prefixes and suffixes: clay_*, CLAY_*, _cv_*, _clay_*,
+     * temps (_t12, _t12_env), cells (x_cell), and C's reserved __x / _X */
+    if (strncmp(name, "clay_", 5) == 0 || strncmp(name, "CLAY_", 5) == 0 ||
+        strncmp(name, "_cv_", 4) == 0 || strncmp(name, "_clay_", 6) == 0)
+        return 1;
+    if (name[0] == '_' && name[1] == 't' && name[2] >= '0' && name[2] <= '9') return 1;
+    if (n >= 5 && strcmp(name + n - 5, "_cell") == 0) return 1;
+    if (name[0] == '_' && (name[1] == '_' || (name[1] >= 'A' && name[1] <= 'Z'))) return 1;
+    return 0;
+}
+
+/* The C name for a Clay identifier: itself, or `_cv_<name>` if reserved.
+ * Returns one of a few rotating static buffers so several calls can appear
+ * in one printf. */
 static const char *c_safe_name(const char *name) {
-    static const char *c_keywords[] = {
-        "auto", "break", "case", "char", "const", "continue", "default",
-        "do", "double", "else", "enum", "extern", "float", "for", "goto",
-        "if", "int", "long", "register", "return", "short", "signed",
-        "sizeof", "static", "struct", "switch", "typedef", "union",
-        "unsigned", "void", "volatile", "while",
-        /* C99 */
-        "inline", "restrict", "_Bool", "_Complex", "_Imaginary",
-        /* Common MSVC/GCC extensions */
-        "bool", "true", "false", NULL
-    };
-    for (int i = 0; c_keywords[i]; i++) {
-        if (strcmp(name, c_keywords[i]) == 0) {
-            /* Return a prefixed name — caller must free if needed.
-             * We use a static buffer since codegen runs single-threaded. */
-            static char buf[128];
-            snprintf(buf, sizeof(buf), "_cv_%s", name);
-            return buf;
-        }
-    }
-    return name;
+    if (!c_name_is_reserved(name)) return name;
+    static char bufs[4][160];
+    static int next = 0;
+    char *buf = bufs[next];
+    next = (next + 1) % 4;
+    snprintf(buf, sizeof(bufs[0]), "_cv_%s", name);
+    return buf;
 }
 
 /* --- Implicit-slot fallback (mirrors bc_compiler.c) ---

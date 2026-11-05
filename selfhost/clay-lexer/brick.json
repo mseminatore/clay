@@ -1,0 +1,6 @@
+{
+    "name": "clay-lexer",
+    "version": "0.1.0",
+    "description": "The Clay tokenizer, written in Clay",
+    "main": "src/main.clay"
+}

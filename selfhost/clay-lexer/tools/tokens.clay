@@ -1,0 +1,14 @@
+// tokens.clay -- print a file's tokens in the format of `clay --tokens`
+//
+//   clay selfhost/clay-lexer/tools/tokens.clay <file.clay>
+import("../src/main.clay")
+
+args = System args
+(args size < 1) ifTrue {
+    "usage: clay tokens.clay <file.clay>" println
+    System exit(2)
+}
+out = []
+(Lexer tokenize(File read(args at(0)))) each { |tok| out push(tok dump) }
+out push("")
+Console print(out join("\n"))

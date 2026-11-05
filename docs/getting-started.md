@@ -69,6 +69,7 @@ clay              # start VM REPL (default)
 | `--compile` | Compile to native binary via C |
 | `-o <name>` | Set output binary name (implies `--compile`) |
 | `--ast` | Print the AST and exit |
+| `--tokens` | Print the lexer's tokens (`<line> <type> <text>`) and exit |
 | `--dap` | Run as a DAP (Debug Adapter Protocol) server |
 | `--vm-repl` | Launch bytecode VM REPL (instant evaluation, default) |
 | `--repl` | Launch classic REPL (compiles to C each input) |

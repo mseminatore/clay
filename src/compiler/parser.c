@@ -46,6 +46,12 @@ static char *read_file(const char *path) {
 
 /* Resolve a relative import path based on the importing file's directory */
 static char *resolve_import_path(const char *base_file, const char *import_path) {
+    /* Absolute paths are used as they are */
+    if (import_path[0] == '/' || import_path[0] == '\\' ||
+        (import_path[0] && import_path[1] == ':')) {
+        return strdup(import_path);
+    }
+
     /* Find directory of base_file */
     const char *last_sep = strrchr(base_file, '/');
     const char *last_bsep = strrchr(base_file, '\\');
