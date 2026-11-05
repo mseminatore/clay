@@ -1,0 +1,8 @@
+// names that are reserved in C
+errno = 1
+time = 2
+x_cell = 3
+_t1 = 4
+self_ = 5
+M = Object clone { argc(main) { main + 1 } }
+[errno, time, x_cell, _t1, self_, M argc(1)] println

@@ -513,11 +513,14 @@ static AstNode *parse_primary(Parser *p) {
     if (match(p, TOK_LBRACKET)) {
         AstNode *node = ast_new(NODE_ARRAY_LIT, p->previous.line);
         nodelist_init(&node->as.array_lit.elements);
+        skip_newlines(p);   /* elements may start on the next line */
         if (!check(p, TOK_RBRACKET)) {
             nodelist_push(&node->as.array_lit.elements, parse_expression(p));
+            skip_newlines(p);
             while (match(p, TOK_COMMA)) {
                 skip_newlines(p);
                 nodelist_push(&node->as.array_lit.elements, parse_expression(p));
+                skip_newlines(p);
             }
         }
         expect(p, TOK_RBRACKET, "Expected ']'");

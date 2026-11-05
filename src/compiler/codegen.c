@@ -573,13 +573,16 @@ static char *emit_int_lit(CodeGen *cg, AstNode *node) {
     return t;
 }
 
+void clay_format_float(float f, char *buf, size_t sz);   /* runtime */
+
 static char *emit_float_lit(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
-    /* Tagged float — no heap allocation, not an owned temp.
-     * Use %.9g to preserve precision; always append .0 if no decimal point. */
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.9g", node->as.float_lit.value);
+    /* Tagged float — no heap allocation, not an owned temp. The shortest text
+     * that reads back as the same float (C parses `0.1f` to that float too);
+     * always a decimal point or exponent. */
+    char buf[48];
+    clay_format_float(node->as.float_lit.value, buf, sizeof(buf));
     if (!strchr(buf, '.') && !strchr(buf, 'e') && !strchr(buf, 'E')) {
         strcat(buf, ".0");
     }
@@ -1307,7 +1310,9 @@ static char *emit_dict_lit(CodeGen *cg, AstNode *node) {
         const char *key_str = key_node->as.string_lit.value;
         char *val = emit_expr(cg, node->as.dict_lit.values.items[i]);
         emit_indent(cg);
-        fprintf(cg->out, "clay_dict_set(%s_obj, \"%s\", %s);\n", t, key_str, val);
+        fprintf(cg->out, "clay_dict_set(%s_obj, ", t);
+        emit_c_string(cg, key_str);
+        fprintf(cg->out, ", %s);\n", val);
         free(val);
     }
 

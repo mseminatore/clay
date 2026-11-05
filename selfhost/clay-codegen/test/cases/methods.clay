@@ -1,0 +1,37 @@
+// method bodies: slot flags, captures, non-local return, super, defaults
+Base = Object clone {
+    count = 0
+    name = "base"
+    greet(who = "world", punct = "!") { "hi " + who + punct }
+    total(xs) {
+        sum = 0
+        xs each { |x| sum = sum + x; count = count + 1 }
+        sum
+    }
+    find(xs, want) {
+        xs each { |x| (x == want) ifTrue { return x } }
+        nil
+    }
+    nested(xs) {
+        acc = []
+        xs each { |x| xs each { |y| acc push(x * y + count) } }
+        acc
+    }
+    guarded() {
+        r = try { self find([1, 2], 2) } catch { |e| e } finally { count = 0 }
+        r
+    }
+    slotLater() {
+        fresh = 1
+        later = fresh + 1
+        later
+    }
+}
+Derived = Base clone {
+    greet(who = "derived") { super greet(who, "?") + " " + self name }
+    +(o) { count + o count }
+    ==(o) { true }
+}
+d = Derived clone
+d count = 2
+[d greet, d total([1, 2, 3]), d find([4, 5], 5), d nested([1, 2]), d guarded, d + d, d slotLater] println

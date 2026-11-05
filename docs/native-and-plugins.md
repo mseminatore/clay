@@ -56,6 +56,20 @@ The generated C includes `#line` directives mapping back to the `.clay` source, 
 
 **Method cache**: message dispatch caches resolved methods per (receiver-prototype, selector) pair, avoiding repeated prototype-chain walks. The cache is automatically invalidated when methods are added or changed.
 
+## A Clay compiler in Clay
+
+`selfhost/` holds a Clay compiler written in Clay — lexer, parser and C code
+generator as bricks, plus the `clayc` driver. It produces exactly the C that
+`clay --compile` does, and compiles itself: built by `clay --compile`, then
+by itself twice, it reaches a fixpoint (the CTest `clay_selfhost_bootstrap`).
+
+```sh
+clay --compile -o clayc selfhost/clayc.clay    # build the Clay compiler
+./clayc -o hello examples/hello.clay           # and use it
+```
+
+See [selfhost/README.md](../selfhost/README.md).
+
 ## FFI (Foreign Function Interface)
 
 Load and call functions from shared libraries (`.dll`, `.so`, `.dylib`). Plugin functions must match the Clay method signature: `ClayValue fn(ClayObject *self, int argc, ClayValue *argv)`.

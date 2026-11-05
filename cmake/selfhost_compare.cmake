@@ -2,13 +2,16 @@
 # must agree exactly with the C implementation on every .clay file in the
 # repository and in their edge-case corpora.
 #
-#   cmake -DCLAY=<clay binary> -DROOT=<source dir> -DCHECK=lexer|parser
-#         [-DNATIVE=<binary to build>] -P selfhost_compare.cmake
+#   cmake -DCLAY=<clay binary> -DROOT=<source dir> -DCHECK=lexer|parser|codegen
+#         [-DNATIVE=<binary to build>] [-DWORK=<scratch dir>] -P selfhost_compare.cmake
 #
-#   lexer:  `clay --tokens f`  vs  selfhost/clay-lexer/tools/tokens.clay f
-#   parser: `clay --ast f`     vs  selfhost/clay-parser/tools/ast.clay f
-#           (stdout and stderr together, and the exit status: syntax errors
-#           must match too)
+#   lexer:   `clay --tokens f`  vs  selfhost/clay-lexer/tools/tokens.clay f
+#   parser:  `clay --ast f`     vs  selfhost/clay-parser/tools/ast.clay f
+#            (stdout and stderr together, and the exit status: syntax errors
+#            must match too)
+#   codegen: `clay -c -o a.c f` vs  selfhost/clay-codegen/tools/c.clay f b.c
+#            (the generated C byte for byte, and the exit status; WORK holds
+#            the C files)
 #
 # Without NATIVE the Clay side runs in the VM; with NATIVE its tool is first
 # compiled with `clay --compile -o <NATIVE>` and that binary is used.
@@ -25,8 +28,14 @@ if(CHECK STREQUAL "lexer")
 elseif(CHECK STREQUAL "parser")
     set(flag --ast)
     set(tool "${ROOT}/selfhost/clay-parser/tools/ast.clay")
+elseif(CHECK STREQUAL "codegen")
+    set(tool "${ROOT}/selfhost/clay-codegen/tools/c.clay")
+    if(NOT WORK)
+        message(FATAL_ERROR "selfhost_compare.cmake: codegen needs WORK")
+    endif()
+    file(MAKE_DIRECTORY "${WORK}")
 else()
-    message(FATAL_ERROR "selfhost_compare.cmake: CHECK must be lexer or parser")
+    message(FATAL_ERROR "selfhost_compare.cmake: CHECK must be lexer, parser or codegen")
 endif()
 
 if(NATIVE)
@@ -50,8 +59,45 @@ if(count LESS 50)
     message(FATAL_ERROR "selfhost_compare.cmake: only ${count} .clay files found under ${ROOT}")
 endif()
 
+# codegen: the generated C names the clay whose plugins/ native programs load;
+# a native tool has no `System executable`, so pass the VM's explicitly
+set(plugin_args "")
+if(CHECK STREQUAL "codegen" AND NATIVE)
+    file(WRITE "${WORK}/exe.clay" "Console print(System executable)\n")
+    execute_process(COMMAND "${CLAY}" "${WORK}/exe.clay" OUTPUT_VARIABLE exe)
+    set(plugin_args --plugin-exe "${exe}")
+endif()
+
 set(failed "")
+set(index 0)
 foreach(f ${files})
+    if(CHECK STREQUAL "codegen")
+        math(EXPR index "${index} + 1")
+        set(c_out "${WORK}/${index}.c")
+        set(clay_out "${WORK}/${index}.clay.c")
+        file(REMOVE "${c_out}" "${clay_out}")
+        execute_process(COMMAND "${CLAY}" -c -o "${c_out}" "${f}"
+                        RESULT_VARIABLE rc_c OUTPUT_QUIET ERROR_QUIET)
+        execute_process(COMMAND ${clay_side} "${f}" "${clay_out}" ${plugin_args}
+                        RESULT_VARIABLE rc_clay OUTPUT_VARIABLE got ERROR_VARIABLE got)
+        set(want "")
+        set(have "")
+        if(EXISTS "${c_out}")
+            file(READ "${c_out}" want)
+        endif()
+        if(EXISTS "${clay_out}")
+            file(READ "${clay_out}" have)
+        endif()
+        if(NOT rc_c EQUAL rc_clay OR NOT want STREQUAL have)
+            file(RELATIVE_PATH rel "${ROOT}" "${f}")
+            list(APPEND failed "${rel}")
+            list(LENGTH failed nfail)
+            if(nfail LESS_EQUAL 3)
+                message("--- ${rel}: C exit ${rc_c}, Clay exit ${rc_clay}: diff ${c_out} ${clay_out}\n${got}")
+            endif()
+        endif()
+        continue()
+    endif()
     execute_process(COMMAND "${CLAY}" ${flag} "${f}"
                     RESULT_VARIABLE rc_c OUTPUT_VARIABLE want ERROR_VARIABLE want)
     execute_process(COMMAND ${clay_side} "${f}"

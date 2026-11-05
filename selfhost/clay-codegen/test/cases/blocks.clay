@@ -1,0 +1,16 @@
+// top-level blocks, captures, block-valued slots, inline clones, plugins
+counter = 0
+inc = { counter = counter + 1 }
+3 times { |i| inc value }
+make = { |n| { |x| x + n } }
+add5 = make value(5)
+P = Object clone {
+    run() {
+        q = Object clone { v = 3; get() { v } }
+        q get
+    }
+    fn = { |x| x * 2 }
+}
+m = (System pluginGlobals contains("MathEx")) ifTrue { MathEx } ifFalse { nil }
+log = [counter, add5 value(1), P run, P fn(4), m != nil]
+log println

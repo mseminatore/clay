@@ -379,18 +379,21 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/native_tests)
 
 # Self-hosting: the compiler pieces written in Clay (selfhost/) must agree
 # exactly with the C implementation on every .clay file — the lexer with
-# `clay --tokens`, the parser with `clay --ast` — in the VM and compiled
-# natively. Run from the source root so brick imports resolve.
-foreach(check lexer parser)
+# `clay --tokens`, the parser with `clay --ast`, the code generator with
+# `clay -c` — in the VM and compiled natively. Run from the source root so
+# brick imports resolve.
+foreach(check lexer parser codegen)
     add_test(NAME clay_selfhost_${check}
              COMMAND ${CMAKE_COMMAND}
                  -DCLAY=$<TARGET_FILE:clay_compiler>
                  -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -DCHECK=${check}
+                 -DWORK=${CMAKE_CURRENT_BINARY_DIR}/selfhost_${check}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_compare.cmake)
     add_test(NAME clay_selfhost_${check}_native
              COMMAND ${CMAKE_COMMAND}
                  -DCLAY=$<TARGET_FILE:clay_compiler>
                  -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -DCHECK=${check}
+                 -DWORK=${CMAKE_CURRENT_BINARY_DIR}/selfhost_${check}_native
                  -DNATIVE=${CMAKE_CURRENT_BINARY_DIR}/native_tests/clay_selfhost_${check}${CMAKE_EXECUTABLE_SUFFIX}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_compare.cmake)
     set_tests_properties(clay_selfhost_${check} PROPERTIES
@@ -398,6 +401,19 @@ foreach(check lexer parser)
     set_tests_properties(clay_selfhost_${check}_native PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
 endforeach()
+# Bootstrap: clayc (selfhost/clayc.clay) compiles itself to a fixpoint. Needs
+# a cc-style clay-native.cfg (clayc doesn't drive MSVC yet).
+if(NOT MSVC)
+    add_test(NAME clay_selfhost_bootstrap
+             COMMAND ${CMAKE_COMMAND}
+                 -DCLAY=$<TARGET_FILE:clay_compiler>
+                 -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+                 -DWORK=${CMAKE_CURRENT_BINARY_DIR}/selfhost_bootstrap
+                 -DCFG=$<TARGET_FILE_DIR:clay_compiler>/clay-native.cfg
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_bootstrap.cmake)
+    set_tests_properties(clay_selfhost_bootstrap PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
+endif()
 
 # Documentation tests: every ```clay block in the guide (docs/*.md) and README
 # must run without error (blocks marked ```clay norun are skipped)

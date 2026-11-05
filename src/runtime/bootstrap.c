@@ -4,6 +4,9 @@
 #include "clay.h"
 #include "ffi.h"
 #include <time.h>
+#ifndef _WIN32
+#include <sys/wait.h>   /* WEXITSTATUS (System run) */
+#endif
 #ifdef _WIN32
 #include <stdlib.h>  /* getenv, exit */
 #else
@@ -466,6 +469,23 @@ void clay_set_args(int argc, char **argv) {
     s_argv = argv;
 }
 
+/* System run("cc -o x x.c") → the command's exit status (via the shell);
+ * output goes to this process's stdout/stderr */
+static ClayValue system_run(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    const char *cmd = clay_arg_string(argc, argv, 0, "run");
+    fflush(stdout);
+    fflush(stderr);
+    int rc = system(cmd);
+#ifndef _WIN32
+    if (rc != -1) {
+        if (WIFEXITED(rc)) rc = WEXITSTATUS(rc);
+        else if (WIFSIGNALED(rc)) rc = 128 + WTERMSIG(rc);
+    }
+#endif
+    return clay_int(rc);
+}
+
 static ClayValue system_exit(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     int code = 0;
@@ -673,6 +693,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
     clay_set_method(clay_System, "exit", system_exit);
+    clay_set_method(clay_System, "run", system_run);
     clay_set_method(clay_System, "env", system_env);
     clay_set_method(clay_System, "args", system_args);
     clay_set_method(clay_System, "platform", system_platform);

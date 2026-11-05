@@ -1,0 +1,25 @@
+// c.clay -- compile a .clay file to C, like `clay -c -o <out.c> <file.clay>`
+//
+//   clay selfhost/clay-codegen/tools/c.clay <file.clay> <out.c> [--plugin-exe <path>]
+//
+// --plugin-exe: the clay whose plugins/ the native program loads (default:
+// the running clay, `System executable`).
+import("../src/main.clay")
+
+args = System args
+(args size < 2) ifTrue {
+    "usage: clay c.clay <file.clay> <out.c> [--plugin-exe <path>]" println
+    System exit(2)
+}
+path = args at(0)
+outPath = args at(1)
+exe = System executable
+((args size >= 4) && (args at(2)) == "--plugin-exe") ifTrue { exe = args at(3) }
+
+p = Parser new(File read(path), path)
+program = p parseProgram
+p hadError ifTrue {
+    Console print("clay: compilation failed due to parse errors\n")
+    System exit(1)
+}
+File write(outPath, (CodeGen new(path, exe)) generate(program))

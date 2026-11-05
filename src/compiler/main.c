@@ -1001,6 +1001,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 int main(int argc, char *argv[]) {
     resolve_exe_path(argv[0]);
     g_exe_path = g_exe_path_buf[0] ? g_exe_path_buf : argv[0];
+    clay_executable_path = g_exe_path_buf;   /* System executable */
     clay_set_args(argc, argv);
     const char *source_file = NULL;
     const char *output_name = NULL;
@@ -1190,10 +1191,16 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Load plugins so codegen knows their prototypes (MathEx, ...): the
+     * native program resolves them at run time from the same plugins/ */
+    clay_bootstrap();
+    clay_plugin_auto_load(g_exe_path);
+
     /* Generate C code: next to the binary when -o names one (keeps source
      * trees clean), else next to the source */
-    char *c_file = (output_name && !c_only) ? replace_ext(output_name, ".c")
-                                            : replace_ext(source_file, ".c");
+    char *c_file = !output_name ? replace_ext(source_file, ".c")
+                 : c_only ? strdup(output_name)            /* -c -o file.c */
+                 : replace_ext(output_name, ".c");
     FILE *out = fopen(c_file, "w");
     if (!out) {
         fprintf(stderr, "clay: cannot write '%s'\n", c_file);

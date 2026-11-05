@@ -347,6 +347,7 @@ void clay_set_args(int argc, char **argv);
 /* --- Plugin system --- */
 /* Check if a name is a plugin-registered global */
 int clay_plugin_is_global(const char *name);
+extern const char *clay_executable_path;   /* set by the clay CLI (System executable) */
 /* Get a plugin-registered prototype by name (or NULL) */
 ClayObject *clay_plugin_get_global(const char *name);
 void        clay_plugin_auto_load(const char *exe_path);   /* load every plugin in <exe dir>/plugins */

@@ -376,9 +376,33 @@ const ClayPluginAPI *clay_get_plugin_api(void) {
     return &g_plugin_api;
 }
 
+/* System pluginGlobals → names of the prototypes loaded plugins registered */
+static ClayValue system_plugin_globals(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    ClayObject *arr = clay_array_new();
+    for (int i = 0; i < clay_plugin_global_count(); i++) {
+        ClayObject *s = clay_string_new(clay_plugin_global_name(i));
+        clay_array_append(arr, CLAY_VAL(s));
+        clay_release(s);
+    }
+    return CLAY_VAL(arr);
+}
+
+/* Path of the clay executable (set by the clay CLI), or NULL */
+const char *clay_executable_path = NULL;
+
+/* System executable → that path, or nil (e.g. in a native program) */
+static ClayValue system_executable(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    if (!clay_executable_path || !clay_executable_path[0]) return CLAY_NIL;
+    return CLAY_VAL(clay_string_new(clay_executable_path));
+}
+
 /* Register System plugin() method — called from bootstrap */
 void clay_plugin_init_system(ClayObject *system_proto) {
     clay_set_method(system_proto, "plugin", system_plugin);
+    clay_set_method(system_proto, "pluginGlobals", system_plugin_globals);
+    clay_set_method(system_proto, "executable", system_executable);
 }
 
 /* True if `fname` ends with one of the plugin library suffixes */

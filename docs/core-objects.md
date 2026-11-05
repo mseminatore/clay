@@ -17,7 +17,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
 | Console | `print(args...)`, `println(args...)`, `readLine()`, `prompt(msg)` |
 | File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` |
-| System | `exit(code)`, `env(name)`, `args()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
+| System | `exit(code)`, `run(command)` (shell command → exit status), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |

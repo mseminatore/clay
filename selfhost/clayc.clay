@@ -1,0 +1,139 @@
+// clayc -- the Clay compiler, written in Clay
+//
+//   clayc [-c] [-o <output>] [--cfg <clay-native.cfg>] [--plugin-exe <clay>] <file.clay>
+//
+// Like `clay --compile`: lexes, parses and generates C with the clay-lexer,
+// clay-parser and clay-codegen bricks, then compiles the C with the C
+// compiler and Clay runtime libraries named in clay-native.cfg (written by
+// the CMake build next to the clay binary).
+//
+//   -c              write the C only (to <output>, or next to the source)
+//   -o <output>     the executable (default: the source name without .clay);
+//                   its C goes next to it (<output>.c)
+//   --cfg <path>    clay-native.cfg (default: $CLAY_NATIVE_CFG, else the one
+//                   next to the running clay)
+//   --plugin-exe    the clay whose plugins/ the program loads at startup
+//                   (default: the running clay; none when clayc is native)
+//
+// Run it in the VM (`clay selfhost/clayc.clay prog.clay`) or compile it with
+// itself: `clay --compile -o clayc selfhost/clayc.clay`, then
+// `./clayc -o clayc2 selfhost/clayc.clay` builds clayc again — with the
+// Clay compiler this time. (CTest clay_selfhost_bootstrap checks that the
+// second and third generations produce the same C.)
+import("clay-codegen/src/main.clay")
+
+Clayc = Object clone {
+    source = nil
+    output = nil
+    cOnly = false
+    cfgPath = nil
+    pluginExe = nil
+
+    fail(msg) {
+        Console print("clayc: " + msg + "\n")
+        System exit(1)
+    }
+
+    usage() {
+        Console print("usage: clayc [-c] [-o <output>] [--cfg <clay-native.cfg>] [--plugin-exe <clay>] <file.clay>\n")
+        System exit(2)
+    }
+
+    parseArgs(args) {
+        pluginExe = System executable
+        i = 0
+        { i < args size } whileTrue {
+            a = args at(i)
+            (a == "-c") ifTrue {
+                cOnly = true
+            } ifFalse {
+                (a == "-o" || a == "--cfg" || a == "--plugin-exe") ifTrue {
+                    (i + 1 >= args size) ifTrue { self usage }
+                    v = args at(i + 1)
+                    (a == "-o") ifTrue { output = v }
+                    (a == "--cfg") ifTrue { cfgPath = v }
+                    (a == "--plugin-exe") ifTrue { pluginExe = v }
+                    i = i + 1
+                } ifFalse {
+                    (a startsWith("-")) ifTrue { self fail("unknown option '" + a + "'") }
+                    source = a
+                }
+            }
+            i = i + 1
+        }
+        (source == nil) ifTrue { self usage }
+    }
+
+    lastSep(path) {
+        a = path lastIndexOf("/")
+        b = path lastIndexOf("\\")
+        (a > b) ifTrue { a } ifFalse { b }
+    }
+
+    // path without its extension (a dot in the last component only)
+    stripExt(path) {
+        sep = self lastSep(path)
+        dot = path lastIndexOf(".")
+        (dot > sep) ifTrue { return path slice(0, dot) }
+        path
+    }
+
+    dirOf(path) {
+        sep = self lastSep(path)
+        (sep < 0) ifTrue { return "." }
+        path slice(0, sep)
+    }
+
+    // key=value lines of clay-native.cfg
+    readCfg() {
+        path = cfgPath ?? (System env("CLAY_NATIVE_CFG"))
+        ((path == nil || path == "") && System executable != nil) ifTrue {
+            path = (self dirOf(System executable)) + "/clay-native.cfg"
+        }
+        (path == nil || (File exists(path)) == false) ifTrue {
+            self fail("cannot find clay-native.cfg (use --cfg <path>)")
+        }
+        cfg = #{}
+        (File read(path)) split("\n") each { |raw|
+            l = raw trim
+            ((l length > 0) && (l startsWith("#")) == false) ifTrue {
+                eq = l indexOf("=")
+                (eq > 0) ifTrue { cfg set(l slice(0, eq), l slice(eq + 1, l length)) }
+            }
+        }
+        ((cfg get("cc")) == nil || (cfg get("libs")) == nil) ifTrue {
+            self fail(path + " has no cc= or libs=")
+        }
+        ((cfg get("kind")) == "msvc") ifTrue {
+            self fail("MSVC builds are not supported by clayc yet (use clay --compile)")
+        }
+        cfg
+    }
+
+    run(args) {
+        self parseArgs(args)
+        (File exists(source)) ifFalse { self fail("cannot read '" + source + "'") }
+        p = Parser new(File read(source), source)
+        program = p parseProgram
+        p hadError ifTrue { self fail("compilation failed due to parse errors") }
+
+        exe = output ?? (self stripExt(source))
+        cFile = cOnly ifTrue { output ?? ((self stripExt(source)) + ".c") } ifFalse {
+            (self stripExt(exe)) + ".c"
+        }
+        File write(cFile, (CodeGen new(source, pluginExe)) generate(program))
+        Console print("clayc: generated " + cFile + "\n")
+        cOnly ifTrue { return 0 }
+
+        cfg = self readCfg
+        cmd = "\"" + (cfg get("cc")) + "\" " + ((cfg get("cflags")) ?? "") + " -Wall \"" + cFile + "\" " +
+              (cfg get("libs")) + " -o \"" + exe + "\""
+        Console print("clayc: compiling " + cFile + " -> " + exe + "\n")
+        rc = System run(cmd)
+        (rc != 0) ifTrue { self fail("C compilation failed") }
+        Console print("clayc: built " + exe + "\n")
+        0
+    }
+}
+
+Clayc run(System args)

@@ -1,0 +1,6 @@
+{
+    "name": "clay-codegen",
+    "version": "0.1.0",
+    "description": "The Clay-to-C code generator, written in Clay",
+    "main": "src/main.clay"
+}

@@ -46,6 +46,7 @@ Node = Object clone {
     isSuper = false    // Send: `super msg`
     superMark = false  // parser-internal: a Self node standing for `super`
     alias = nil        // Import: `as Name`
+    fnName = nil       // codegen: the C function of a Block / MethodDef
 
     make(k, l) {
         n = self clone
@@ -471,11 +472,14 @@ Parser = Object clone {
         (self match("[")) ifTrue {
             n = Node make("Array", prev line)
             n items = []
+            self skipNewlines     // elements may start on the next line
             (self check("]")) ifFalse {
                 n items push(self expression)
+                self skipNewlines
                 { self match(",") } whileTrue {
                     self skipNewlines
                     n items push(self expression)
+                    self skipNewlines
                 }
             }
             self expect("]", "Expected ']'")

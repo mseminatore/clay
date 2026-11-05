@@ -1,0 +1,1334 @@
+// clay-codegen -- the Clay-to-C code generator, written in Clay
+//
+// Usage:
+//   import("../clay-codegen/src/main.clay")
+//
+//   p = Parser new(source, "prog.clay")
+//   program = p parseProgram
+//   cg = CodeGen new("prog.clay", pluginExePath)   // path: as given to the compiler
+//   cSource = cg generate(program)                 // the C program, as a string
+//
+// A port of src/compiler/codegen.c that produces the same C, byte for byte
+// (CTest clay_selfhost_codegen compares it with `clay -c` on every .clay
+// file in the repository). The generated C is compiled and linked against
+// the Clay runtime exactly like the output of `clay --compile`.
+//
+// pluginExePath: the clay executable whose plugins/ folder native programs
+// load at startup (nil: none). Plugin prototype names come from
+// `System pluginGlobals` (the plugins loaded into the compiler).
+
+import("../../clay-parser/src/main.clay")
+
+// --- C names ---
+
+CNames = Object clone {
+    reserved = nil
+
+    setup() {
+        (reserved != nil) ifTrue { return nil }
+        r = #{}
+        [
+            // C keywords
+            "auto", "break", "case", "char", "const", "continue", "default", "do",
+            "double", "else", "enum", "extern", "float", "for", "goto", "if", "int",
+            "long", "register", "return", "short", "signed", "sizeof", "static",
+            "struct", "switch", "typedef", "union", "unsigned", "void", "volatile",
+            "while", "inline", "restrict", "_Bool", "_Complex", "_Imaginary",
+            "bool", "true", "false", "asm", "near", "far", "min", "max",
+            // generated code
+            "self", "argc", "argv", "main",
+            // stdio.h
+            "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
+            "vsprintf", "vsnprintf", "scanf", "fscanf", "sscanf", "fopen", "fclose",
+            "freopen", "fread", "fwrite", "fgets", "fputs", "fgetc", "fputc", "getc",
+            "putc", "getchar", "putchar", "gets", "puts", "ungetc", "fflush", "fseek",
+            "ftell", "rewind", "fgetpos", "fsetpos", "remove", "rename", "tmpfile",
+            "tmpnam", "feof", "ferror", "clearerr", "perror", "setbuf", "setvbuf",
+            "stdin", "stdout", "stderr", "EOF", "FILE", "BUFSIZ", "fpos_t",
+            // stdlib.h
+            "malloc", "calloc", "realloc", "free", "abort", "exit", "atexit",
+            "_Exit", "getenv", "system", "atoi", "atol", "atoll", "atof", "strtol",
+            "strtoll", "strtoul", "strtoull", "strtod", "strtof", "strtold", "rand",
+            "srand", "qsort", "bsearch", "abs", "labs", "llabs", "div", "ldiv",
+            "lldiv", "mblen", "mbtowc", "wctomb", "mbstowcs", "wcstombs", "RAND_MAX",
+            "EXIT_SUCCESS", "EXIT_FAILURE", "NULL", "size_t", "wchar_t", "environ",
+            // string.h
+            "memcpy", "memmove", "memset", "memcmp", "memchr", "strcpy", "strncpy",
+            "strcat", "strncat", "strcmp", "strncmp", "strcoll", "strxfrm", "strchr",
+            "strrchr", "strstr", "strspn", "strcspn", "strpbrk", "strtok", "strlen",
+            "strerror", "strdup", "index", "rindex",
+            // math.h
+            "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh",
+            "tanh", "exp", "exp2", "log", "log10", "log2", "pow", "sqrt", "ceil",
+            "floor", "fabs", "fmod", "frexp", "ldexp", "modf", "round", "trunc",
+            "fmin", "fmax", "hypot", "cbrt", "expm1", "log1p", "erf", "erfc",
+            "lgamma", "tgamma", "gamma", "nan", "isnan", "isinf", "isfinite",
+            "signbit", "copysign", "remainder", "INFINITY", "NAN", "HUGE_VAL", "j0",
+            "j1", "jn", "y0", "y1", "yn",
+            // setjmp.h, stdint.h, stddef.h
+            "setjmp", "longjmp", "jmp_buf", "offsetof", "ptrdiff_t", "intptr_t",
+            "uintptr_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t",
+            "uint16_t", "uint32_t", "uint64_t",
+            // ctype.h, time.h, errno.h, assert.h, signal.h, POSIX
+            "isalpha", "isdigit", "isalnum", "isspace", "isupper", "islower",
+            "ispunct", "isprint", "toupper", "tolower", "time", "clock", "difftime",
+            "mktime", "localtime", "gmtime", "strftime", "asctime", "ctime", "errno",
+            "assert", "signal", "raise", "read", "write", "open", "close", "select",
+            "sleep", "usleep", "fork", "kill", "pipe", "dup", "link", "unlink", "stat",
+            "access", "getpid", "optarg"
+        ] each { |w| r set(w, true) }
+        reserved = r
+        nil
+    }
+
+    isReserved(name) {
+        (name == "_method_self" || name == "__ret_id" || (name startsWith("__isslot_"))) ifTrue {
+            return false
+        }
+        (reserved has(name)) ifTrue { return true }
+        ((name startsWith("clay_")) || (name startsWith("CLAY_")) ||
+         (name startsWith("_cv_")) || (name startsWith("_clay_"))) ifTrue { return true }
+        c1 = name byteAt(1)
+        c2 = name byteAt(2)
+        ((name byteAt(0)) == 95 && c1 == 116 && c2 != nil && c2 >= 48 && c2 <= 57) ifTrue { return true }
+        (name endsWith("_cell")) ifTrue { return true }
+        ((name byteAt(0)) == 95 && c1 != nil && (c1 == 95 || (c1 >= 65 && c1 <= 90))) ifTrue { return true }
+        false
+    }
+
+    // The C name of a Clay identifier: itself, or _cv_<name> if reserved
+    safe(name) {
+        self setup
+        (self isReserved(name)) ifTrue { return "_cv_" + name }
+        name
+    }
+
+    hex = "0123456789abcdef"
+
+    // Clay name → C identifier chars: alnum and _ kept, others _xHH
+    // (at most 58 characters, like the C buffer)
+    mangle(s) {
+        parts = []
+        len = 0
+        n = s length
+        i = 0
+        { i < n && len + 5 < 64 } whileTrue {
+            c = s byteAt(i)
+            ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 95) ifTrue {
+                parts push(s slice(i, i + 1))
+                len = len + 1
+            } ifFalse {
+                parts push("_x" + (hex at(c / 16)) + (hex at(c % 16)))
+                len = len + 4
+            }
+            i = i + 1
+        }
+        parts join("")
+    }
+
+    // A C string literal (the value ends at a NUL, like a C string)
+    cString(s) {
+        parts = ["\""]
+        start = 0
+        n = s length
+        i = 0
+        { i < n } whileTrue {
+            c = s byteAt(i)
+            esc = nil
+            (c == 34) ifTrue { esc = "\\\"" }
+            (c == 92) ifTrue { esc = "\\\\" }
+            (c == 10) ifTrue { esc = "\\n" }
+            (c == 9) ifTrue { esc = "\\t" }
+            (c == 13) ifTrue { esc = "\\r" }
+            (c == 63) ifTrue { esc = "\\?" }
+            (esc == nil && (c < 32 || c == 127)) ifTrue {
+                esc = "\\" + (c / 64) toString + ((c / 8) % 8) toString + (c % 8) toString
+            }
+            (esc != nil) ifTrue {
+                parts push(s slice(start, i))
+                parts push(esc)
+                start = i + 1
+            }
+            i = i + 1
+        }
+        parts push(s slice(start, n))
+        parts push("\"")
+        parts join("")
+    }
+
+    // The source path inside a C string: \ → /, " escaped
+    pathBody(s) { (s replace("\\", "/")) replace("\"", "\\\"") }
+}
+
+// A function to emit: a method, or a block (with the variables it captures)
+FnDef = Object clone {
+    funcName = ""
+    objContext = nil
+    node = nil
+    captures = nil
+    cloneSlots = nil
+    inMethodCtx = false
+
+    make(fname, ctx, n, caps, inCtx) {
+        d = self clone
+        d funcName = fname
+        d objContext = ctx
+        d node = n
+        d captures = caps
+        d inMethodCtx = inCtx
+        d
+    }
+}
+
+// --- the code generator ---
+
+CodeGen = Object clone {
+    out = nil              // chunks of C text being written
+    sourceFile = ""
+    pluginExePath = nil
+    pluginGlobals = nil
+    indent = 1
+    tempCounter = 0
+    inMethod = false
+    locals = nil
+    methodLocalBase = 0
+    toplevelCount = 0
+    boxed = nil
+    knownSlots = nil
+    ownedTemps = nil
+    inFunction = false
+    useSlotRecv = false
+    fnIsBlock = false
+    fnHasRetFrame = false
+    fnVars = nil
+    fnCells = nil
+    superProto = nil
+    collected = nil
+    methodCtx = false      // emitting a method, or a block created inside one
+    nameOrder = nil        // pre-assigned function names, in registration order
+    nameCounter = 0
+
+    builtins = #{
+        "Object": "CLAY_VAL(clay_Object)", "Number": "CLAY_VAL(clay_Number)",
+        "String": "CLAY_VAL(clay_String)", "Array": "CLAY_VAL(clay_Array)",
+        "Block": "CLAY_VAL(clay_Block)", "Nil": "CLAY_VAL(clay_Nil)",
+        "Boolean": "CLAY_VAL(clay_Boolean)", "Error": "CLAY_VAL(clay_Error)",
+        "Dict": "CLAY_VAL(clay_Dict)", "Math": "CLAY_VAL(clay_Math)",
+        "Console": "CLAY_VAL(clay_Console)", "File": "CLAY_VAL(clay_File)",
+        "System": "CLAY_VAL(clay_System)", "FFI": "CLAY_VAL(clay_FFI)",
+        "Date": "CLAY_VAL(clay_Date)", "Http": "CLAY_VAL(clay_Http)",
+        "Regex": "CLAY_VAL(clay_Regex)", "Fiber": "CLAY_VAL(clay_Fiber)",
+        "Db": "CLAY_VAL(clay_Db)", "Graphics": "CLAY_VAL(clay_Graphics)",
+        "Range": "CLAY_VAL(clay_Range)", "Vec3": "CLAY_VAL(clay_Vec3)",
+        "Thread": "CLAY_VAL(clay_Thread)",
+        "true": "CLAY_TRUE", "false": "CLAY_FALSE", "nil": "CLAY_NIL"
+    }
+
+    init(source, pluginExe = nil, plugins = nil) {
+        out = []
+        sourceFile = source
+        pluginExePath = pluginExe
+        pluginGlobals = plugins ?? (System pluginGlobals)
+        indent = 1
+        tempCounter = 0
+        inMethod = false
+        locals = []
+        methodLocalBase = 0
+        toplevelCount = 0
+        boxed = []
+        knownSlots = nil
+        ownedTemps = []
+        inFunction = false
+        useSlotRecv = false
+        fnIsBlock = false
+        fnHasRetFrame = false
+        fnVars = []
+        fnCells = []
+        superProto = nil
+        collected = []
+        methodCtx = false
+        nameOrder = []
+        nameCounter = 0
+    }
+
+    // --- output ---
+
+    w(s) { out push(s) }
+    ind() { out push("    " repeat(indent)) }
+    line(s) {
+        self ind
+        out push(s + "\n")
+    }
+    safe(n) { CNames safe(n) }
+
+    emitLine(l) {
+        out push("#line " + l toString + " \"" + (CNames pathBody(sourceFile)) + "\"\n")
+        self line("clay_source_line = " + l toString + ";")
+    }
+
+    tempName() {
+        t = "_t" + tempCounter toString
+        tempCounter = tempCounter + 1
+        t
+    }
+
+    pushOwnedTemp(t) { ownedTemps push(t) }
+    isOwnedTemp(t) { ownedTemps contains(t) }
+
+    // release owned temps [from, end) except resultTemp, and drop them
+    tempCleanupFrom(from, resultTemp) {
+        i = from
+        { i < ownedTemps size } whileTrue {
+            t = ownedTemps at(i)
+            (t != resultTemp) ifTrue { self line("clay_release_val(" + t + ");") }
+            i = i + 1
+        }
+        ownedTemps = ownedTemps slice(0, from)
+    }
+    tempCleanup(resultTemp) { self tempCleanupFrom(0, resultTemp) }
+
+    trackVar(n) { inFunction ifTrue { fnVars push(n) } }
+    trackCell(n) { (inFunction && indent <= 1) ifTrue { fnCells push(n) } }
+
+    retains(v, n) {
+        i = 0
+        { i < n } whileTrue {
+            self line("clay_retain_val(" + v + ");")
+            i = i + 1
+        }
+    }
+    rvSet(v) { self line("clay_release_val(__rv); __rv = " + v + ";") }
+
+    functionReleases() {
+        fnVars each { |v| self line("clay_release_val(" + (self safe(v)) + ");") }
+        fnCells each { |c| self line("clay_cell_release(" + (self safe(c)) + "_cell);") }
+    }
+
+    functionExit() {
+        self functionReleases
+        fnHasRetFrame ifTrue { self line("clay_try_pop();") }
+        fnIsBlock ifTrue {
+            self line("return clay_return_value(__rv, CLAY_VAL(self), 0, NULL);")
+        } ifFalse {
+            self line("return clay_return_value(__rv, CLAY_VAL(self), argc, argv);")
+        }
+    }
+
+    // --- scopes ---
+
+    isLocal(n) { locals contains(n) }
+
+    isToplevelVar(n) {
+        found = false
+        i = 0
+        { i < locals size } whileTrue {
+            (locals at(i) == n) ifTrue {
+                (i >= toplevelCount) ifTrue { return false }
+                found = true
+            }
+            i = i + 1
+        }
+        found
+    }
+
+    isFnLocal(n) { (self isLocal(n)) && ((methodCtx && (self isToplevelVar(n))) == false) }
+
+    isMethodLocal(n) {
+        i = methodLocalBase
+        { i < locals size } whileTrue {
+            (locals at(i) == n) ifTrue { return true }
+            i = i + 1
+        }
+        false
+    }
+
+    isBoxed(n) { boxed contains(n) }
+    isKnownSlot(n) { knownSlots != nil && (knownSlots contains(n)) }
+
+    isBuiltinGlobal(n) { (builtins has(n)) || (pluginGlobals contains(n)) }
+    builtinExpr(n) {
+        e = builtins get(n)
+        (e != nil) ifTrue { return e }
+        (pluginGlobals contains(n)) ifTrue { return "CLAY_VAL(clay_plugin_get_global(\"" + n + "\"))" }
+        n
+    }
+
+    // implicit-slot flags
+    flagName(n) { "__isslot_" + n }
+    hasSlotFlag(n) { self isLocal(self flagName(n)) }
+    flagExpr(n) {
+        f = self flagName(n)
+        (self isBoxed(f)) ifTrue { return f + "_cell->value" }
+        f
+    }
+    methodSelfExpr() {
+        (self isBoxed("_method_self")) ifTrue { return "CLAY_OBJ(_method_self_cell->value)" }
+        useSlotRecv ifTrue { return "__recv" }
+        "self"
+    }
+    localReadExpr(n) {
+        (self isBoxed(n)) ifTrue { return (self safe(n)) + "_cell->value" }
+        self safe(n)
+    }
+
+    // --- non-local return analysis (ast.c) ---
+
+    returnWalkList(list, inBlock, wantInBlock) {
+        list each { |n| (self returnWalk(n, inBlock, wantInBlock)) ifTrue { return true } }
+        false
+    }
+
+    returnWalk(n, inBlock, wantInBlock) {
+        (n == nil) ifTrue { return false }
+        k = n kind
+        (k == "Return") ifTrue {
+            (wantInBlock == false || inBlock) ifTrue { return true }
+            return self returnWalk(n expr, inBlock, wantInBlock)
+        }
+        (k == "Block") ifTrue { return self returnWalkList(n body, true, wantInBlock) }
+        (k == "Assign") ifTrue { return self returnWalk(n value, inBlock, wantInBlock) }
+        (k == "Send") ifTrue {
+            return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                   (self returnWalkList(n items, inBlock, wantInBlock))
+        }
+        (k == "Binary") ifTrue {
+            return (self returnWalk(n left, inBlock, wantInBlock)) ||
+                   (self returnWalk(n right, inBlock, wantInBlock))
+        }
+        (k == "Array") ifTrue { return self returnWalkList(n items, inBlock, wantInBlock) }
+        (k == "DictLit") ifTrue { return self returnWalkList(n vals, inBlock, wantInBlock) }
+        (k == "TryCatch") ifTrue {
+            return (self returnWalk(n tryBlock, inBlock, wantInBlock)) ||
+                   (self returnWalk(n catchBlock, inBlock, wantInBlock)) ||
+                   (self returnWalk(n finallyBlock, inBlock, wantInBlock))
+        }
+        (k == "Raise") ifTrue { return self returnWalk(n expr, inBlock, wantInBlock) }
+        (k == "SlotAssign") ifTrue {
+            return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                   (self returnWalk(n value, inBlock, wantInBlock))
+        }
+        (k == "Clone") ifTrue { return self returnWalk(n recv, inBlock, wantInBlock) }
+        false
+    }
+
+    hasBlockReturn(body) { self returnWalkList(body, false, true) }
+
+    // --- function names (assigned before emitting) ---
+
+    register(n, fname) {
+        n fnName = fname
+        nameOrder push(fname)
+    }
+
+    prewalk(n, parentName) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Block") ifTrue {
+            fname = "_clay_block_" + nameCounter toString
+            nameCounter = nameCounter + 1
+            self register(n, fname)
+            n body each { |s| self prewalk(s, fname) }
+            return nil
+        }
+        (k == "MethodDef") ifTrue {
+            fname = "_clay_method_" + (CNames mangle(parentName ?? "anon")) + "_" +
+                    (CNames mangle(n name)) + "_" + nameCounter toString
+            nameCounter = nameCounter + 1
+            self register(n, fname)
+            n body each { |s| self prewalk(s, fname) }
+            return nil
+        }
+        (k == "Clone") ifTrue {
+            self prewalk(n recv, parentName)
+            n items each { |m| self prewalk(m, parentName) }
+            return nil
+        }
+        (k == "Assign") ifTrue { return self prewalk(n value, n name) }
+        (k == "Send") ifTrue {
+            self prewalk(n recv, parentName)
+            n items each { |a| self prewalk(a, parentName) }
+            return nil
+        }
+        (k == "Binary") ifTrue {
+            self prewalk(n left, parentName)
+            self prewalk(n right, parentName)
+            return nil
+        }
+        (k == "Array") ifTrue {
+            n items each { |e| self prewalk(e, parentName) }
+            return nil
+        }
+        (k == "Program") ifTrue {
+            n items each { |s| self prewalk(s, nil) }
+            return nil
+        }
+        (k == "SlotDef") ifTrue { return self prewalk(n value, parentName) }
+        (k == "TryCatch") ifTrue {
+            self prewalk(n tryBlock, parentName)
+            self prewalk(n catchBlock, parentName)
+            self prewalk(n finallyBlock, parentName)
+            return nil
+        }
+        (k == "Raise") ifTrue { return self prewalk(n expr, parentName) }
+        (k == "SlotAssign") ifTrue {
+            self prewalk(n recv, parentName)
+            self prewalk(n value, parentName)
+            return nil
+        }
+        (k == "Return") ifTrue { return self prewalk(n expr, parentName) }
+        (k == "DictLit") ifTrue {
+            n vals each { |v| self prewalk(v, parentName) }
+            return nil
+        }
+        nil
+    }
+
+    // --- closure captures ---
+
+    captureSlotFlag(caps, n) {
+        (self hasSlotFlag(n)) ifFalse { return nil }
+        f = self flagName(n)
+        (caps contains(f)) ifFalse { caps push(f) }
+        ((self isLocal("_method_self")) && (caps contains("_method_self")) == false) ifTrue {
+            caps push("_method_self")
+        }
+    }
+
+    captureMethodSelf(caps) {
+        ((self isLocal("_method_self")) && (caps contains("_method_self")) == false) ifTrue {
+            caps push("_method_self")
+        }
+    }
+
+    scanList(list, params, caps) { list each { |n| self scan(n, params, caps) } }
+
+    scan(n, params, caps) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Ident") ifTrue {
+            nm = n name
+            (self isBuiltinGlobal(nm)) ifTrue { return nil }
+            (params contains(nm)) ifTrue { return nil }
+            (caps contains(nm)) ifTrue { return nil }
+            (self isToplevelVar(nm)) ifTrue { return nil }    // uses the static
+            (self isLocal(nm)) ifTrue {
+                caps push(nm)
+                self captureSlotFlag(caps, nm)
+                return nil
+            }
+            self captureMethodSelf(caps)
+            return nil
+        }
+        (k == "Block") ifTrue {
+            combined = params slice(0, params size)
+            n params each { |p| combined push(p name) }
+            return self scanList(n body, combined, caps)
+        }
+        (k == "Self") ifTrue { return self captureMethodSelf(caps) }
+        (k == "Send") ifTrue {
+            self scan(n recv, params, caps)
+            return self scanList(n items, params, caps)
+        }
+        (k == "Binary") ifTrue {
+            self scan(n left, params, caps)
+            return self scan(n right, params, caps)
+        }
+        (k == "Assign") ifTrue {
+            self scan(n value, params, caps)
+            an = n name
+            ((self isBuiltinGlobal(an)) == false && (params contains(an)) == false &&
+             (caps contains(an)) == false && (self isLocal(an)) && (self isToplevelVar(an)) == false) ifTrue {
+                caps push(an)
+                self captureSlotFlag(caps, an)
+            }
+            ((self isBuiltinGlobal(an)) == false && (self isLocal(an)) == false &&
+             (params contains(an)) == false) ifTrue {
+                self captureMethodSelf(caps)
+            }
+            (self isKnownSlot(an)) ifTrue { self captureMethodSelf(caps) }
+            return nil
+        }
+        (k == "Clone") ifTrue {
+            self scan(n recv, params, caps)
+            return self scanList(n items, params, caps)
+        }
+        (k == "MethodDef") ifTrue { return self scanList(n body, params, caps) }
+        (k == "SlotDef") ifTrue { return self scan(n value, params, caps) }
+        (k == "Array") ifTrue { return self scanList(n items, params, caps) }
+        (k == "TryCatch") ifTrue {
+            self scan(n tryBlock, params, caps)
+            self scan(n catchBlock, params, caps)
+            return self scan(n finallyBlock, params, caps)
+        }
+        (k == "Raise") ifTrue { return self scan(n expr, params, caps) }
+        (k == "SlotAssign") ifTrue {
+            self scan(n recv, params, caps)
+            return self scan(n value, params, caps)
+        }
+        (k == "Return") ifTrue {
+            ((self isLocal("__ret_id")) && (caps contains("__ret_id")) == false) ifTrue {
+                caps push("__ret_id")
+            }
+            return self scan(n expr, params, caps)
+        }
+        (k == "DictLit") ifTrue { return self scanList(n vals, params, caps) }
+        nil
+    }
+
+    // --- expressions: each returns the temp holding its value (or nil) ---
+
+    expr(n) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Int") ifTrue {
+            t = self tempName
+            self line("ClayValue " + t + " = clay_int((intptr_t)" + n value toString + "LL);")
+            return t
+        }
+        (k == "Float") ifTrue {
+            t = self tempName
+            s = n value toString
+            ((s contains(".")) || (s contains("e")) || (s contains("E"))) ifFalse { s = s + ".0" }
+            self line("ClayValue " + t + " = clay_float_tag(" + s + "f);")
+            return t
+        }
+        (k == "String") ifTrue {
+            t = self tempName
+            self line("ClayValue " + t + " = CLAY_VAL(clay_string_new(" + (CNames cString(n value)) + "));")
+            self pushOwnedTemp(t)
+            return t
+        }
+        (k == "Ident") ifTrue { return self ident(n) }
+        (k == "Self") ifTrue { return self selfExpr(n) }
+        (k == "Send") ifTrue { return self send(n) }
+        (k == "Binary") ifTrue { return self binary(n) }
+        (k == "Block") ifTrue { return self block(n) }
+        (k == "Array") ifTrue {
+            t = self tempName
+            self line("ClayObject *" + t + "_obj = clay_array_new();")
+            n items each { |e|
+                v = self expr(e)
+                self line("clay_array_append(" + t + "_obj, " + (v ?? "(null)") + ");")
+            }
+            self line("ClayValue " + t + " = CLAY_VAL(" + t + "_obj);")
+            self pushOwnedTemp(t)
+            return t
+        }
+        (k == "DictLit") ifTrue {
+            t = self tempName
+            self line("ClayObject *" + t + "_obj = clay_dict_new();")
+            i = 0
+            { i < n keys size } whileTrue {
+                v = self expr(n vals at(i))
+                self line("clay_dict_set(" + t + "_obj, " + (CNames cString((n keys at(i)) value)) + ", " + (v ?? "(null)") + ");")
+                i = i + 1
+            }
+            self line("ClayValue " + t + " = CLAY_VAL(" + t + "_obj);")
+            self pushOwnedTemp(t)
+            return t
+        }
+        (k == "TryCatch") ifTrue { return self tryCatch(n) }
+        (k == "Raise") ifTrue { return self raiseExpr(n) }
+        (k == "Clone") ifTrue { return self cloneExpr(n) }
+        Console print("codegen: unhandled node type " + k + "\n")
+        nil
+    }
+
+    ident(n) {
+        nm = n name
+        t = self tempName
+        (self hasSlotFlag(nm)) ifTrue {
+            self line("ClayValue " + t + " = CLAY_IS_TRUTHY(" + (self flagExpr(nm)) + ") ? clay_get_slot(" +
+                      (self methodSelfExpr) + ", \"" + nm + "\") : " + (self localReadExpr(nm)) + ";")
+            return t
+        }
+        (self isBoxed(nm)) ifTrue {
+            self line("ClayValue " + t + " = " + (self safe(nm)) + "_cell->value;")
+            return t
+        }
+        (self isLocal(nm)) ifTrue {
+            self line("ClayValue " + t + " = " + (self safe(nm)) + ";")
+            return t
+        }
+        (self isBuiltinGlobal(nm)) ifTrue {
+            self line("ClayValue " + t + " = " + (self builtinExpr(nm)) + ";")
+            return t
+        }
+        inMethod ifTrue {
+            (self isBoxed("_method_self")) ifTrue {
+                self line("ClayValue " + t + " = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"" + nm + "\");")
+            } ifFalse {
+                self line("ClayValue " + t + " = clay_get_slot(" + (self methodSelfExpr) + ", \"" + nm + "\");")
+            }
+            return t
+        }
+        self line("ClayValue " + t + " = " + (self safe(nm)) + ";")
+        t
+    }
+
+    selfExpr(n) {
+        inMethod ifFalse {
+            Console print("codegen: 'self' used outside of method or block (line " + n line toString + ")\n")
+            return nil
+        }
+        t = self tempName
+        (self isBoxed("_method_self")) ifTrue {
+            self line("ClayValue " + t + " = _method_self_cell->value;")
+        } ifFalse {
+            useSlotRecv ifTrue {
+                self line("ClayValue " + t + " = __recv ? CLAY_VAL(__recv) : CLAY_NIL;")
+            } ifFalse {
+                self line("ClayValue " + t + " = CLAY_VAL(self);")
+            }
+        }
+        t
+    }
+
+    send(n) {
+        recv = self expr(n recv)
+        (recv == nil) ifTrue { return nil }
+        args = []
+        n items each { |a| args push(self expr(a)) }
+        t = self tempName
+        self emitLine(n line)
+        argc = args size
+        list = "{" + (args map { |a| a ?? "(null)" } join(", ")) + "}"
+        (n isSuper && superProto != nil) ifTrue {
+            (argc == 0) ifTrue {
+                self line("ClayValue " + t + " = clay_send_super_owned(" + recv + ", CLAY_OBJ(" + superProto +
+                          "), \"" + n name + "\", 0, NULL);")
+            } ifFalse {
+                self line("ClayValue " + t + " = clay_send_super_owned(" + recv + ", CLAY_OBJ(" + superProto +
+                          "), \"" + n name + "\", " + argc toString + ", (ClayValue[])" + list + ");")
+            }
+        } ifFalse {
+            (argc == 0) ifTrue {
+                self line("ClayValue " + t + " = clay_send_owned(" + recv + ", \"" + n name + "\", 0, NULL);")
+            } ifFalse {
+                self line("ClayValue " + t + " = clay_send_owned(" + recv + ", \"" + n name + "\", " +
+                          argc toString + ", (ClayValue[])" + list + ");")
+            }
+        }
+        self pushOwnedTemp(t)
+        t
+    }
+
+    // a ? b : c for the three short-circuit operators
+    shortCircuit(n, op) {
+        left = self expr(n left)
+        (left == nil) ifTrue { return nil }
+        t = self tempName
+        self emitLine(n line)
+        self line("ClayValue " + t + ";")
+        (op == "??") ifTrue {
+            self line("if (" + left + " != CLAY_NIL) {")
+        } ifFalse {
+            self line("if (CLAY_IS_TRUTHY(" + left + ")) {")
+        }
+        indent = indent + 1
+        (op == "&&") ifTrue { self rightSide(n, t, false) }
+        (op == "||") ifTrue { self line(t + " = CLAY_TRUE;") }
+        (op == "??") ifTrue { self line(t + " = " + left + "; clay_retain_val(" + t + ");") }
+        indent = indent - 1
+        self line("} else {")
+        indent = indent + 1
+        (op == "&&") ifTrue { self line(t + " = CLAY_FALSE;") }
+        (op == "||") ifTrue { self rightSide(n, t, false) }
+        (op == "??") ifTrue { self rightSide(n, t, true) }
+        indent = indent - 1
+        self line("}")
+        (op == "??") ifTrue { self pushOwnedTemp(t) }
+        t
+    }
+
+    rightSide(n, t, coalesce) {
+        mark = ownedTemps size
+        right = self expr(n right)
+        coalesce ifTrue {
+            self line(t + " = " + right + "; clay_retain_val(" + t + ");")
+        } ifFalse {
+            self line(t + " = CLAY_BOOL(CLAY_IS_TRUTHY(" + right + "));")
+        }
+        self tempCleanupFrom(mark, nil)
+    }
+
+    intOps = #{
+        "+": "clay_int(clay_to_int(@1) + clay_to_int(@2))",
+        "-": "clay_int(clay_to_int(@1) - clay_to_int(@2))",
+        "*": "clay_int(clay_int_mul(clay_to_int(@1), clay_to_int(@2)))",
+        "==": "CLAY_BOOL(clay_to_int(@1) == clay_to_int(@2))",
+        "!=": "CLAY_BOOL(clay_to_int(@1) != clay_to_int(@2))",
+        "<": "CLAY_BOOL(clay_to_int(@1) < clay_to_int(@2))",
+        ">": "CLAY_BOOL(clay_to_int(@1) > clay_to_int(@2))",
+        "<=": "CLAY_BOOL(clay_to_int(@1) <= clay_to_int(@2))",
+        ">=": "CLAY_BOOL(clay_to_int(@1) >= clay_to_int(@2))"
+    }
+
+    floatOps = #{
+        "+": "clay_float_tag(clay_to_float(@1) + clay_to_float(@2))",
+        "-": "clay_float_tag(clay_to_float(@1) - clay_to_float(@2))",
+        "*": "clay_float_tag(clay_to_float(@1) * clay_to_float(@2))",
+        "/": "clay_float_tag(clay_to_float(@1) / clay_to_float(@2))",
+        "==": "CLAY_BOOL(clay_to_float(@1) == clay_to_float(@2))",
+        "!=": "CLAY_BOOL(clay_to_float(@1) != clay_to_float(@2))",
+        "<": "CLAY_BOOL(clay_to_float(@1) < clay_to_float(@2))",
+        ">": "CLAY_BOOL(clay_to_float(@1) > clay_to_float(@2))",
+        "<=": "CLAY_BOOL(clay_to_float(@1) <= clay_to_float(@2))",
+        ">=": "CLAY_BOOL(clay_to_float(@1) >= clay_to_float(@2))"
+    }
+
+    fill(template, l, r) { (template replace("@1", l)) replace("@2", r) }
+
+    binary(n) {
+        op = n name
+        (op == "&&" || op == "||" || op == "??") ifTrue { return self shortCircuit(n, op) }
+        (op == "..") ifTrue {
+            left = self expr(n left)
+            (left == nil) ifTrue { return nil }
+            right = self expr(n right)
+            (right == nil) ifTrue { return nil }
+            t = self tempName
+            self emitLine(n line)
+            self line("ClayValue " + t + " = CLAY_VAL(clay_range_new(clay_to_int(" + left + "), clay_to_int(" +
+                      right + "), 1));")
+            self pushOwnedTemp(t)
+            return t
+        }
+        left = self expr(n left)
+        right = self expr(n right)
+        (left == nil || right == nil) ifTrue { return nil }
+        t = self tempName
+        dispatch = t + " = clay_send_owned(" + left + ", \"" + op + "\", 1, (ClayValue[]){" + right + "});"
+        self emitLine(n line)
+        self line("ClayValue " + t + ";")
+        self line("if (CLAY_IS_INT(" + left + ") && CLAY_IS_INT(" + right + ")) {")
+        indent = indent + 1
+        iop = intOps get(op)
+        (iop != nil) ifTrue {
+            self line(t + " = " + (self fill(iop, left, right)) + ";")
+        } ifFalse {
+            (op == "/" || op == "%") ifTrue {
+                what = (op == "/") ifTrue { "division" } ifFalse { "modulo" }
+                self line("if (clay_to_int(" + right + ") == 0) clay_raise(CLAY_VAL(clay_error_new(\"" + what +
+                          " by zero\", \"DivisionByZero\")));")
+                self line(t + " = clay_int(clay_to_int(" + left + ") " + op + " clay_to_int(" + right + "));")
+            } ifFalse {
+                self line(dispatch)
+            }
+        }
+        indent = indent - 1
+        self line("} else if ((CLAY_IS_TAGGED_FLOAT(" + left + ") || CLAY_IS_INT(" + left + ")) && " +
+                  "(CLAY_IS_TAGGED_FLOAT(" + right + ") || CLAY_IS_INT(" + right + "))) {")
+        indent = indent + 1
+        fop = floatOps get(op)
+        (fop != nil) ifTrue {
+            self line(t + " = " + (self fill(fop, left, right)) + ";")
+        } ifFalse {
+            self line(dispatch)
+        }
+        indent = indent - 1
+        self line("} else {")
+        indent = indent + 1
+        self line(dispatch)
+        indent = indent - 1
+        self line("}")
+        self pushOwnedTemp(t)
+        t
+    }
+
+    block(n) {
+        fname = n fnName
+        (fname == nil) ifTrue {
+            Console print("codegen: block has no pre-assigned name\n")
+            return nil
+        }
+        params = n params map { |p| p name }
+        caps = []
+        n body each { |s| self scan(s, params, caps) }
+        md = FnDef make(fname, nil, n, caps, methodCtx)
+        collected push(md)
+        (inMethod && knownSlots != nil) ifTrue { md cloneSlots = knownSlots }
+
+        t = self tempName
+        (caps size > 0) ifTrue {
+            caps each { |nm|
+                (self isBoxed(nm)) ifFalse {
+                    (nm == "_method_self") ifTrue {
+                        self line("ClayCell *" + nm + "_cell = clay_cell_new(CLAY_VAL(self));")
+                    } ifFalse {
+                        self line("ClayCell *" + (self safe(nm)) + "_cell = clay_cell_new(" + (self safe(nm)) + ");")
+                    }
+                    boxed push(nm)
+                    self trackCell(nm)
+                }
+            }
+            env = caps map { |nm| "(ClayValue)(uintptr_t)" + (self safe(nm)) + "_cell" }
+            self line("ClayValue " + t + "_env[] = {" + (env join(", ")) + "};")
+            self line("ClayValue " + t + " = CLAY_VAL(clay_block_new_cells(" + fname + ", " + t + "_env, " +
+                      caps size toString + "));")
+        } ifFalse {
+            self line("ClayValue " + t + " = CLAY_VAL(clay_block_new(" + fname + ", NULL, 0));")
+        }
+        self pushOwnedTemp(t)
+        t
+    }
+
+    tryCatch(n) {
+        t = self tempName
+        tryTmp = self tempName
+        errTmp = self tempName
+        self line("ClayValue " + t + ";")
+        tryBlock = self expr(n tryBlock)
+        catchBlock = (n catchBlock == nil) ifTrue { nil } ifFalse { self expr(n catchBlock) }
+        finallyBlock = (n finallyBlock == nil) ifTrue { nil } ifFalse { self expr(n finallyBlock) }
+        self line("ClayTryFrame _try_" + t + ";")
+        self line("if (clay_try_push(&_try_" + t + ") == 0) {")
+        indent = indent + 1
+        self line("ClayValue " + tryTmp + " = clay_send_val(" + (tryBlock ?? "(null)") + ", \"value\", 0, NULL);")
+        self line("clay_try_pop();")
+        self line(t + " = " + tryTmp + ";")
+        indent = indent - 1
+        self line("} else {")
+        indent = indent + 1
+        self line("ClayValue " + errTmp + " = clay_error_stack.current_error; /* owned */")
+        fin = (finallyBlock == nil) ifTrue { "" } ifFalse {
+            " clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));"
+        }
+        self line("if (clay_is_control_signal(" + errTmp + ")) {" + fin + " clay_raise(" + errTmp + "); }")
+        (catchBlock != nil) ifTrue {
+            self line(t + " = clay_send_val(" + catchBlock + ", \"value\", 1, (ClayValue[]){ " + errTmp + " });")
+        } ifFalse {
+            self line(t + " = CLAY_NIL;")
+        }
+        self line("clay_release_val(" + errTmp + ");")
+        indent = indent - 1
+        self line("}")
+        (finallyBlock != nil) ifTrue {
+            self line("clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));")
+        }
+        self pushOwnedTemp(t)
+        t
+    }
+
+    raiseExpr(n) {
+        v = self expr(n expr)
+        t = self tempName
+        self retains(v, (self isOwnedTemp(v)) ifTrue { 0 } ifFalse { 1 })
+        self line("ClayValue " + t + " = " + (v ?? "(null)") + ";")
+        self line("if (CLAY_IS_PTR(" + t + ") && !CLAY_IS_NIL(" + t + ") && CLAY_OBJ(" + t + ")->type == CLAY_TYPE_STRING) {")
+        indent = indent + 1
+        self line("ClayValue " + t + "_s = " + t + ";")
+        self line(t + " = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(" + t + "_s)), \"RuntimeError\"));")
+        self line("clay_release_val(" + t + "_s);")
+        indent = indent - 1
+        self line("}")
+        self line("clay_raise(" + t + ");")
+        t
+    }
+
+    // inline clone expression (e.g. Object clone { } inside a method)
+    cloneExpr(n) {
+        proto = self expr(n recv)
+        (proto == nil) ifTrue { return nil }
+        t = self tempName
+        self line("ClayValue " + t + " = CLAY_VAL(clay_clone(CLAY_OBJ(" + proto + ")));")
+        n items each { |m|
+            (m kind == "SlotDef") ifTrue {
+                v = self expr(m value)
+                (v != nil) ifTrue { self line("clay_set_slot(CLAY_OBJ(" + t + "), \"" + m name + "\", " + v + ");") }
+            }
+            (m kind == "MethodDef" && m fnName != nil) ifTrue {
+                collected push(FnDef make(m fnName, nil, m, [], true))
+                self line("clay_set_method(CLAY_OBJ(" + t + "), \"" + m name + "\", " + m fnName + ");")
+            }
+        }
+        self pushOwnedTemp(t)
+        t
+    }
+
+    // --- statements ---
+
+    // locals created by top-level bare assignments, with implicit-slot flags
+    slotFallbackDecls(body) {
+        body each { |s|
+            (s != nil && s kind == "Assign") ifTrue {
+                nm = s name
+                ((self isFnLocal(nm)) || (self isKnownSlot(nm)) || (self isBuiltinGlobal(nm))) ifFalse {
+                    w = self flagName(nm)
+                    out push("    ClayValue " + (self safe(nm)) + " = CLAY_NIL;\n")
+                    out push("    ClayValue " + w + " = clay_has_slot(" + (self methodSelfExpr) + ", \"" + nm +
+                             "\") ? CLAY_TRUE : CLAY_FALSE;\n")
+                    locals push(nm)
+                    locals push(w)
+                    self trackVar(nm)
+                }
+            }
+        }
+    }
+
+    varStore(nm, v, extra) {
+        self retains(v, extra)
+        (self isBoxed(nm)) ifTrue {
+            s = self safe(nm)
+            self line("clay_release_val(" + s + "_cell->value); " + s + "_cell->value = " + v + ";")
+        } ifFalse {
+            s = self safe(nm)
+            self line("clay_release_val(" + s + "); " + s + " = " + v + ";")
+        }
+    }
+
+    flaggedWrite(nm, v, own) {
+        self line("if (CLAY_IS_TRUTHY(" + (self flagExpr(nm)) + ")) {")
+        indent = indent + 1
+        self retains(v, 1 - own)
+        self line("clay_set_slot(" + (self methodSelfExpr) + ", \"" + nm + "\", " + v + ");")
+        indent = indent - 1
+        self line("} else {")
+        indent = indent + 1
+        self varStore(nm, v, 2 - own)
+        indent = indent - 1
+        self line("}")
+    }
+
+    own(v) { (self isOwnedTemp(v)) ifTrue { 1 } ifFalse { 0 } }
+
+    fnAssign(s, isMethod) {
+        nm = s name
+        self emitLine(s line)
+        v = self expr(s value)
+        (v == nil) ifTrue { return nil }
+        o = self own(v)
+        ((self hasSlotFlag(nm)) && (self isKnownSlot(nm)) == false) ifTrue {
+            self flaggedWrite(nm, v, o)
+        } ifFalse {
+            ((self isKnownSlot(nm)) && (isMethod == false || (self isLocal(nm)) == false)) ifTrue {
+                self retains(v, 1 - o)
+                self line("clay_set_slot(" + (self methodSelfExpr) + ", \"" + nm + "\", " + v + ");")
+            } ifFalse {
+                isVar = (self isBoxed(nm)) ||
+                        (isMethod ifTrue { self isMethodLocal(nm) } ifFalse { self isFnLocal(nm) })
+                isVar ifTrue {
+                    self varStore(nm, v, 2 - o)
+                } ifFalse {
+                    self retains(v, 2 - o)
+                    self line("ClayValue " + (self safe(nm)) + " = " + v + ";")
+                    locals push(nm)
+                    self trackVar(nm)
+                }
+            }
+        }
+        self rvSet(v)
+        self tempCleanup(v)
+    }
+
+    fnExprStmt(s) {
+        self emitLine(s line)
+        v = self expr(s)
+        (v == nil) ifTrue { return nil }
+        self retains(v, 1 - (self own(v)))
+        self rvSet(v)
+        self tempCleanup(v)
+    }
+
+    paramDecl(pname, i, defaultExpr) {
+        c = self safe(pname)
+        is = i toString
+        (defaultExpr == nil) ifTrue {
+            out push("    ClayValue " + c + " = (argc > " + is + ") ? argv[" + is + "] : CLAY_NIL;\n")
+            out push("    clay_retain_val(" + c + ");\n")
+        } ifFalse {
+            out push("    ClayValue " + c + " = CLAY_NIL;\n")
+            out push("    if (argc > " + is + ") { " + c + " = argv[" + is + "]; clay_retain_val(" + c + "); } else {\n")
+            saved = indent
+            indent = 2
+            mark = ownedTemps size
+            d = self expr(defaultExpr)
+            (d != nil) ifTrue {
+                self retains(d, 1 - (self own(d)))
+                self line(c + " = " + d + ";")
+                self tempCleanupFrom(mark, d)
+            }
+            indent = saved
+            out push("    }\n")
+        }
+        locals push(pname)
+        self trackVar(pname)
+    }
+
+    stmt(n) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Assign") ifTrue {
+            self emitLine(n line)
+            v = self expr(n value)
+            (v == nil) ifTrue { return nil }
+            self varStore(n name, v, 1 - (self own(v)))
+            (n value != nil && n value kind == "Send" && n value name == "clone") ifTrue {
+                (self isBoxed(n name)) ifTrue {
+                    self line("clay_set_slot_take(CLAY_OBJ(" + (self safe(n name)) + "_cell->value), \"_name\", CLAY_VAL(clay_string_new(\"" + n name + "\")));")
+                } ifFalse {
+                    self line("clay_set_slot_take(CLAY_OBJ(" + (self safe(n name)) + "), \"_name\", CLAY_VAL(clay_string_new(\"" + n name + "\")));")
+                }
+            }
+            self tempCleanup(v)
+            return nil
+        }
+        (k == "Return") ifTrue {
+            self emitLine(n line)
+            (fnIsBlock && (self isBoxed("__ret_id"))) ifTrue {
+                v = (n expr == nil) ifTrue { nil } ifFalse { self expr(n expr) }
+                (v != nil) ifTrue { self retains(v, 1 - (self own(v))) }
+                self line("{ ClayValue __ret_v = " + (v ?? "CLAY_NIL") + ";")
+                indent = indent + 1
+                self tempCleanup(v)
+                self functionReleases
+                self line("clay_release_val(__rv);")
+                self line("clay_raise_return(__ret_v, __ret_id_cell->value); }")
+                indent = indent - 1
+                return nil
+            }
+            (n expr != nil) ifTrue {
+                v = self expr(n expr)
+                (v != nil) ifTrue {
+                    self retains(v, 1 - (self own(v)))
+                    self rvSet(v)
+                    self tempCleanup(v)
+                }
+            }
+            inFunction ifTrue { self functionExit } ifFalse { self line("return __rv;") }
+            return nil
+        }
+        (k == "Break") ifTrue {
+            self emitLine(n line)
+            self line("clay_raise(CLAY_VAL(clay_BreakSignal));")
+            return nil
+        }
+        (k == "Continue") ifTrue {
+            self emitLine(n line)
+            self line("clay_raise(CLAY_VAL(clay_ContinueSignal));")
+            return nil
+        }
+        (k == "SlotAssign") ifTrue {
+            self emitLine(n line)
+            recv = self expr(n recv)
+            v = self expr(n value)
+            (recv != nil && v != nil) ifTrue {
+                self line("clay_set_slot(CLAY_OBJ(" + recv + "), \"" + n name + "\", " + v + ");")
+                inFunction ifTrue {
+                    self retains(v, 1)
+                    self rvSet(v)
+                }
+            }
+            self tempCleanup(nil)
+            return nil
+        }
+        self expr(n)
+        self tempCleanup(nil)
+        out push("\n")
+    }
+
+    // top-level `Name = Proto clone { ... }`
+    topClone(n, varName) {
+        proto = self expr(n recv)
+        (proto == nil) ifTrue { return nil }
+        self emitLine(n line)
+        self line("/* " + varName + " = ... clone({ ... }) */")
+        self line(varName + " = CLAY_VAL(clay_clone(CLAY_OBJ(" + proto + ")));")
+        slotNames = []
+        n items each { |m| (m kind == "SlotDef") ifTrue { slotNames push(m name) } }
+        n items each { |m|
+            (m kind == "SlotDef") ifTrue {
+                v = self expr(m value)
+                (v != nil) ifTrue {
+                    self line("clay_set_slot(CLAY_OBJ(" + varName + "), \"" + m name + "\", " + v + ");")
+                }
+            }
+            (m kind == "MethodDef") ifTrue {
+                (m fnName == nil) ifTrue {
+                    Console print("codegen: method has no pre-assigned name\n")
+                } ifFalse {
+                    md = FnDef make(m fnName, varName, m, [], true)
+                    md cloneSlots = (slotNames size > 0) ifTrue { slotNames } ifFalse { nil }
+                    collected push(md)
+                    self line("clay_set_method(CLAY_OBJ(" + varName + "), \"" + m name + "\", " + m fnName + ");")
+                }
+            }
+        }
+        self line("clay_set_slot_take(CLAY_OBJ(" + varName + "), \"_name\", CLAY_VAL(clay_string_new(\"" + varName + "\")));")
+        self tempCleanup(nil)
+    }
+
+    // a statement of a method or block body
+    bodyStmt(s, isMethod) {
+        k = s kind
+        (k == "Assign") ifTrue { return self fnAssign(s, isMethod) }
+        (k == "SlotAssign" || k == "Return" || k == "Break" || k == "Continue") ifTrue { return self stmt(s) }
+        self fnExprStmt(s)
+    }
+
+    // --- function bodies ---
+
+    methodBodies() {
+        { collected size > 0 } whileTrue {
+            batch = collected
+            collected = []
+            batch each { |d| self functionBody(d) }
+        }
+    }
+
+    functionBody(d) {
+        n = d node
+        out push("\nstatic ClayValue " + d funcName + "(ClayObject *self, int argc, ClayValue *argv) {\n")
+        out push("    (void)self; (void)argc; (void)argv;\n")
+
+        savedInMethod = inMethod
+        savedLocalCount = locals size
+        savedBoxedCount = boxed size
+        savedBase = methodLocalBase
+        savedSuper = superProto
+        savedKnown = knownSlots
+        savedCtx = methodCtx
+        savedInFunction = inFunction
+        methodLocalBase = locals size
+        inMethod = true
+        methodCtx = d inMethodCtx
+        inFunction = true
+        fnVars = []
+        fnCells = []
+        superProto = d objContext
+        knownSlots = d cloneSlots
+
+        (n kind == "MethodDef") ifTrue {
+            pc = n params size toString
+            mname = (n name replace("\\", "\\\\")) replace("\"", "\\\"")
+            out push("    if (argc > " + pc + ") clay_raise_arity(\"" + mname + "\", " + pc + ", argc);\n")
+            (self hasBlockReturn(n body)) ifTrue {
+                out push("    ClayValue __ret_id = clay_return_id_next();\n" +
+                         "    ClayTryFrame __ret_tf;\n" +
+                         "    if (clay_try_push(&__ret_tf) != 0) {\n" +
+                         "        ClayValue __ret_v, __ret_err = clay_error_stack.current_error;\n" +
+                         "        if (clay_return_matches(__ret_err, __ret_id, &__ret_v))\n" +
+                         "            return clay_return_value(__ret_v, CLAY_VAL(self), argc, argv);\n" +
+                         "        clay_raise(__ret_err);\n" +
+                         "    }\n" +
+                         "    __ret_tf.return_id = __ret_id;\n")
+                locals push("__ret_id")
+                fnHasRetFrame = true
+            }
+            locals push("_method_self")
+            i = 0
+            n params each { |p|
+                (p kind == "Assign") ifTrue {
+                    self paramDecl(p name, i, p value)
+                } ifFalse {
+                    self paramDecl(p name, i, nil)
+                }
+                i = i + 1
+            }
+            out push("    ClayValue __rv = CLAY_NIL;\n")
+            self slotFallbackDecls(n body)
+            savedIndent = indent
+            indent = 1
+            n body each { |s| self bodyStmt(s, true) }
+            self functionExit
+            indent = savedIndent
+            fnHasRetFrame = false
+        } ifFalse {
+            savedRecv = useSlotRecv
+            savedIsBlock = fnIsBlock
+            fnIsBlock = true
+            useSlotRecv = (d captures contains("_method_self")) == false
+            useSlotRecv ifTrue { out push("    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n") }
+            blockBoxed = boxed size
+            i = 0
+            d captures each { |c|
+                out push("    ClayCell *" + (self safe(c)) + "_cell = (ClayCell *)(uintptr_t)self->as.block.env[" +
+                         i toString + "];\n")
+                locals push(c)
+                boxed push(c)
+                i = i + 1
+            }
+            i = 0
+            n params each { |p|
+                self paramDecl(p name, i, nil)
+                i = i + 1
+            }
+            out push("    ClayValue __rv = CLAY_NIL;\n")
+            (inMethod && (self isBoxed("_method_self"))) ifTrue { self slotFallbackDecls(n body) }
+            savedIndent = indent
+            indent = 1
+            n body each { |s| self bodyStmt(s, false) }
+            self functionExit
+            indent = savedIndent
+            useSlotRecv = savedRecv
+            fnIsBlock = savedIsBlock
+            boxed = boxed slice(0, blockBoxed)
+        }
+
+        fnVars = []
+        fnCells = []
+        inFunction = savedInFunction
+        inMethod = savedInMethod
+        methodCtx = savedCtx
+        superProto = savedSuper
+        methodLocalBase = savedBase
+        knownSlots = savedKnown
+        locals = locals slice(0, savedLocalCount)
+        boxed = boxed slice(0, savedBoxedCount)
+        out push("}\n")
+    }
+
+    // --- the program ---
+
+    generate(program) {
+        self prewalk(program, nil)
+        program items each { |s|
+            ((s kind == "Assign") && (self isLocal(s name)) == false) ifTrue { locals push(s name) }
+        }
+        toplevelCount = locals size
+
+        header = "/* Generated by Clay compiler */\n#include \"clay.h\"\n#include \"range.h\"\n\n"
+
+        // main's statements first (they collect the functions to emit)
+        file = out
+        out = []
+        program items each { |s|
+            (s kind == "Assign" && s value != nil && s value kind == "Clone") ifTrue {
+                self topClone(s value, s name)
+            } ifFalse {
+                self stmt(s)
+            }
+        }
+        mainBody = out
+        out = file
+
+        out push(header)
+        (nameOrder reverse) each { |f| out push("static ClayValue " + f + "(ClayObject *self, int argc, ClayValue *argv);\n") }
+        out push("\n")
+        declared = #{}
+        program items each { |s|
+            (s kind == "Assign" && (declared has(s name)) == false) ifTrue {
+                declared set(s name, true)
+                out push("static ClayValue " + (self safe(s name)) + " = CLAY_NIL;\n")
+            }
+        }
+        out push("\n")
+        boxed = []
+
+        self methodBodies
+
+        out push("\nint main(int argc, char **argv) {\n")
+        out push("    clay_bootstrap();\n")
+        out push("    clay_set_args(argc - 1, argv + 1);\n")
+        out push("    clay_source_file = \"" + (CNames pathBody(sourceFile)) + "\";\n")
+        (pluginExePath != nil && pluginExePath != "") ifTrue {
+            out push("    clay_plugin_auto_load(\"" + (CNames pathBody(pluginExePath)) + "\");\n")
+        }
+        out push("\n")
+        mainBody each { |c| out push(c) }
+        out push("\n    clay_shutdown();\n")
+        out push("    return 0;\n")
+        out push("}\n")
+        out join("")
+    }
+}
