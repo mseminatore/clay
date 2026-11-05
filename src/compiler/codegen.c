@@ -127,8 +127,8 @@ static void emit_rv_set(CodeGen *cg, const char *val) {
     fprintf(cg->out, "clay_release_val(__rv); __rv = %s;\n", val);
 }
 
-/* Release everything this function owns, then return __rv */
-static void emit_function_exit(CodeGen *cg) {
+/* Release the variables and cells this function owns */
+static void emit_function_releases(CodeGen *cg) {
     for (int i = 0; i < cg->fn_var_count; i++) {
         emit_indent(cg);
         fprintf(cg->out, "clay_release_val(%s);\n", c_safe_name(cg->fn_vars[i]));
@@ -136,6 +136,15 @@ static void emit_function_exit(CodeGen *cg) {
     for (int i = 0; i < cg->fn_cell_count; i++) {
         emit_indent(cg);
         fprintf(cg->out, "clay_cell_release(%s_cell);\n", c_safe_name(cg->fn_cells[i]));
+    }
+}
+
+/* Release everything this function owns, then return __rv */
+static void emit_function_exit(CodeGen *cg) {
+    emit_function_releases(cg);
+    if (cg->fn_has_ret_frame) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_try_pop();\n");
     }
     emit_indent(cg);
     if (cg->fn_is_block)
@@ -529,6 +538,21 @@ static int is_local(CodeGen *cg, const char *name) {
     return 0;
 }
 
+/* A top-level variable (a file-scope static) not shadowed by a nested local.
+ * Blocks use the static directly instead of capturing it in a cell: it lives
+ * for the whole program, and methods read the static, so a cell copy would
+ * go stale. */
+static int is_toplevel_var(CodeGen *cg, const char *name) {
+    int found = 0;
+    for (int i = 0; i < cg->local_count; i++) {
+        if (strcmp(cg->local_names[i], name) == 0) {
+            if (i >= cg->toplevel_local_count) return 0;
+            found = 1;
+        }
+    }
+    return found;
+}
+
 /* Check if name is a method/block-specific local (not inherited from outer scope) */
 static int is_method_local(CodeGen *cg, const char *name) {
     for (int i = cg->method_local_base; i < cg->local_count; i++) {
@@ -669,7 +693,9 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             if (name_in_list(name, block_params, param_count)) break;
             if (capture_has(caps, name)) break;
             /* If it's a local in the enclosing scope, it needs capture */
-            if (is_local(cg, name)) {
+            if (is_toplevel_var(cg, name)) {
+                /* uses the static */
+            } else if (is_local(cg, name)) {
                 capture_add(caps, name);
                 capture_slot_flag(caps, name, cg);
             } else if (is_local(cg, "_method_self") && !capture_has(caps, "_method_self")) {
@@ -725,7 +751,7 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
                 if (!is_builtin_global(aname) &&
                     !name_in_list(aname, block_params, param_count) &&
                     !capture_has(caps, aname) &&
-                    is_local(cg, aname)) {
+                    is_local(cg, aname) && !is_toplevel_var(cg, aname)) {
                     capture_add(caps, aname);
                     capture_slot_flag(caps, aname, cg);
                 }
@@ -773,6 +799,9 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             scan_free_vars(node->as.slot_assign.value, block_params, param_count, caps, cg);
             break;
         case NODE_RETURN:
+            /* A block's `return` returns from its method: capture the call id */
+            if (is_local(cg, "__ret_id") && !capture_has(caps, "__ret_id"))
+                capture_add(caps, "__ret_id");
             if (node->as.return_stmt.expr)
                 scan_free_vars(node->as.return_stmt.expr, block_params, param_count, caps, cg);
             break;
@@ -1254,7 +1283,14 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
 
     /* Error was raised — get the error value */
     emit_indent(cg);
-    fprintf(cg->out, "ClayValue %s = clay_error_stack.current_error;\n", err_tmp);
+    fprintf(cg->out, "ClayValue %s = clay_error_stack.current_error; /* owned */\n", err_tmp);
+
+    /* break / continue / non-local return pass through: run finally, re-raise */
+    emit_indent(cg);
+    fprintf(cg->out, "if (clay_is_control_signal(%s)) {", err_tmp);
+    if (finally_block)
+        fprintf(cg->out, " clay_release_val(clay_send_val(%s, \"value\", 0, NULL));", finally_block);
+    fprintf(cg->out, " clay_raise(%s); }\n", err_tmp);
 
     if (catch_block) {
         emit_indent(cg);
@@ -1264,6 +1300,8 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
         emit_indent(cg);
         fprintf(cg->out, "%s = CLAY_NIL;\n", t);
     }
+    emit_indent(cg);
+    fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
 
     cg->indent--;
     emit_indent(cg);
@@ -1272,7 +1310,7 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
     /* Finally block — always executed */
     if (finally_block) {
         emit_indent(cg);
-        fprintf(cg->out, "clay_send_val(%s, \"value\", 0, NULL);\n", finally_block);
+        fprintf(cg->out, "clay_release_val(clay_send_val(%s, \"value\", 0, NULL));\n", finally_block);
         free(finally_block);
     }
 
@@ -1287,8 +1325,10 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
 static char *emit_raise(CodeGen *cg, AstNode *node) {
     char *val = emit_expr(cg, node->as.raise.expr);
 
-    /* If the value is a string, wrap it in an Error object */
+    /* clay_raise takes a reference: own the value, and if it is a string,
+     * wrap it in an Error object */
     char *t = temp_name(cg);
+    emit_retains(cg, val, 1 - is_owned_temp(cg, val));
     emit_indent(cg);
     fprintf(cg->out, "ClayValue %s = %s;\n", t, val);
     emit_indent(cg);
@@ -1296,7 +1336,11 @@ static char *emit_raise(CodeGen *cg, AstNode *node) {
             t, t, t);
     cg->indent++;
     emit_indent(cg);
-    fprintf(cg->out, "%s = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(%s)), \"RuntimeError\"));\n", t, t);
+    fprintf(cg->out, "ClayValue %s_s = %s;\n", t, t);
+    emit_indent(cg);
+    fprintf(cg->out, "%s = CLAY_VAL(clay_error_new(clay_string_data(CLAY_OBJ(%s_s)), \"RuntimeError\"));\n", t, t);
+    emit_indent(cg);
+    fprintf(cg->out, "clay_release_val(%s_s);\n", t);
     cg->indent--;
     emit_indent(cg);
     fprintf(cg->out, "}\n");
@@ -1504,10 +1548,10 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
             strcmp(node->as.assign.value->as.send.message, "clone") == 0) {
             emit_indent(cg);
             if (is_boxed(cg, node->as.assign.name)) {
-                fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s_cell->value), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+                fprintf(cg->out, "clay_set_slot_take(CLAY_OBJ(%s_cell->value), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
                         c_safe_name(node->as.assign.name), node->as.assign.name);
             } else {
-                fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+                fprintf(cg->out, "clay_set_slot_take(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
                         c_safe_name(node->as.assign.name), node->as.assign.name);
             }
         }
@@ -1544,6 +1588,24 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
     /* Return: emit expression and early return from method/block */
     if (node->type == NODE_RETURN) {
         emit_line(cg, node->line);
+        if (cg->fn_is_block && is_boxed(cg, "__ret_id")) {
+            /* `return` in a block: return from the enclosing method by raising
+             * a ReturnSignal (which takes our reference to the value) */
+            char *val = node->as.return_stmt.expr ? emit_expr(cg, node->as.return_stmt.expr) : NULL;
+            if (val) emit_retains(cg, val, 1 - is_owned_temp(cg, val));
+            emit_indent(cg);
+            fprintf(cg->out, "{ ClayValue __ret_v = %s;\n", val ? val : "CLAY_NIL");
+            cg->indent++;
+            emit_temp_cleanup(cg, val);
+            emit_function_releases(cg);
+            emit_indent(cg);
+            fprintf(cg->out, "clay_release_val(__rv);\n");
+            emit_indent(cg);
+            fprintf(cg->out, "clay_raise_return(__ret_v, __ret_id_cell->value); }\n");
+            cg->indent--;
+            free(val);
+            return;
+        }
         if (node->as.return_stmt.expr) {
             char *val = emit_expr(cg, node->as.return_stmt.expr);
             if (val) {
@@ -1566,7 +1628,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
     if (node->type == NODE_BREAK) {
         emit_line(cg, node->line);
         emit_indent(cg);
-        fprintf(cg->out, "clay_raise(CLAY_VAL(clay_error_new(\"break\", \"BreakSignal\")));\n");
+        fprintf(cg->out, "clay_raise(CLAY_VAL(clay_BreakSignal));\n");
         return;
     }
 
@@ -1574,7 +1636,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
     if (node->type == NODE_CONTINUE) {
         emit_line(cg, node->line);
         emit_indent(cg);
-        fprintf(cg->out, "clay_raise(CLAY_VAL(clay_error_new(\"continue\", \"ContinueSignal\")));\n");
+        fprintf(cg->out, "clay_raise(CLAY_VAL(clay_ContinueSignal));\n");
         return;
     }
 
@@ -1668,7 +1730,7 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
 
     /* Auto-set _name slot to variable name */
     emit_indent(cg);
-    fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
+    fprintf(cg->out, "clay_set_slot_take(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
             var_name, var_name);
     /* Clean up any owned temps from slot value expressions */
     emit_temp_cleanup(cg, NULL);
@@ -1724,6 +1786,24 @@ static void emit_method_bodies(CodeGen *cg) {
                 fputc(*c, cg->out);
             }
             fprintf(cg->out, "\", %d, argc);\n", node->as.method_def.params.count);
+            /* Non-local return: blocks in this method `return` from it by
+             * raising a ReturnSignal tagged with this call's id; catch it here.
+             * (The frame is pushed before any locals exist; on that path the
+             * method's own locals are not released.) */
+            if (ast_has_block_return(&node->as.method_def.body)) {
+                fprintf(cg->out,
+                    "    ClayValue __ret_id = clay_return_id_next();\n"
+                    "    ClayTryFrame __ret_tf;\n"
+                    "    if (clay_try_push(&__ret_tf) != 0) {\n"
+                    "        ClayValue __ret_v, __ret_err = clay_error_stack.current_error;\n"
+                    "        if (clay_return_matches(__ret_err, __ret_id, &__ret_v))\n"
+                    "            return clay_return_value(__ret_v, CLAY_VAL(self), argc, argv);\n"
+                    "        clay_raise(__ret_err);\n"
+                    "    }\n"
+                    "    __ret_tf.return_id = __ret_id;\n");
+                push_local(cg, "__ret_id");
+                cg->fn_has_ret_frame = 1;
+            }
             /* Make method's self available for capture by nested blocks */
             push_local(cg, "_method_self");
             /* Register params as locals (each holds its own reference) */
@@ -1754,6 +1834,7 @@ static void emit_method_bodies(CodeGen *cg) {
             }
             emit_function_exit(cg);
             cg->indent = saved_indent;
+            cg->fn_has_ret_frame = 0;
         } else if (node->type == NODE_BLOCK) {
             /* A block that doesn't capture an enclosing method's self is a
              * top-level block; if it is invoked as a method (setMethod or a
@@ -1856,6 +1937,7 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->local_count = 0;
     cg->local_capacity = 0;
     cg->method_local_base = 0;
+    cg->toplevel_local_count = 0;
     cg->boxed_names = NULL;
     cg->boxed_count = 0;
     cg->boxed_capacity = 0;
@@ -1867,6 +1949,7 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->in_function = 0;
     cg->use_slot_recv = 0;
     cg->fn_is_block = 0;
+    cg->fn_has_ret_frame = 0;
     cg->plugin_exe_path = NULL;
     cg->fn_vars = NULL;
     cg->fn_var_count = 0;
@@ -1880,34 +1963,34 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
  * This ensures module-level variables are accessible from static method functions
  * that capture them via closures. */
 static void collect_vars(AstNode *program, FILE *out) {
-    const char *declared[256];
-    int decl_count = 0;
+    int cap = 64, decl_count = 0;
+    const char **declared = (const char **)malloc(sizeof(const char *) * (size_t)cap);
     for (int i = 0; i < program->as.program.stmts.count; i++) {
         AstNode *stmt = program->as.program.stmts.items[i];
-        if (stmt->type == NODE_ASSIGN) {
-            /* Skip if already declared */
+        int n = 0;
+        AstNode **targets = NULL;
+        AstNode *single = NULL;
+        if (stmt->type == NODE_ASSIGN) { single = stmt; n = 1; }
+        else if (stmt->type == NODE_DESTRUCTURE) {
+            targets = stmt->as.destructure.targets.items;
+            n = stmt->as.destructure.targets.count;
+        }
+        for (int j = 0; j < n; j++) {
+            const char *name = single ? single->as.assign.name : targets[j]->as.ident.name;
             int found = 0;
-            for (int j = 0; j < decl_count; j++) {
-                if (strcmp(declared[j], stmt->as.assign.name) == 0) { found = 1; break; }
+            for (int k = 0; k < decl_count; k++) {
+                if (strcmp(declared[k], name) == 0) { found = 1; break; }
             }
-            if (!found && decl_count < 256) {
-                declared[decl_count++] = stmt->as.assign.name;
-                fprintf(out, "static ClayValue %s = CLAY_NIL;\n", c_safe_name(stmt->as.assign.name));
+            if (found) continue;
+            if (decl_count == cap) {
+                cap *= 2;
+                declared = (const char **)realloc(declared, sizeof(const char *) * (size_t)cap);
             }
-        } else if (stmt->type == NODE_DESTRUCTURE) {
-            for (int j = 0; j < stmt->as.destructure.targets.count; j++) {
-                const char *name = stmt->as.destructure.targets.items[j]->as.ident.name;
-                int found = 0;
-                for (int k = 0; k < decl_count; k++) {
-                    if (strcmp(declared[k], name) == 0) { found = 1; break; }
-                }
-                if (!found && decl_count < 256) {
-                    declared[decl_count++] = name;
-                    fprintf(out, "static ClayValue %s = CLAY_NIL;\n", c_safe_name(name));
-                }
-            }
+            declared[decl_count++] = name;
+            fprintf(out, "static ClayValue %s = CLAY_NIL;\n", c_safe_name(name));
         }
     }
+    free(declared);
 }
 
 void codegen_emit(CodeGen *cg, AstNode *program) {
@@ -1929,6 +2012,7 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
             }
         }
     }
+    cg->toplevel_local_count = cg->local_count;
 
     /* Emit header */
     fprintf(cg->out, "/* Generated by Clay compiler */\n");

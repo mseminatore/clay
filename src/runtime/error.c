@@ -20,13 +20,13 @@ CLAY_THREAD_LOCAL int clay_trace_enabled = 1; /* can be disabled for benchmarkin
 /* Create an Error object with message and type slots */
 ClayObject *clay_error_new(const char *message, const char *type) {
     ClayObject *err = clay_clone(clay_Error);
-    clay_set_slot(err, "_message", CLAY_VAL(clay_string_new(message)));
-    clay_set_slot(err, "_type", CLAY_VAL(clay_string_new(type)));
+    clay_set_slot_take(err, "_message", CLAY_VAL(clay_string_new(message)));
+    clay_set_slot_take(err, "_type", CLAY_VAL(clay_string_new(type)));
     if (clay_source_line > 0) {
         clay_set_slot(err, "_line", clay_int(clay_source_line));
     }
     if (clay_source_file) {
-        clay_set_slot(err, "_file", CLAY_VAL(clay_string_new(clay_source_file)));
+        clay_set_slot_take(err, "_file", CLAY_VAL(clay_string_new(clay_source_file)));
     }
 
     /* Capture stack trace from shadow call stack */
@@ -50,7 +50,7 @@ ClayObject *clay_error_new(const char *message, const char *type) {
         if (pos > 0) {
             /* Remove trailing newline */
             if (pos > 0 && trace_buf[pos - 1] == '\n') trace_buf[--pos] = '\0';
-            clay_set_slot(err, "_trace", CLAY_VAL(clay_string_new(trace_buf)));
+            clay_set_slot_take(err, "_trace", CLAY_VAL(clay_string_new(trace_buf)));
         }
     }
 
@@ -58,11 +58,66 @@ ClayObject *clay_error_new(const char *message, const char *type) {
 }
 
 /* Raise an error: longjmp to nearest try frame, or abort */
+const ClayTryHooks *clay_try_hooks = NULL;
+
+CLAY_THREAD_LOCAL ClayUnwindList *clay_unwind_list = NULL;
+static CLAY_THREAD_LOCAL ClayUnwindList g_thread_unwind = { NULL, 0, 0 };
+
+static ClayUnwindList *unwind_list(void) {
+    return clay_unwind_list ? clay_unwind_list : &g_thread_unwind;
+}
+
+void clay_unwind_push(ClayObject *obj) {
+    ClayUnwindList *l = unwind_list();
+    if (l->count == l->capacity) {
+        int cap = l->capacity ? l->capacity * 2 : 64;
+        ClayObject **items = (ClayObject **)realloc(l->items, sizeof(ClayObject *) * (size_t)cap);
+        if (!items) { fprintf(stderr, "clay: out of memory\n"); exit(1); }
+        l->items = items;
+        l->capacity = cap;
+    }
+    l->items[l->count++] = obj;
+}
+
+void clay_unwind_pop(void) {
+    unwind_list()->count--;
+}
+
+static void unwind_to(ClayUnwindList *l, int depth) {
+    while (l->count > depth) clay_release(l->items[--l->count]);
+}
+
+void clay_unwind_list_free(ClayUnwindList *list) {
+    unwind_to(list, 0);
+    free(list->items);
+    list->items = NULL;
+    list->capacity = 0;
+}
+
+void clay_try_save_state(ClayTryFrame *frame) {
+    frame->slot_method_self = clay_slot_method_self;
+    frame->trace_depth = clay_call_trace.depth;
+    frame->trace_overflow = clay_call_trace.overflow;
+    frame->return_id = 0;
+    frame->unwind_depth = unwind_list()->count;
+    if (clay_try_hooks) clay_try_hooks->save(frame->engine_state);
+}
+
+static void clay_try_restore_state(ClayTryFrame *frame) {
+    clay_slot_method_self = frame->slot_method_self;
+    clay_call_trace.depth = frame->trace_depth;
+    clay_call_trace.overflow = frame->trace_overflow;
+    if (clay_try_hooks) clay_try_hooks->restore(frame->engine_state);
+    unwind_to(unwind_list(), frame->unwind_depth);
+}
+
 void clay_raise(ClayValue error) {
     if (clay_error_stack.head != NULL) {
         clay_error_stack.current_error = error;
         ClayTryFrame *frame = clay_error_stack.head;
         clay_error_stack.head = frame->prev;
+        /* Undo everything the frames we are about to skip had changed */
+        clay_try_restore_state(frame);
         longjmp(frame->buf, 1);
     }
     /* No try frame — print and abort */
@@ -146,6 +201,7 @@ static ClayValue error_stackTrace(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     ClayValue trace = clay_get_slot(self, "_trace");
     if (CLAY_IS_NIL(trace)) return CLAY_VAL(clay_string_new(""));
+    clay_retain_val(trace);
     return trace;
 }
 
@@ -201,4 +257,63 @@ void clay_raise_arity(const char *method, int expected, int got) {
     snprintf(msg, sizeof(msg), "%s takes %d argument%s, but %d %s given",
              method, expected, expected == 1 ? "" : "s", got, got == 1 ? "was" : "were");
     clay_raise(CLAY_VAL(clay_error_new(msg, "ArgumentError")));
+}
+
+/* --- Control signals and non-local return --- */
+
+static const char *error_type_name(ClayValue error) {
+    if (!CLAY_IS_OBJ(error)) return NULL;
+    ClayValue t = clay_get_slot(CLAY_OBJ(error), "_type");
+    return CLAY_IS_TYPE(t, CLAY_TYPE_STRING) ? clay_string_data(CLAY_OBJ(t)) : NULL;
+}
+
+int clay_is_control_signal(ClayValue error) {
+    const char *t = error_type_name(error);
+    return t && (strcmp(t, "BreakSignal") == 0 || strcmp(t, "ContinueSignal") == 0 ||
+                 strcmp(t, "ReturnSignal") == 0);
+}
+
+int clay_loop_signal(ClayValue error) {
+    const char *t = error_type_name(error);
+    int sig = 0;
+    if (t && strcmp(t, "BreakSignal") == 0) sig = CLAY_SIGNAL_BREAK;
+    else if (t && strcmp(t, "ContinueSignal") == 0) sig = CLAY_SIGNAL_CONTINUE;
+    if (sig) clay_release_val(error);
+    return sig;
+}
+
+static CLAY_THREAD_LOCAL intptr_t g_return_id = 0;
+
+ClayValue clay_return_id_next(void) {
+    if (++g_return_id > CLAY_INT_MAX) g_return_id = 1;
+    return clay_int(g_return_id);
+}
+
+void clay_raise_return(ClayValue value, ClayValue id) {
+    /* The method call is live only while its try frame is on the stack. If
+     * the block outlived its method, raise an ordinary (catchable) error. */
+    ClayTryFrame *f = clay_error_stack.head;
+    while (f && f->return_id != id) f = f->prev;
+    if (!f) {
+        clay_release_val(value);
+        ClayObject *err = clay_error_new("return from a method that has already returned",
+                                         "RuntimeError");
+        clay_raise(CLAY_VAL(err));
+    }
+    ClayObject *sig = clay_error_new("non-local return", "ReturnSignal");
+    clay_set_slot(sig, "_value", value);
+    clay_release_val(value);          /* the signal now holds it */
+    clay_set_slot(sig, "_id", id);
+    clay_raise(CLAY_VAL(sig));
+}
+
+int clay_return_matches(ClayValue error, ClayValue id, ClayValue *value_out) {
+    const char *t = error_type_name(error);
+    if (!t || strcmp(t, "ReturnSignal") != 0) return 0;
+    if (clay_get_slot(CLAY_OBJ(error), "_id") != id) return 0;
+    ClayValue v = clay_get_slot(CLAY_OBJ(error), "_value");
+    clay_retain_val(v);      /* the caller owns the returned value */
+    *value_out = v;
+    clay_release_val(error); /* the signal is consumed */
+    return 1;
 }

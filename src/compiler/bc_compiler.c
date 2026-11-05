@@ -315,6 +315,69 @@ static void vm_fiber_destroy(void *state) {
     free(st);
 }
 
+/* --- Try-frame hooks: VM state restored when an error unwinds to a frame ---
+ * Any C code that catches an error (try/catch, loops catching break/continue,
+ * method non-local return) resumes with the VM exactly as it was when the try
+ * frame was pushed — not with whatever chunk the error was raised from. */
+/* Return id handed from bc_method_dispatch to the method prologue (see
+ * native_method_return_id_fn) */
+static CLAY_THREAD_LOCAL ClayValue g_pending_return_id = 0;
+
+typedef struct {
+    clayvm_vm_t *vm;
+    clayvm_value_t *stack;
+    const uint8_t *code;
+    size_t code_len;
+    size_t ip;
+    int sp;
+    int running;
+    int frame_count;
+    int exception_count;
+    ClayObject *method_self;
+    ClayObject *super_proto;
+} VmTryState;
+
+typedef char vm_try_state_fits[(sizeof(VmTryState) <= CLAY_TRY_ENGINE_STATE_SIZE) ? 1 : -1];
+
+static void vm_try_save(void *buf) {
+    VmTryState *st = (VmTryState *)buf;
+    st->vm = g_vm;
+    st->method_self = g_method_self;
+    st->super_proto = g_super_proto;
+    if (!g_vm) return;
+    st->stack = g_vm->stack;
+    st->code = g_vm->code;
+    st->code_len = g_vm->code_len;
+    st->ip = g_vm->ip;
+    st->sp = g_vm->sp;
+    st->running = g_vm->running;
+    st->frame_count = g_vm->frame_count;
+    st->exception_count = g_vm->exception_count;
+}
+
+static void vm_try_restore(void *buf) {
+    VmTryState *st = (VmTryState *)buf;
+    g_method_self = st->method_self;
+    g_super_proto = st->super_proto;
+    if (!st->vm || st->vm != g_vm) return;
+    g_vm->code = st->code;
+    g_vm->code_len = st->code_len;
+    g_vm->ip = st->ip;
+    /* Values the unwound code left on the stack above the frame's mark are
+     * abandoned: release them. (Each VM call in between already released its
+     * own frame before re-raising; a fiber switch swaps stacks, so only on
+     * the same stack.) */
+    if (g_vm->stack == st->stack) {
+        while (g_vm->sp > st->sp) vm_release_val(g_vm->stack[--g_vm->sp]);
+    }
+    g_vm->sp = st->sp;
+    g_vm->running = st->running;
+    g_vm->frame_count = st->frame_count;
+    g_vm->exception_count = st->exception_count;
+}
+
+static const ClayTryHooks bc_try_hooks = { vm_try_save, vm_try_restore };
+
 static const ClayFiberHooks bc_fiber_hooks = {
     vm_fiber_create, vm_fiber_enter, vm_fiber_leave, vm_fiber_destroy
 };
@@ -367,6 +430,24 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
      * parameters are nil or take their defaults. */
     if (argc > ms->param_count)
         clay_raise_arity(ms->name ? ms->name : "method", ms->param_count, argc);
+
+    /* Non-local return: catch the ReturnSignal a block raises for this
+     * activation. The try frame is pushed before any VM state changes, so the
+     * try hooks restore the caller's VM state, self and super on the way out. */
+    ClayTryFrame nl_frame;
+    ClayValue nl_id = CLAY_NIL;
+    if (chunk->has_block_return) {
+        nl_id = clay_return_id_next();
+        if (clay_try_push(&nl_frame) != 0) {
+            ClayValue err = clay_error_stack.current_error;
+            ClayValue value;
+            if (clay_return_matches(err, nl_id, &value))
+                return clay_return_value(value, CLAY_VAL(self), argc, argv);
+            clay_raise(err);
+        }
+        nl_frame.return_id = nl_id;
+        g_pending_return_id = nl_id;
+    }
 
     /* Save and set super prototype context */
     ClayObject *saved_super_proto = g_super_proto;
@@ -456,7 +537,9 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     /* Restore super prototype context */
     g_super_proto = saved_super_proto;
 
-    return retval;
+    if (chunk->has_block_return) clay_try_pop();
+    /* Like every method: a result that is self or an argument is borrowed */
+    return clay_return_value(retval, CLAY_VAL(self), argc, argv);
 }
 
 /* --- Bytecode emission helpers --- */
@@ -668,6 +751,11 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
     }
+
+    /* The operands stay in the stack array after popping; during the call
+     * sp is raised over them again so an error unwinding past this send
+     * releases them (vm_try_restore), and lowered afterwards. */
+    int send_top = vm->sp, send_bottom = vm->sp - argc;
 
     /* Pop args in reverse: first popped = last arg */
     int msg_argc = argc - 2;
@@ -904,6 +992,8 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
             target_methods = target_obj->parent->methods;
     }
 
+    vm->sp = send_top;
+
     /* Per-callsite inline cache check */
     size_t site_ip = vm->ip;
     unsigned int ic_idx = (unsigned int)(site_ip >> 2) & IC_TABLE_MASK;
@@ -919,7 +1009,9 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         if (CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) {
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
+            clay_unwind_push(wrapper);
             result = clay_invoke(ic->method, wrapper, msg_argc, args);
+            clay_unwind_pop();
             if (result == CLAY_VAL(wrapper)) {
                 clay_release(wrapper);
                 result = receiver;
@@ -978,6 +1070,8 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
             }
         }
     }
+
+    vm->sp = send_bottom;
 
     /* Alias check: if result is same as an input, retain before releasing */
     int aliased = 0;
@@ -1275,7 +1369,7 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
         vm->running = saved_running;
         vm->frame_count = saved_frame_count;
         if (!CLAY_IS_NIL(finally_block)) {
-            clay_send_val(finally_block, "value", 0, NULL);
+            clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
         }
         vm_release_val(try_vm);
         vm_release_val(catch_vm);
@@ -1290,15 +1384,27 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
         vm->running = saved_running;
         vm->frame_count = saved_frame_count;
 
-        ClayValue error = clay_error_stack.current_error;
+        ClayValue error = clay_error_stack.current_error;   /* we own it */
+        if (clay_is_control_signal(error)) {
+            /* break / continue / non-local return are not errors: run finally,
+             * then let the signal continue to its loop or method */
+            if (!CLAY_IS_NIL(finally_block)) {
+                clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
+            }
+            vm_release_val(try_vm);
+            vm_release_val(catch_vm);
+            vm_release_val(finally_vm);
+            clay_raise(error);
+        }
         ClayValue result;
         if (!CLAY_IS_NIL(catch_block)) {
             result = clay_send_val(catch_block, "value", 1, &error);
         } else {
             result = CLAY_NIL;
         }
+        clay_release_val(error);   /* handled */
         if (!CLAY_IS_NIL(finally_block)) {
-            clay_send_val(finally_block, "value", 0, NULL);
+            clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
         }
         vm_release_val(try_vm);
         vm_release_val(catch_vm);
@@ -1408,6 +1514,27 @@ static int native_self_has_slot_fn(clayvm_vm_t *vm, int argc) {
         has = clay_has_slot(g_method_self, clay_string_data((ClayObject *)name_val.as.obj));
     vm_release_val(name_val);
     clayvm_vm_push(vm, CLAYVM_INT64(has));
+    return 0;
+}
+
+/* Non-local return. bc_method_dispatch gives each activation of a method that
+ * contains `return` inside a block an id (and catches the ReturnSignal);
+ * the method's prologue reads it into its hidden "?ret" local, which nested
+ * blocks capture and pass to raise_return. */
+
+static int native_method_return_id_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_vm_push(vm, clay_to_vm(g_pending_return_id));
+    return 0;
+}
+
+static int native_raise_return_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t id_vm = clayvm_vm_pop(vm);
+    clayvm_value_t val_vm = clayvm_vm_pop(vm);
+    ClayValue val = vm_to_clay(val_vm);
+    ClayValue id = vm_to_clay(id_vm);
+    clay_raise_return(val, id);     /* takes pop's reference to val */
     return 0;
 }
 
@@ -1568,6 +1695,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     vm->arith_fallback = arith_fallback_fn;
     clay_ic_invalidate_hook = bc_ic_invalidate;
     clay_fiber_hooks = &bc_fiber_hooks;
+    clay_try_hooks = &bc_try_hooks;
     vm->retain_fn = vm_retain_cb;
     vm->release_fn = vm_release_cb;
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);
@@ -1591,6 +1719,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_self_has_slot = clayvm_native_register(&vm->natives, "self_has_slot", native_self_has_slot_fn, 1);
     bc->native_set_self_slot = clayvm_native_register(&vm->natives, "set_self_slot", native_set_self_slot_fn, 2);
     bc->native_cell_set_rev = clayvm_native_register(&vm->natives, "cell_set_rev", native_cell_set_rev_fn, 2);
+    bc->native_method_return_id = clayvm_native_register(&vm->natives, "method_return_id", native_method_return_id_fn, 0);
+    bc->native_raise_return = clayvm_native_register(&vm->natives, "raise_return", native_raise_return_fn, 2);
     bc->native_stop_vm = clayvm_native_register(&vm->natives, "stop_vm", native_stop_vm_fn, 0);
     bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 3);
     bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
@@ -2031,10 +2161,14 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
             bc_scan_free_vars(node->as.slot_assign.receiver, block_params, param_count, caps, bc);
             bc_scan_free_vars(node->as.slot_assign.value, block_params, param_count, caps, bc);
             break;
-        case NODE_RETURN:
+        case NODE_RETURN: {
+            /* A block's `return` returns from its method: capture the id */
+            int rslot = bc_resolve_enclosing(bc, "?ret");
+            if (rslot >= 0) bc_capture_add(caps, "?ret", rslot);
             if (node->as.return_stmt.expr)
                 bc_scan_free_vars(node->as.return_stmt.expr, block_params, param_count, caps, bc);
             break;
+        }
         case NODE_DICT_LIT:
             bc_scan_free_vars_list(&node->as.dict_lit.values, block_params, param_count, caps, bc);
             break;
@@ -2188,6 +2322,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     int saved_local_count = bc->local_count;
     int saved_scope_depth = bc->scope_depth;
     int saved_in_method = bc->in_method;
+    int saved_chunk_is_method = bc->chunk_is_method;
     BcLocal *saved_enclosing = bc->enclosing_locals;
     int saved_enclosing_count = bc->enclosing_local_count;
     if (saved_local_count > 0)
@@ -2202,6 +2337,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->scope_depth = 0;
     bc->len = 0;
     if (is_method) bc->in_method = 1;
+    bc->chunk_is_method = is_method;
 
     /* Register params as locals (slot 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
@@ -2221,6 +2357,15 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
      * local variables (not params, captures, builtins, or user globals).
      * This ensures prescan can identify which locals nested blocks capture,
      * enabling proper cell-boxing for closures that escape their scope. */
+    /* Non-local return: a method whose blocks `return` gets a hidden "?ret"
+     * local holding this activation's id (registered before the prescan so
+     * nested blocks capture it) */
+    int ret_slot = -1;
+    if (is_method && ast_has_block_return(body)) {
+        chunk->has_block_return = 1;
+        ret_slot = bc_add_local(bc, "?ret");
+    }
+
     int prereg_start = bc->local_count;
     bc_preregister_method_locals(bc, body);
     int prereg_end = bc->local_count;
@@ -2241,6 +2386,16 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     /* Pre-scan body for nested blocks to identify params that will be captured.
      * This must happen AFTER params are registered as locals. */
     bc_prescan_list(bc, body);
+
+    /* First thing on entry: read this activation's return id (before any
+     * nested call can start another method) */
+    if (ret_slot >= 0) {
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_method_return_id);
+        emit_byte(bc, 0);
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)ret_slot);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
 
     /* Set each flag at method entry: does self already have this slot?
      * (Before cell boxing below, so a captured flag is boxed with its value.) */
@@ -2355,6 +2510,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->local_count = saved_local_count;
     bc->scope_depth = saved_scope_depth;
     bc->in_method = saved_in_method;
+    bc->chunk_is_method = saved_chunk_is_method;
     bc->enclosing_locals = saved_enclosing;
     bc->enclosing_local_count = saved_enclosing_count;
     if (saved_local_count > 0)
@@ -2935,6 +3091,15 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
         } else {
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
                 (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        }
+        int ret_id = bc->chunk_is_method ? -1 : bc_resolve_local(bc, "?ret");
+        if (ret_id >= 0) {
+            /* `return` in a block: return from the enclosing method */
+            bc_emit_get_local_value(bc, ret_id);
+            emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+            emit_u16(bc, (uint16_t)bc->native_raise_return);
+            emit_byte(bc, 2);
+            return;
         }
         emit_op(bc, CLAYVM_OP_CALL_NATIVE);
         emit_u16(bc, (uint16_t)bc->native_stop_vm);

@@ -37,6 +37,7 @@ typedef struct {
 
     /* Saved error stack head — isolate try frames per fiber */
     ClayTryFrame *saved_error_head;
+    ClayUnwindList unwind;      /* the fiber's clay_unwind_list */
 
 #ifdef _WIN32
     LPVOID os_fiber;            /* Windows fiber handle */
@@ -109,7 +110,7 @@ static ClayValue fiber_new(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *block = CLAY_OBJ(argv[0]);
 
     ClayObject *fiber = clay_clone(clay_Fiber);
-    clay_set_slot(fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
+    clay_set_slot_take(fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
 
     FiberContext *ctx = (FiberContext *)calloc(1, sizeof(FiberContext));
     ctx->block = block;
@@ -149,6 +150,8 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
     /* Save caller's error stack head and swap in the fiber's */
     ClayTryFrame *caller_error_head = clay_error_stack.head;
     clay_error_stack.head = ctx->saved_error_head;
+    ClayUnwindList *caller_unwind = clay_unwind_list;
+    clay_unwind_list = &ctx->unwind;
 
 #ifdef _WIN32
     ctx->caller_fiber = GetCurrentFiber();
@@ -160,6 +163,7 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
     /* Back here after yield() or completion */
     g_current_fiber = prev;
     clay_error_stack.head = caller_error_head;
+    clay_unwind_list = caller_unwind;
 
     int done = (ctx->status == 2);
     if (clay_fiber_hooks) clay_fiber_hooks->leave(ctx->engine, done);
@@ -213,5 +217,6 @@ void clay_fiber_context_free(intptr_t ctx_ptr) {
 #endif
     if (ctx->engine && clay_fiber_hooks) clay_fiber_hooks->destroy(ctx->engine);
     ctx->engine = NULL;
+    clay_unwind_list_free(&ctx->unwind);
     free(ctx);
 }

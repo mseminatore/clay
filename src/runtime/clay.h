@@ -201,6 +201,9 @@ ClayObject *clay_object_new(void);
 void        clay_object_pool_return(ClayObject *obj); /* Return to free-list pool */
 ClayObject *clay_clone(ClayObject *proto);
 void        clay_set_slot(ClayObject *obj, const char *name, ClayValue value);
+/* clay_set_slot for a value the caller owns: the slot takes that reference
+ * (use for fresh objects, e.g. clay_set_slot_take(o, "k", CLAY_VAL(clay_string_new(s)))) */
+void        clay_set_slot_take(ClayObject *obj, const char *name, ClayValue value);
 ClayValue   clay_get_slot(ClayObject *obj, const char *name);
 int         clay_has_slot(ClayObject *obj, const char *name);
 void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func);
@@ -373,10 +376,46 @@ void        clay_inspect(ClayObject *obj);
 #include <setjmp.h>
 
 /* Try/catch frames — linked list on the C stack (no fixed limit) */
+/* Execution-engine state saved with each try frame (see ClayTryHooks) */
+#define CLAY_TRY_ENGINE_STATE_SIZE 128
+
+/* Objects a C function owns only for the duration of a call it makes (e.g.
+ * the temporary Number wrapper dispatch creates for an int receiver). An error
+ * unwinding past that call releases them: each try frame records the depth
+ * and restoring it releases what is above. One list per fiber. */
+typedef struct ClayUnwindList {
+    ClayObject **items;
+    int count;
+    int capacity;
+} ClayUnwindList;
+extern CLAY_THREAD_LOCAL ClayUnwindList *clay_unwind_list;   /* NULL: the thread's own */
+void clay_unwind_push(ClayObject *obj);
+void clay_unwind_pop(void);              /* normal path: the caller releases it */
+void clay_unwind_list_free(ClayUnwindList *list);   /* releases what remains */
+
 typedef struct ClayTryFrame {
     jmp_buf buf;
     struct ClayTryFrame *prev;
+    /* Snapshot taken by clay_try_push and restored by clay_raise before it
+     * jumps here: a longjmp skips the code that would normally restore these */
+    ClayObject *slot_method_self;
+    int trace_depth;
+    int trace_overflow;
+    ClayValue return_id;    /* nonzero: catches non-local returns for this method call */
+    int unwind_depth;       /* clay_unwind_list count when pushed */
+    unsigned char engine_state[CLAY_TRY_ENGINE_STATE_SIZE];
 } ClayTryFrame;
+
+/* Hooks for an execution engine (the bytecode VM) to save and restore its own
+ * state — code pointer, ip, stack depth, current self — with each try frame.
+ * NULL for natively compiled programs. */
+typedef struct {
+    void (*save)(void *state);      /* at clay_try_push */
+    void (*restore)(void *state);   /* in clay_raise, before jumping */
+} ClayTryHooks;
+extern const ClayTryHooks *clay_try_hooks;
+
+void clay_try_save_state(ClayTryFrame *frame);
 
 typedef struct {
     ClayTryFrame *head;          /* linked list of active try frames */
@@ -389,12 +428,30 @@ extern CLAY_THREAD_LOCAL ClayErrorStack clay_error_stack;
 #define clay_try_push(frame) \
     ((frame)->prev = clay_error_stack.head, \
      clay_error_stack.head = (frame), \
+     clay_try_save_state(frame), \
      setjmp((frame)->buf))
 #define clay_try_pop() \
     (clay_error_stack.head = clay_error_stack.head->prev)
 
 /* Raise an error — longjmps to nearest try frame, or aborts */
 void clay_raise(ClayValue error);
+
+/* break / continue / non-local return travel as errors; user try/catch lets
+ * them through (running finally) instead of catching them */
+int  clay_is_control_signal(ClayValue error);
+/* Loop methods (each, times, whileTrue, ...): classify a caught error. For
+ * break/continue the signal is consumed (released); otherwise the caller
+ * re-raises it. */
+#define CLAY_SIGNAL_BREAK    1
+#define CLAY_SIGNAL_CONTINUE 2
+int  clay_loop_signal(ClayValue error);
+
+/* Non-local return: `return v` inside a block returns from the method the
+ * block was written in. Each such method activation gets an id; the block
+ * raises a ReturnSignal carrying (value, id) and the method catches it. */
+ClayValue clay_return_id_next(void);
+void      clay_raise_return(ClayValue value, ClayValue id);   /* takes a reference to value; does not return */
+int       clay_return_matches(ClayValue error, ClayValue id, ClayValue *value_out); /* consumes a matched signal */
 
 /* Source location tracking for error messages */
 extern CLAY_THREAD_LOCAL int clay_source_line;
@@ -419,6 +476,7 @@ typedef struct {
 typedef struct {
     ClayTraceFrame frames[CLAY_MAX_TRACE_DEPTH];
     int depth;
+    int overflow;   /* pushes beyond CLAY_MAX_TRACE_DEPTH (not recorded) */
 } ClayCallTrace;
 
 extern CLAY_THREAD_LOCAL ClayCallTrace clay_call_trace;
@@ -431,12 +489,15 @@ static inline void clay_trace_push(const char *file, int line, const char *sel) 
         f->file = file;
         f->line = line;
         f->selector = sel;
+    } else {
+        clay_call_trace.overflow++;   /* keep pushes and pops balanced */
     }
 }
 
 static inline void clay_trace_pop(void) {
     if (!clay_trace_enabled) return;
-    if (clay_call_trace.depth > 0) clay_call_trace.depth--;
+    if (clay_call_trace.overflow > 0) clay_call_trace.overflow--;
+    else if (clay_call_trace.depth > 0) clay_call_trace.depth--;
 }
 
 /* --- Cell (heap-allocated box for by-reference capture in C codegen) --- */

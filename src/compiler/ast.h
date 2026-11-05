@@ -153,4 +153,10 @@ void nodelist_free(NodeList *list);
 
 void ast_print(AstNode *node, int indent);
 
+/* Non-local return: does a method body contain `return` inside a block
+ * (so the method must catch ReturnSignal)? Does a block's subtree contain any
+ * `return` (so it must capture its method's return id)? */
+int ast_has_block_return(NodeList *method_body);
+int ast_block_contains_return(AstNode *block);
+
 #endif /* CLAY_AST_H */

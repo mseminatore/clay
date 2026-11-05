@@ -299,3 +299,61 @@ void ast_print(AstNode *node, int indent) {
             break;
     }
 }
+
+/* --- Non-local return analysis ---
+ * Walk expressions without descending into nested clone bodies (their methods
+ * have their own returns). in_block: are we inside a block literal? */
+static int ast_return_walk(AstNode *n, int in_block, int want_in_block);
+
+static int ast_return_walk_list(NodeList *l, int in_block, int want_in_block) {
+    for (int i = 0; i < l->count; i++)
+        if (ast_return_walk(l->items[i], in_block, want_in_block)) return 1;
+    return 0;
+}
+
+static int ast_return_walk(AstNode *n, int in_block, int want_in_block) {
+    if (!n) return 0;
+    switch (n->type) {
+        case NODE_RETURN:
+            if (!want_in_block || in_block) return 1;
+            return ast_return_walk(n->as.return_stmt.expr, in_block, want_in_block);
+        case NODE_BLOCK:
+            return ast_return_walk_list(&n->as.block.body, 1, want_in_block);
+        case NODE_ASSIGN:
+            return ast_return_walk(n->as.assign.value, in_block, want_in_block);
+        case NODE_SEND:
+            return ast_return_walk(n->as.send.receiver, in_block, want_in_block) ||
+                   ast_return_walk_list(&n->as.send.args, in_block, want_in_block);
+        case NODE_BINARY:
+            return ast_return_walk(n->as.binary.left, in_block, want_in_block) ||
+                   ast_return_walk(n->as.binary.right, in_block, want_in_block);
+        case NODE_ARRAY_LIT:
+            return ast_return_walk_list(&n->as.array_lit.elements, in_block, want_in_block);
+        case NODE_DICT_LIT:
+            return ast_return_walk_list(&n->as.dict_lit.values, in_block, want_in_block);
+        case NODE_TRY_CATCH:
+            return ast_return_walk(n->as.try_catch.try_block, in_block, want_in_block) ||
+                   ast_return_walk(n->as.try_catch.catch_block, in_block, want_in_block) ||
+                   ast_return_walk(n->as.try_catch.finally_block, in_block, want_in_block);
+        case NODE_RAISE:
+            return ast_return_walk(n->as.raise.expr, in_block, want_in_block);
+        case NODE_SLOT_ASSIGN:
+            return ast_return_walk(n->as.slot_assign.receiver, in_block, want_in_block) ||
+                   ast_return_walk(n->as.slot_assign.value, in_block, want_in_block);
+        case NODE_DESTRUCTURE:
+            return ast_return_walk(n->as.destructure.value, in_block, want_in_block);
+        case NODE_CLONE:
+            return ast_return_walk(n->as.clone.proto, in_block, want_in_block);
+        default:
+            return 0;   /* literals, identifiers, method/slot defs, break, ... */
+    }
+}
+
+int ast_has_block_return(NodeList *method_body) {
+    return ast_return_walk_list(method_body, 0, 1);
+}
+
+int ast_block_contains_return(AstNode *block) {
+    return block && block->type == NODE_BLOCK &&
+           ast_return_walk_list(&block->as.block.body, 1, 0);
+}

@@ -65,7 +65,8 @@ static ClayValue object_new(ClayObject *self, int argc, ClayValue *argv) {
     /* Call init(args) if the clone has an init method */
     if (clay_lookup_method(self, "init")) {
         ClayObject *obj = clay_clone(self);
-        ClayValue init_result = clay_send(obj, "init", argc, argv);
+        /* init often returns an argument (`init(c) { center = c }`): owned copy */
+        ClayValue init_result = clay_send_owned(CLAY_VAL(obj), "init", argc, argv);
         clay_release_val(init_result);
         return CLAY_VAL(obj);
     }
@@ -619,15 +620,15 @@ void clay_bootstrap(void) {
     /* Loop control signal singletons (Error clones for break/continue) */
     clay_BreakSignal = clay_clone(clay_Error);
     clay_BreakSignal->refcount = 1000000;
-    clay_set_slot(clay_BreakSignal, "_message", CLAY_VAL(clay_string_new("break")));
-    clay_set_slot(clay_BreakSignal, "_type", CLAY_VAL(clay_string_new("BreakSignal")));
-    clay_set_slot(clay_BreakSignal, "_name", CLAY_VAL(clay_string_new("BreakSignal")));
+    clay_set_slot_take(clay_BreakSignal, "_message", CLAY_VAL(clay_string_new("break")));
+    clay_set_slot_take(clay_BreakSignal, "_type", CLAY_VAL(clay_string_new("BreakSignal")));
+    clay_set_slot_take(clay_BreakSignal, "_name", CLAY_VAL(clay_string_new("BreakSignal")));
 
     clay_ContinueSignal = clay_clone(clay_Error);
     clay_ContinueSignal->refcount = 1000000;
-    clay_set_slot(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("continue")));
-    clay_set_slot(clay_ContinueSignal, "_type", CLAY_VAL(clay_string_new("ContinueSignal")));
-    clay_set_slot(clay_ContinueSignal, "_name", CLAY_VAL(clay_string_new("ContinueSignal")));
+    clay_set_slot_take(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("continue")));
+    clay_set_slot_take(clay_ContinueSignal, "_type", CLAY_VAL(clay_string_new("ContinueSignal")));
+    clay_set_slot_take(clay_ContinueSignal, "_name", CLAY_VAL(clay_string_new("ContinueSignal")));
 
     /* Dict prototype */
     clay_Dict = clay_object_new();
@@ -640,7 +641,7 @@ void clay_bootstrap(void) {
     clay_Range = clay_object_new();
     clay_Range->parent = clay_Object;
     clay_Range->refcount = 1000000;
-    clay_set_slot(clay_Range, "_name", CLAY_VAL(clay_string_new("Range")));
+    clay_set_slot_take(clay_Range, "_name", CLAY_VAL(clay_string_new("Range")));
     clay_range_init_methods(clay_Range);
 
     /* Math object */
@@ -668,7 +669,7 @@ void clay_bootstrap(void) {
     clay_System = clay_object_new();
     clay_System->parent = clay_Object;
     clay_System->refcount = 1000000;
-    clay_set_slot(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
+    clay_set_slot_take(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
     clay_set_method(clay_System, "exit", system_exit);
@@ -685,42 +686,42 @@ void clay_bootstrap(void) {
     clay_FFI = clay_object_new();
     clay_FFI->parent = clay_Object;
     clay_FFI->refcount = 1000000;
-    clay_set_slot(clay_FFI, "_name", CLAY_VAL(clay_string_new("FFI")));
+    clay_set_slot_take(clay_FFI, "_name", CLAY_VAL(clay_string_new("FFI")));
     clay_ffi_init(clay_FFI);
 
     /* Date prototype */
     clay_Date = clay_object_new();
     clay_Date->parent = clay_Object;
     clay_Date->refcount = 1000000;
-    clay_set_slot(clay_Date, "_name", CLAY_VAL(clay_string_new("Date")));
+    clay_set_slot_take(clay_Date, "_name", CLAY_VAL(clay_string_new("Date")));
     clay_date_init_methods(clay_Date);
 
     /* Http prototype */
     clay_Http = clay_object_new();
     clay_Http->parent = clay_Object;
     clay_Http->refcount = 1000000;
-    clay_set_slot(clay_Http, "_name", CLAY_VAL(clay_string_new("Http")));
+    clay_set_slot_take(clay_Http, "_name", CLAY_VAL(clay_string_new("Http")));
     clay_http_init(clay_Http);
 
     /* Regex prototype */
     clay_Regex = clay_object_new();
     clay_Regex->parent = clay_Object;
     clay_Regex->refcount = 1000000;
-    clay_set_slot(clay_Regex, "_name", CLAY_VAL(clay_string_new("Regex")));
+    clay_set_slot_take(clay_Regex, "_name", CLAY_VAL(clay_string_new("Regex")));
     clay_regex_init_methods(clay_Regex);
 
     /* Fiber prototype */
     clay_Fiber = clay_object_new();
     clay_Fiber->parent = clay_Object;
     clay_Fiber->refcount = 1000000;
-    clay_set_slot(clay_Fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
+    clay_set_slot_take(clay_Fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
     clay_fiber_init_methods(clay_Fiber);
 
     /* Db prototype */
     clay_Db = clay_object_new();
     clay_Db->parent = clay_Object;
     clay_Db->refcount = 1000000;
-    clay_set_slot(clay_Db, "_name", CLAY_VAL(clay_string_new("Db")));
+    clay_set_slot_take(clay_Db, "_name", CLAY_VAL(clay_string_new("Db")));
     clay_db_init(clay_Db);
 
     /* Vec3 prototype — 3D vector with inline float x/y/z */
@@ -728,14 +729,14 @@ void clay_bootstrap(void) {
     clay_Vec3->parent = clay_Object;
     clay_Vec3->type = CLAY_TYPE_VEC3;
     clay_Vec3->refcount = 1000000;
-    clay_set_slot(clay_Vec3, "_name", CLAY_VAL(clay_string_new("Vec3")));
+    clay_set_slot_take(clay_Vec3, "_name", CLAY_VAL(clay_string_new("Vec3")));
     clay_vec3_init_methods(clay_Vec3);
 
     /* Thread prototype (requires -DCLAY_THREAD_SAFE for real threading) */
     clay_Thread = clay_object_new();
     clay_Thread->parent = clay_Object;
     clay_Thread->refcount = 1000000;
-    clay_set_slot(clay_Thread, "_name", CLAY_VAL(clay_string_new("Thread")));
+    clay_set_slot_take(clay_Thread, "_name", CLAY_VAL(clay_string_new("Thread")));
     {
         extern void clay_thread_init(ClayObject *proto);
         clay_thread_init(clay_Thread);
@@ -745,7 +746,7 @@ void clay_bootstrap(void) {
     clay_Graphics = clay_object_new();
     clay_Graphics->parent = clay_Object;
     clay_Graphics->refcount = 1000000;
-    clay_set_slot(clay_Graphics, "_name", CLAY_VAL(clay_string_new("Graphics")));
+    clay_set_slot_take(clay_Graphics, "_name", CLAY_VAL(clay_string_new("Graphics")));
     clay_graphics_init(clay_Graphics);
 }
 

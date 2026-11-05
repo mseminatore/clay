@@ -145,7 +145,9 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             /* Create wrapper only for the call (method needs self with _value) */
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
+            clay_unwind_push(wrapper);
             ClayValue result = invoke_method(m, wrapper, argc, argv);
+            clay_unwind_pop();
             /* If method returned self (the wrapper), return the original integer */
             if (result == CLAY_VAL(wrapper)) {
                 clay_release(wrapper);
@@ -177,7 +179,9 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         if (m) {
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
+            clay_unwind_push(wrapper);
             ClayValue result = invoke_method(m, wrapper, argc, argv);
+            clay_unwind_pop();
             if (result == CLAY_VAL(wrapper)) {
                 clay_release(wrapper);
                 clay_trace_pop();

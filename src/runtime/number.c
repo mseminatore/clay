@@ -307,16 +307,9 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
             clay_try_pop();
         } else {
             ClayValue err = clay_error_stack.current_error;
-            if (CLAY_IS_PTR(err) && !CLAY_IS_NIL(err)) {
-                ClayObject *eobj = CLAY_OBJ(err);
-                ClayValue type_val = clay_get_slot(eobj, "_type");
-                if (CLAY_IS_PTR(type_val) && !CLAY_IS_NIL(type_val) &&
-                    CLAY_OBJ(type_val)->type == CLAY_TYPE_STRING) {
-                    const char *tstr = clay_string_data(CLAY_OBJ(type_val));
-                    if (strcmp(tstr, "BreakSignal") == 0) return result;
-                    if (strcmp(tstr, "ContinueSignal") == 0) continue;
-                }
-            }
+            int sig = clay_loop_signal(err);
+            if (sig == CLAY_SIGNAL_BREAK) return result;
+            if (sig == CLAY_SIGNAL_CONTINUE) continue;
             clay_raise(err);
         }
     }

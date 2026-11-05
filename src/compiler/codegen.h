@@ -15,6 +15,7 @@ typedef struct {
     int local_count;
     int local_capacity;
     int method_local_base; /* index where method-specific locals start */
+    int toplevel_local_count; /* locals [0, n) are the program's top-level variables */
     char **boxed_names;  /* variables boxed into cells (by-reference capture) */
     int boxed_count;
     int boxed_capacity;
@@ -29,6 +30,7 @@ typedef struct {
      * when the function returns. */
     const char *plugin_exe_path; /* clay binary whose plugins/ native programs load */
     int in_function;
+    int fn_has_ret_frame; /* method catching non-local returns (see emit_ret_frame) */
     int fn_is_block;     /* emitting a block function (always returns an owned value) */
     int use_slot_recv;   /* top-level block: self is the receiver it was invoked
                           * as a method on (clay_slot_method_self), held in __recv */

@@ -343,25 +343,35 @@ inc value
 ```clay
 Shapes = Object clone {
   area(w, h) {
-    (w <= 0 || h <= 0) ifTrue { "invalid" println }
+    (w <= 0 || h <= 0) ifTrue { return 0 }
     return w * h
     "never reached"
   }
 }
 (Shapes area(3, 4)) println     // 12
+(Shapes area(0 - 1, 4)) println // 0
 ```
 
-> **Note:** `return` inside a block (e.g. `ifTrue { return x }`) currently
-> exits the *block*, not the enclosing method. To return different values on
-> different paths, make the conditional the method's last expression — it has a
-> value:
->
-> ```clay
-> M = Object clone {
->   abs(x) { (x < 0) ifTrue { 0 - x } ifFalse { x } }
-> }
-> (M abs(0 - 3)) println          // 3
-> ```
+`return` inside a block returns from the *method the block was written in*,
+however deeply the block is nested, so it can end a loop early (`finally`
+blocks still run on the way out):
+
+```clay
+Finder = Object clone {
+  firstOver(items, limit) {
+    items each { |x| (x > limit) ifTrue { return x } }
+    nil
+  }
+}
+(Finder firstOver([3, 8, 12, 20], 10)) println   // 12
+(Finder firstOver([1, 2], 10)) println           // nil
+```
+
+A block that outlives its method can't return from it any more; calling its
+`return` then raises a `RuntimeError`. Outside methods there is nothing to
+return from, so `return` only ends the innermost block it is written in —
+inside a top-level block, `(x > 1) ifTrue { return "big" }` ends just the
+`ifTrue` block. Put such logic in a method.
 
 ## Break and continue
 

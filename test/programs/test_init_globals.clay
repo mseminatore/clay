@@ -1,0 +1,47 @@
+// Regression tests: init returning an argument, and top-level variables
+// shared between the program, its blocks and its methods
+
+check = { |label, got, want|
+    (got != want) ifTrue {
+        raise("FAIL: " + label + " - expected " + want toString + ", got " + got toString)
+    }
+}
+
+// init(c) { center = c } returns its argument; `new` must not release it
+// (this used to double-free in native builds)
+V = Object clone {
+    x = 0.0
+    init(vx) { x = vx }
+}
+Holder = Object clone {
+    item = nil
+    init(v) { item = v }
+}
+Pair = Object clone {
+    a = nil
+    b = nil
+    init(x, y) { a = x; b = y }
+}
+p1 = Pair new(V new(1.0), Holder new(V new(2.0)))
+p2 = Pair new(V new(3.0), Holder new(V new(4.0)))
+check value("pair 1", p1 b item x, 2.0)
+check value("pair 2", p2 a x, 3.0)
+
+// A recursive top-level block, assigned after a forward declaration and
+// called from a method, sees its current value
+countdown = nil
+countdown = { |n| (n > 0) ifTrue { countdown value(n - 1) } ifFalse { "done" } }
+Runner = Object clone {
+    run() { countdown value(3) }
+}
+check value("block from top level", countdown value(2), "done")
+check value("block from a method", Runner run, "done")
+
+// Writes from a block are seen by methods
+total = 0
+Reader = Object clone { read() { total } }
+[1, 2, 3] each { |n| total = total + n }
+check value("block write seen by top level", total, 6)
+check value("block write seen by method", Reader read, 6)
+
+"PASS: init and globals" println

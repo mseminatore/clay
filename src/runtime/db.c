@@ -31,9 +31,9 @@ static ClayValue db_open(ClayObject *self, int argc, ClayValue *argv) {
 
     extern ClayObject *clay_Db;
     ClayObject *obj = clay_clone(clay_Db);
-    clay_set_slot(obj, "_name", CLAY_VAL(clay_string_new("Db")));
+    clay_set_slot_take(obj, "_name", CLAY_VAL(clay_string_new("Db")));
     clay_set_slot(obj, "_db_ptr", clay_int((intptr_t)db));
-    clay_set_slot(obj, "_path", CLAY_VAL(clay_string_new(path)));
+    clay_set_slot_take(obj, "_path", CLAY_VAL(clay_string_new(path)));
     return CLAY_VAL(obj);
 }
 

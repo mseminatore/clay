@@ -835,6 +835,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             } else {
                 fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             }
+            clay_release_val(err);
         } else {
             /* Set source for step debugger */
             if (step_mode) {

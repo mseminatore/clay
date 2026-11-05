@@ -47,11 +47,79 @@ Finder = Object clone {
     }
 }
 
-// Note: return inside ifTrue block currently exits the block, not the method.
-// This tests that the second return works correctly.
 r3 = Finder check(5)
 (r3 != "small") ifTrue {
     raise("FAIL: expected 'small', got '" + r3 + "'")
 }
+
+// --- Non-local return: `return` in a block returns from the method ---
+
+check = { |label, got, want|
+    (got != want) ifTrue {
+        raise("FAIL: " + label + " - expected " + want toString + ", got " + got toString)
+    }
+}
+
+check value("return in ifTrue", Finder check(50), "big")
+
+Search = Object clone {
+    hits = 0
+    find(arr, target) {
+        arr each { |x|
+            hits = hits + 1
+            (x == target) ifTrue { return "found " + x toString }
+        }
+        "missing"
+    }
+    pair(arr) {
+        arr each { |x| arr each { |y| ((x + y) == 7) ifTrue { return [x, y] } } }
+        nil
+    }
+    inTry(arr) {
+        try { arr each { |x| (x > 2) ifTrue { return x * 10 } } } catch { |e| return "caught" }
+        0
+    }
+    withFinally(log) {
+        try { [1, 2, 3] each { |x| return x } } finally { log push("finally") }
+        99
+    }
+    sumTo(n) {
+        (n == 0) ifTrue { return 0 }
+        [n] each { |x| return self sumTo(n - 1) + x }
+        -1
+    }
+    abs(n) {
+        (n < 0) ifTrue { return 0 - n }
+        n
+    }
+    early() {
+        5 times { |i| (i == 2) ifTrue { return } }
+        "not reached"
+    }
+    escaping() { { |x| return x } }
+}
+
+s = Search clone
+check value("find", s find([1, 2, 3, 4], 2), "found 2")
+check value("find stops the loop", s hits, 2)
+check value("find missing", s find([1, 2], 9), "missing")
+check value("nested blocks", s pair([1, 3, 4, 6]), [1, 6])
+check value("through try", s inTry([1, 2, 3, 4]), 30)
+log = []
+check value("through finally", s withFinally(log), 1)
+check value("finally ran", log, ["finally"])
+check value("recursive", s sumTo(4), 10)
+check value("abs negative", s abs(0 - 5), 5)
+check value("abs positive", s abs(5), 5)
+check value("bare return", s early, nil)
+// The callers' state is intact after a non-local return
+total = 0
+(1..3) each { |i| total = total + (s abs(0 - i)) }
+check value("caller loop", total, 6)
+
+// A block whose method has already returned can't return from it
+blk = s escaping
+r = try { blk value(5) } catch { |e| e type }
+check value("orphaned return", r, "RuntimeError")
 
 "PASS: early return" println

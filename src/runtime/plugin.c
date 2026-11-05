@@ -119,7 +119,7 @@ static ClayPluginObject api_register_type(const ClayPluginType *def) {
     ClayObject *proto = clay_object_new();
     proto->parent = clay_Object;
     proto->refcount = 1000000; /* singleton */
-    clay_set_slot(proto, "_name", CLAY_VAL(clay_string_new(def->name)));
+    clay_set_slot_take(proto, "_name", CLAY_VAL(clay_string_new(def->name)));
 
     /* Register methods */
     if (def->methods) {

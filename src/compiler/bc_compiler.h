@@ -28,6 +28,7 @@ typedef struct {
     char   *capture_names[BC_MAX_CAPTURES]; /* names of captured variables */
     int     capture_slots[BC_MAX_CAPTURES]; /* enclosing scope slot index for each capture */
     int     local_count;       /* total locals (params + temps) in this chunk */
+    int     has_block_return;  /* method whose blocks `return` from it (non-local return) */
     int    *line_map;    /* source line map: line_map[offset] = source line */
 } BcChunk;
 
@@ -86,6 +87,8 @@ typedef struct {
     int native_self_has_slot;   /* self_has_slot(name) → 1/0 (implicit-slot fallback) */
     int native_set_self_slot;   /* set_self_slot(value, name) → value */
     int native_cell_set_rev;    /* cell_set_rev(value, cell) → value */
+    int native_method_return_id; /* method_return_id() → id of the method call being entered */
+    int native_raise_return;    /* raise_return(value, id) — non-local return from a block */
 
     int had_error;
 
@@ -105,6 +108,7 @@ typedef struct {
 
     /* Method context flag — 1 when compiling inside a method body */
     int      in_method;
+    int      chunk_is_method;  /* compiling a method body (not a block) */
 
     /* Known slot names from the enclosing clone block (for Io-style assignment) */
     const char **known_slots;

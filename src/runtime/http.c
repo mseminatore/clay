@@ -18,7 +18,7 @@ static ClayValue http_post(ClayObject *self, int argc, ClayValue *argv);
 static ClayValue make_response(int status_code, const char *body, size_t body_len) {
     extern ClayObject *clay_Http;
     ClayObject *resp = clay_clone(clay_Http);
-    clay_set_slot(resp, "_name", CLAY_VAL(clay_string_new("HttpResponse")));
+    clay_set_slot_take(resp, "_name", CLAY_VAL(clay_string_new("HttpResponse")));
     clay_set_slot(resp, "_status", clay_int(status_code));
     clay_set_slot(resp, "_body", CLAY_VAL(clay_string_new_len(body, body_len)));
     return CLAY_VAL(resp);
@@ -27,9 +27,9 @@ static ClayValue make_response(int status_code, const char *body, size_t body_le
 static ClayValue make_error_response(const char *msg) {
     extern ClayObject *clay_Http;
     ClayObject *resp = clay_clone(clay_Http);
-    clay_set_slot(resp, "_name", CLAY_VAL(clay_string_new("HttpResponse")));
+    clay_set_slot_take(resp, "_name", CLAY_VAL(clay_string_new("HttpResponse")));
     clay_set_slot(resp, "_status", clay_int(0));
-    clay_set_slot(resp, "_body", CLAY_VAL(clay_string_new(msg)));
+    clay_set_slot_take(resp, "_body", CLAY_VAL(clay_string_new(msg)));
     return CLAY_VAL(resp);
 }
 
@@ -439,10 +439,10 @@ static ClayValue make_request(const char *method_str, const char *path,
                                size_t body_sz) {
     extern ClayObject *clay_Http;
     ClayObject *req = clay_clone(clay_Http);
-    clay_set_slot(req, "_name", CLAY_VAL(clay_string_new("HttpRequest")));
-    clay_set_slot(req, "_method", CLAY_VAL(clay_string_new(method_str)));
-    clay_set_slot(req, "_path", CLAY_VAL(clay_string_new(path)));
-    clay_set_slot(req, "_query", CLAY_VAL(clay_string_new(query ? query : "")));
+    clay_set_slot_take(req, "_name", CLAY_VAL(clay_string_new("HttpRequest")));
+    clay_set_slot_take(req, "_method", CLAY_VAL(clay_string_new(method_str)));
+    clay_set_slot_take(req, "_path", CLAY_VAL(clay_string_new(path)));
+    clay_set_slot_take(req, "_query", CLAY_VAL(clay_string_new(query ? query : "")));
     clay_set_slot(req, "_body",
         CLAY_VAL(body_data ? clay_string_new_len(body_data, body_sz)
                            : clay_string_new("")));
@@ -500,7 +500,7 @@ static ClayValue http_json_response(ClayObject *self, int argc, ClayValue *argv)
     size_t blen = strlen(body);
     extern ClayObject *clay_Http;
     ClayObject *resp = clay_clone(clay_Http);
-    clay_set_slot(resp, "_name", CLAY_VAL(clay_string_new("HttpResponse")));
+    clay_set_slot_take(resp, "_name", CLAY_VAL(clay_string_new("HttpResponse")));
     clay_set_slot(resp, "_status", clay_int(status_code));
     clay_set_slot(resp, "_body", CLAY_VAL(clay_string_new_len(body, blen)));
     clay_set_slot(resp, "_content_type",

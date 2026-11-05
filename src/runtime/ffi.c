@@ -59,7 +59,7 @@ static ClayValue ffi_load(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *obj = clay_clone(self);
     /* Store handle as tagged integer (platform pointer fits in uintptr_t) */
     clay_set_slot(obj, "_handle", (ClayValue)(uintptr_t)handle);
-    clay_set_slot(obj, "_path", CLAY_VAL(clay_string_new(path)));
+    clay_set_slot_take(obj, "_path", CLAY_VAL(clay_string_new(path)));
     return CLAY_VAL(obj);
 }
 

@@ -213,6 +213,11 @@ void clay_set_slot(ClayObject *obj, const char *name, ClayValue value) {
     ht_insert(obj->slots, key_copy, (ht_value_t)(uintptr_t)value);
 }
 
+void clay_set_slot_take(ClayObject *obj, const char *name, ClayValue value) {
+    clay_set_slot(obj, name, value);
+    clay_release_val(value);
+}
+
 ClayValue clay_get_slot(ClayObject *obj, const char *name) {
     /* Look up in this object first, then walk parent chain */
     ClayObject *cur = obj;
