@@ -1,0 +1,4 @@
+import("lib_helper.clay") as H
+import("lib_helper.clay")
+import("./lib_helper.clay")
+x = H helperValue

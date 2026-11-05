@@ -65,6 +65,10 @@ static inline unsigned int cache_hash(uintptr_t key1, uintptr_t key2) {
    Two-level cache: first checks receiver's own methods table, then
    checks the defining prototype's table (shared across siblings). */
 static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
+    /* A selector some object has as a slot shadowing a method: the nearest
+     * definition wins, which the caches (keyed by methods tables) can't tell */
+    if (clay_selector_shadowed(selector)) return clay_lookup_nearest(obj, selector);
+
     /* For objects with own methods, key by their methods table pointer.
      * For objects without (lazy methods), key by parent's methods table.
      * This groups all instances of the same prototype together (better cache

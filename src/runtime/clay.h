@@ -201,6 +201,14 @@ ClayObject *clay_object_new(void);
 void        clay_object_pool_return(ClayObject *obj); /* Return to free-list pool */
 ClayObject *clay_clone(ClayObject *proto);
 void        clay_set_slot(ClayObject *obj, const char *name, ClayValue value);
+/* Slots shadowing inherited methods: the nearest definition (slot or method)
+ * along the prototype chain wins. Only selectors some object actually shadows
+ * take the careful lookup; see object.c. */
+extern volatile long clay_shadow_count;
+int         clay_selector_shadowed_slow(const char *selector);
+static inline int clay_selector_shadowed(const char *selector) {
+    return clay_shadow_count != 0 && clay_selector_shadowed_slow(selector);
+}
 /* clay_set_slot for a value the caller owns: the slot takes that reference
  * (use for fresh objects, e.g. clay_set_slot_take(o, "k", CLAY_VAL(clay_string_new(s)))) */
 void        clay_set_slot_take(ClayObject *obj, const char *name, ClayValue value);
@@ -212,6 +220,7 @@ ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
 
 /* Full method lookup (returns ClayMethod* with context, uses global cache) */
 ClayMethod *clay_cached_lookup(ClayObject *obj, const char *selector);
+ClayMethod *clay_lookup_nearest(ClayObject *obj, const char *name);   /* NULL if a slot is nearer */
 
 /* Invoke a method, setting context before call */
 ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv);

@@ -1,0 +1,1044 @@
+// clay-parser -- the Clay parser, written in Clay
+//
+// Usage:
+//   import("../clay-parser/src/main.clay")
+//
+//   p = Parser new(source, "file.clay")
+//   program = p parseProgram          // a Node of kind "Program"
+//   p hadError                        // true if a syntax error was reported
+//   (AstPrinter print(program)) println
+//
+// A port of src/compiler/parser.c: the same grammar, desugarings (compound
+// assignment, destructuring, unary minus/not, string interpolation,
+// namespaced imports), import resolution (files and bricks) and error
+// messages. AstPrinter prints the format of `clay --ast`; CTest
+// clay_selfhost_parser compares the two on every .clay file in the
+// repository.
+//
+// Known quirks kept for compatibility with the C parser:
+// - a string literal ends at a \0 or \x00 escape (C strings);
+// - interpolation finds `${ ... }` by counting braces in the raw text;
+// - brick.json is only read for its "main" field.
+
+import("../../clay-lexer/src/main.clay")
+
+// --- AST ---
+
+Node = Object clone {
+    kind = ""
+    line = 0
+    name = nil         // Ident/Assign/SlotDef/MethodDef name, Send message,
+                       // Binary op, SlotAssign slot, Import path
+    value = nil        // literal value; Assign/SlotDef/SlotAssign value
+    recv = nil         // Send/SlotAssign receiver, Clone proto
+    left = nil
+    right = nil
+    expr = nil         // Raise / Return expression (Return: nil for bare return)
+    items = nil        // Send args, Array elements, Program statements,
+                       // Clone members, Destructure targets
+    params = nil       // Block / MethodDef parameters (Ident, or Assign for a default)
+    body = nil         // Block / MethodDef statements
+    keys = nil         // DictLit keys (String nodes)
+    vals = nil         // DictLit values
+    tryBlock = nil
+    catchBlock = nil
+    finallyBlock = nil
+    isSuper = false    // Send: `super msg`
+    superMark = false  // parser-internal: a Self node standing for `super`
+    alias = nil        // Import: `as Name`
+
+    make(k, l) {
+        n = self clone
+        n kind = k
+        n line = l
+        n
+    }
+}
+
+// --- Printer: the format of `clay --ast` ---
+
+AstPrinter = Object clone {
+    print(node) {
+        out = []
+        self emit(out, node, 0, "")
+        out push("")
+        out join("\n")
+    }
+
+    hex = "0123456789abcdef"
+
+    // \, ", newline, CR, tab and other control bytes escaped
+    escape(s) {
+        parts = []
+        start = 0
+        n = s length
+        i = 0
+        { i < n } whileTrue {
+            c = s byteAt(i)
+            esc = nil
+            (c == 92) ifTrue { esc = "\\\\" }
+            (c == 34) ifTrue { esc = "\\\"" }
+            (c == 10) ifTrue { esc = "\\n" }
+            (c == 13) ifTrue { esc = "\\r" }
+            (c == 9) ifTrue { esc = "\\t" }
+            (esc == nil && (c < 32 || c == 127)) ifTrue {
+                esc = "\\x" + (hex at(c / 16)) + (hex at(c % 16))
+            }
+            (esc != nil) ifTrue {
+                parts push(s slice(start, i))
+                parts push(esc)
+                start = i + 1
+            }
+            i = i + 1
+        }
+        parts push(s slice(start, n))
+        parts join("")
+    }
+
+    describe(n) {
+        k = n kind
+        (k == "Int" || k == "Float") ifTrue { return k + "(" + n value toString + ")" }
+        (k == "String") ifTrue { return "String(\"" + (self escape(n value)) + "\")" }
+        (k == "Ident" || k == "Assign" || k == "SlotDef" || k == "Binary") ifTrue {
+            return k + "(" + n name + ")"
+        }
+        (k == "Send") ifTrue {
+            return "Send(" + (n isSuper ifTrue { "super" } ifFalse { "" }) + "." + n name + ")"
+        }
+        (k == "SlotAssign") ifTrue { return "SlotAssign(." + n name + ")" }
+        (k == "Block") ifTrue { return "Block(params=" + n params size toString + ")" }
+        (k == "MethodDef") ifTrue {
+            return "MethodDef(" + n name + ", params=" + n params size toString + ")"
+        }
+        (k == "Clone") ifTrue { return "Clone(members=" + n items size toString + ")" }
+        (k == "Array") ifTrue { return "Array(count=" + n items size toString + ")" }
+        (k == "DictLit") ifTrue { return "DictLit(count=" + n keys size toString + ")" }
+        (k == "Destructure") ifTrue { return "Destructure(targets=" + n items size toString + ")" }
+        (k == "Program") ifTrue { return "Program(stmts=" + n items size toString + ")" }
+        (k == "Import") ifTrue {
+            a = (n alias == nil) ifTrue { "" } ifFalse { " as " + n alias }
+            return "Import(\"" + n name + "\"" + a + ")"
+        }
+        k    // Self, TryCatch, Raise, Return, Break, Continue
+    }
+
+    emitAll(out, list, indent, label) {
+        list each { |c| self emit(out, c, indent, label) }
+    }
+
+    emit(out, n, indent, label) {
+        pad = ("  " repeat(indent)) + label
+        (n == nil) ifTrue {
+            out push(pad + "(null)")
+            return nil
+        }
+        out push(pad + (self describe(n)) + " @" + n line toString)
+        in = indent + 1
+        k = n kind
+        (k == "Assign" || k == "SlotDef") ifTrue { self emit(out, n value, in, "") }
+        (k == "Send") ifTrue {
+            self emit(out, n recv, in, "")
+            self emitAll(out, n items, in, "")
+        }
+        (k == "Binary") ifTrue {
+            self emit(out, n left, in, "")
+            self emit(out, n right, in, "")
+        }
+        (k == "Block" || k == "MethodDef") ifTrue {
+            self emitAll(out, n params, in, "param: ")
+            self emitAll(out, n body, in, "")
+        }
+        (k == "Clone") ifTrue {
+            self emit(out, n recv, in, "proto: ")
+            self emitAll(out, n items, in, "")
+        }
+        (k == "Array" || k == "Program") ifTrue { self emitAll(out, n items, in, "") }
+        (k == "TryCatch") ifTrue {
+            self emit(out, n tryBlock, in, "try: ")
+            (n catchBlock != nil) ifTrue { self emit(out, n catchBlock, in, "catch: ") }
+            (n finallyBlock != nil) ifTrue { self emit(out, n finallyBlock, in, "finally: ") }
+        }
+        (k == "Raise") ifTrue { self emit(out, n expr, in, "") }
+        (k == "SlotAssign") ifTrue {
+            self emit(out, n recv, in, "")
+            self emit(out, n value, in, "")
+        }
+        (k == "Return" && n expr != nil) ifTrue { self emit(out, n expr, in, "") }
+        (k == "DictLit") ifTrue {
+            i = 0
+            { i < n keys size } whileTrue {
+                self emit(out, n keys at(i), in, "key: ")
+                self emit(out, n vals at(i), in, "value: ")
+                i = i + 1
+            }
+        }
+        (k == "Destructure") ifTrue {
+            self emitAll(out, n items, in, "target: ")
+            self emit(out, n value, in, "value: ")
+        }
+        nil
+    }
+}
+
+// --- Parser ---
+
+Parser = Object clone {
+    toks = nil
+    idx = 0
+    cur = nil
+    prev = nil
+    hadError = false
+    filename = ""
+    imported = nil     // Dict of resolved import paths, shared with nested imports
+
+    init(source, file, importedSet = nil, startLine = 1) {
+        toks = Lexer tokenize(source, startLine)
+        idx = 0
+        cur = nil
+        prev = nil
+        hadError = false
+        filename = file
+        imported = importedSet ?? #{}
+        self advance          // prime the parser
+    }
+
+    // --- tokens ---
+
+    tokenAt(i) {
+        (i < toks size) ifTrue { return toks at(i) }
+        // past an ERROR token (the lexer stops there): the end
+        Token new("EOF", "", (toks at(toks size - 1)) line)
+    }
+
+    advance() {
+        prev = cur
+        cur = self tokenAt(idx)
+        idx = idx + 1
+        (cur kind == "ERROR") ifTrue {
+            self error(cur text)
+            cur = self tokenAt(idx)
+            idx = idx + 1
+        }
+    }
+
+    check(k) { cur kind == k }
+
+    match(k) {
+        (cur kind != k) ifTrue { return false }
+        self advance
+        true
+    }
+
+    expect(k, msg) {
+        (cur kind == k) ifTrue {
+            self advance
+            return nil
+        }
+        self error(msg)
+    }
+
+    skipNewlines() {
+        { cur kind == "NEWLINE" || cur kind == ";" } whileTrue { self advance }
+    }
+
+    mark() { [idx, cur, prev] }
+    reset(m) {
+        idx = m at(0)
+        cur = m at(1)
+        prev = m at(2)
+    }
+
+    // --- errors (reported once, like the C parser) ---
+
+    error(msg) {
+        hadError ifTrue { return nil }
+        hadError = true
+        Console print("${filename}:${cur line}: error: ${msg} (got '${cur text}')\n")
+    }
+
+    errorPrev(msg) {
+        hadError ifTrue { return nil }
+        hadError = true
+        Console print("${filename}:${prev line}: error: ${msg}: ${prev text}\n")
+    }
+
+    // --- helpers ---
+
+    // operator token usable as a method name in a clone body, or nil
+    operatorName() {
+        k = cur kind
+        (["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">="] contains(k)) ifTrue { return k }
+        nil
+    }
+
+    isHexDigit(c) { (c >= 48 && c <= 57) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70) }
+    hexValue(c) {
+        (c <= 57) ifTrue { return c - 48 }
+        (c >= 97) ifTrue { return c - 87 }
+        c - 55
+    }
+
+    // strtol(two chars, 16) as the C parser uses it for \xHH: the byte, or nil
+    hexEscape(c1, c2) {
+        (c1 == nil || c2 == nil || (self isHexDigit(c2)) == false) ifTrue { return nil }
+        (self isHexDigit(c1)) ifTrue { return (self hexValue(c1)) * 16 + (self hexValue(c2)) }
+        (c1 == 32 || (c1 >= 9 && c1 <= 13) || c1 == 43) ifTrue { return self hexValue(c2) }
+        (c1 == 45) ifTrue { return (256 - (self hexValue(c2))) % 256 }
+        nil
+    }
+
+    // C escapes; the value ends at a NUL (C strings)
+    processEscapes(raw) {
+        parts = []
+        start = 0
+        n = raw length
+        i = 0
+        { i < n } whileTrue {
+            c = raw byteAt(i)
+            ((c == 92) && (i + 1 < n)) ifTrue {
+                e = raw byteAt(i + 1)
+                rep = nil
+                skip = 1
+                (e == 110) ifTrue { rep = "\n" }
+                (e == 116) ifTrue { rep = "\t" }
+                (e == 114) ifTrue { rep = "\r" }
+                (e == 92) ifTrue { rep = "\\" }
+                (e == 34) ifTrue { rep = "\"" }
+                (e == 48) ifTrue {
+                    parts push(raw slice(start, i))
+                    return parts join("")
+                }
+                (e == 120 && i + 3 < n) ifTrue {
+                    v = self hexEscape(raw byteAt(i + 2), raw byteAt(i + 3))
+                    (v != nil) ifTrue {
+                        (v == 0) ifTrue {
+                            parts push(raw slice(start, i))
+                            return parts join("")
+                        }
+                        rep = String chr(v)
+                        skip = 3
+                    }
+                }
+                (rep != nil) ifTrue {
+                    parts push(raw slice(start, i))
+                    parts push(rep)
+                    i = i + skip
+                    start = i + 1
+                }
+            }
+            i = i + 1
+        }
+        parts push(raw slice(start, n))
+        parts join("")
+    }
+
+    // [a, b] = v  →  __destr_src = v; a = __destr_src at(0); b = __destr_src at(1)
+    desugarDestructure(stmt, list) {
+        l = stmt line
+        tmp = Node make("Assign", l)
+        tmp name = "__destr_src"
+        tmp value = stmt value
+        list push(tmp)
+        i = 0
+        stmt items each { |t|
+            src = Node make("Ident", l)
+            src name = "__destr_src"
+            ix = Node make("Int", l)
+            ix value = i
+            at = Node make("Send", l)
+            at recv = src
+            at name = "at"
+            at items = [ix]
+            a = Node make("Assign", l)
+            a name = t name
+            a value = at
+            list push(a)
+            i = i + 1
+        }
+    }
+
+    // a statement into a body list (destructuring expands)
+    addStatement(stmt, list) {
+        (stmt == nil) ifTrue { return nil }
+        (stmt kind == "Destructure") ifTrue { return self desugarDestructure(stmt, list) }
+        list push(stmt)
+    }
+
+    binary(l, op, a, b) {
+        n = Node make("Binary", l)
+        n name = op
+        n left = a
+        n right = b
+        n
+    }
+
+    send(l, r, msg, args) {
+        n = Node make("Send", l)
+        n recv = r
+        n name = msg
+        n items = args
+        n
+    }
+
+    // --- primary ---
+
+    primary() {
+        hadError ifTrue { return nil }
+
+        (self match("-")) ifTrue {
+            l = prev line
+            operand = self primary
+            (operand == nil) ifTrue { return nil }
+            (operand kind == "Int" || operand kind == "Float") ifTrue {
+                operand value = operand value negated
+                return operand
+            }
+            zero = Node make("Int", l)
+            zero value = 0
+            return self binary(l, "-", zero, operand)
+        }
+
+        (self match("!")) ifTrue {
+            l = prev line
+            operand = self primary
+            (operand == nil) ifTrue { return nil }
+            return self send(l, operand, "not", [])
+        }
+
+        (self match("INT")) ifTrue {
+            n = Node make("Int", prev line)
+            n value = 0
+            v = try { prev text toInt } catch { |e| nil }
+            (v == nil) ifTrue {
+                self errorPrev("integer literal is too large for a 62-bit integer (use a float, e.g. 1e19)")
+                return n
+            }
+            n value = v
+            return n
+        }
+
+        (self match("FLOAT")) ifTrue {
+            n = Node make("Float", prev line)
+            n value = prev text toFloat
+            return n
+        }
+
+        (self match("STRING")) ifTrue {
+            n = Node make("String", prev line)
+            n value = self processEscapes(prev text)
+            return n
+        }
+
+        (self match("INTERP_STRING")) ifTrue { return self interpolation }
+        (self match("TRY")) ifTrue { return self tryCatch }
+
+        (self match("RAISE")) ifTrue {
+            l = prev line
+            self expect("(", "Expected '(' after raise")
+            e = self expression
+            self expect(")", "Expected ')' after raise argument")
+            n = Node make("Raise", l)
+            n expr = e
+            return n
+        }
+
+        (self match("IDENT")) ifTrue {
+            n = Node make("Ident", prev line)
+            n name = prev text
+            return n
+        }
+
+        (self match("SELF")) ifTrue { return Node make("Self", prev line) }
+
+        (self match("SUPER")) ifTrue {
+            (self check("IDENT")) ifFalse {
+                self error("Expected method name after 'super'")
+                return Node make("Self", prev line)
+            }
+            n = Node make("Self", prev line)
+            n superMark = true
+            return n
+        }
+
+        (self match("(")) ifTrue {
+            e = self expression
+            self expect(")", "Expected ')'")
+            return e
+        }
+
+        (self check("{")) ifTrue { return self block }
+
+        (self match("[")) ifTrue {
+            n = Node make("Array", prev line)
+            n items = []
+            (self check("]")) ifFalse {
+                n items push(self expression)
+                { self match(",") } whileTrue {
+                    self skipNewlines
+                    n items push(self expression)
+                }
+            }
+            self expect("]", "Expected ']'")
+            return n
+        }
+
+        (self match("#{")) ifTrue { return self dictLiteral }
+
+        self error("Expected expression")
+        nil
+    }
+
+    interpolation() {
+        l = prev line
+        raw = prev text
+        n = raw length
+        result = nil
+        pos = 0
+        { pos < n } whileTrue {
+            start = pos
+            { pos < n && ((pos < n - 1 && (raw byteAt(pos)) == 36 && (raw byteAt(pos + 1)) == 123) == false) } whileTrue {
+                pos = pos + 1
+            }
+            (pos > start) ifTrue {
+                lit = Node make("String", l)
+                lit value = self processEscapes(raw slice(start, pos))
+                result = (result == nil) ifTrue { lit } ifFalse { self binary(l, "+", result, lit) }
+            }
+            (pos >= n) ifTrue { break }
+
+            pos = pos + 2
+            depth = 1
+            exprStart = pos
+            { pos < n && depth > 0 } whileTrue {
+                c = raw byteAt(pos)
+                (c == 123) ifTrue { depth = depth + 1 }
+                (c == 125) ifTrue { depth = depth - 1 }
+                (depth > 0) ifTrue { pos = pos + 1 }
+            }
+            sub = Parser new(raw slice(exprStart, pos), filename, nil, l)
+            e = sub expression
+            sub hadError ifTrue { hadError = true }
+            (e != nil) ifTrue {
+                ts = self send(l, e, "toString", [])
+                (result == nil) ifTrue {
+                    empty = Node make("String", l)
+                    empty value = ""
+                    result = self binary(l, "+", empty, ts)
+                } ifFalse {
+                    result = self binary(l, "+", result, ts)
+                }
+            }
+            (pos < n) ifTrue { pos = pos + 1 }
+        }
+        (result == nil) ifTrue {
+            result = Node make("String", l)
+            result value = ""
+        }
+        result
+    }
+
+    // try { } / try({ }) — the same for catch and finally
+    clauseBlock(word) {
+        (self check("{")) ifTrue { return self block }
+        self expect("(", "Expected '{' or '(' after " + word)
+        b = self block
+        self expect(")", "Expected ')' after " + word + " block")
+        b
+    }
+
+    tryCatch() {
+        l = prev line
+        t = self clauseBlock("try")
+        self skipNewlines
+        c = nil
+        (self match("CATCH")) ifTrue { c = self clauseBlock("catch") }
+        f = nil
+        m = self mark
+        self skipNewlines
+        (self match("FINALLY")) ifTrue {
+            f = self clauseBlock("finally")
+        } ifFalse {
+            self reset(m)
+        }
+        n = Node make("TryCatch", l)
+        n tryBlock = t
+        n catchBlock = c
+        n finallyBlock = f
+        n
+    }
+
+    dictLiteral() {
+        n = Node make("DictLit", prev line)
+        n keys = []
+        n vals = []
+        self skipNewlines
+        (self check("}")) ifFalse {
+            { true } whileTrue {
+                self skipNewlines
+                key = nil
+                (self match("IDENT")) ifTrue {
+                    key = Node make("String", prev line)
+                    key value = prev text
+                } ifFalse {
+                    (self match("STRING")) ifTrue {
+                        key = Node make("String", prev line)
+                        key value = self processEscapes(prev text)
+                    } ifFalse {
+                        self error("Expected key name or string in dict literal")
+                        break
+                    }
+                }
+                self expect(":", "Expected ':' after dict key")
+                v = self expression
+                n keys push(key)
+                n vals push(v)
+                self skipNewlines
+                (self match(",")) ifFalse { break }
+            }
+        }
+        self skipNewlines
+        self expect("}", "Expected '}' to close dict literal")
+        n
+    }
+
+    // --- block ---
+
+    block() {
+        self expect("{", "Expected '{'")
+        n = Node make("Block", prev line)
+        n params = []
+        n body = []
+        self skipNewlines
+        (self check("|")) ifTrue {
+            self advance
+            (self check("|")) ifFalse {
+                self expect("IDENT", "Expected parameter name")
+                p = Node make("Ident", prev line)
+                p name = prev text
+                n params push(p)
+                { self match(",") } whileTrue {
+                    self expect("IDENT", "Expected parameter name")
+                    p = Node make("Ident", prev line)
+                    p name = prev text
+                    n params push(p)
+                }
+            }
+            self expect("|", "Expected '|'")
+            self skipNewlines
+        }
+        self statementsUntilBrace(n body)
+        self expect("}", "Expected '}'")
+        n
+    }
+
+    statementsUntilBrace(list) {
+        { (self check("}")) == false && (self check("EOF")) == false && hadError == false } whileTrue {
+            self addStatement(self statement, list)
+            self skipNewlines
+        }
+    }
+
+    // --- clone body: { slot = value  method(params) { body } } ---
+
+    cloneBody() {
+        self expect("{", "Expected '{'")
+        n = Node make("Clone", prev line)
+        n items = []
+        self skipNewlines
+        { (self check("}")) == false && (self check("EOF")) == false && hadError == false } whileTrue {
+            op = self operatorName
+            ((self check("IDENT")) == false && op == nil) ifTrue {
+                self error("Expected slot or method name in clone body")
+                break
+            }
+            self advance
+            mname = op ?? prev text
+            mline = prev line
+            (self match("=")) ifTrue {
+                s = Node make("SlotDef", mline)
+                s name = mname
+                s value = self expression
+                n items push(s)
+            } ifFalse {
+                (self match("(")) ifTrue {
+                    n items push(self methodDef(mname, mline))
+                } ifFalse {
+                    self error("Expected '=' or '(' after name in clone body")
+                    break
+                }
+            }
+            self skipNewlines
+        }
+        self expect("}", "Expected '}'")
+        n
+    }
+
+    param() {
+        self expect("IDENT", "Expected parameter name")
+        p = Node make("Ident", prev line)
+        p name = prev text
+        (self match("=")) ifTrue {
+            d = Node make("Assign", p line)
+            d name = p name
+            d value = self expression
+            return d
+        }
+        p
+    }
+
+    methodDef(mname, mline) {
+        m = Node make("MethodDef", mline)
+        m name = mname
+        m params = []
+        m body = []
+        (self check(")")) ifFalse {
+            m params push(self param)
+            { self match(",") } whileTrue { m params push(self param) }
+        }
+        self expect(")", "Expected ')'")
+        self skipNewlines
+        self expect("{", "Expected '{' for method body")
+        self skipNewlines
+        self statementsUntilBrace(m body)
+        self expect("}", "Expected '}'")
+        m
+    }
+
+    // --- postfix: message sends ---
+
+    argList(list, newlinesAfterComma) {
+        (self check(")")) ifFalse {
+            list push(self expression)
+            { self match(",") } whileTrue {
+                newlinesAfterComma ifTrue { self skipNewlines }
+                list push(self expression)
+            }
+        }
+        self expect(")", "Expected ')'")
+    }
+
+    postfix() {
+        e = self primary
+        (e == nil) ifTrue { return nil }
+        nextIsSuper = e kind == "Self" && e superMark
+        nextIsSuper ifTrue { e superMark = false }
+
+        { self check("IDENT") } whileTrue {
+            self advance
+            msg = prev text
+            sl = prev line
+
+            (msg == "clone" && (self check("{"))) ifTrue {
+                c = self cloneBody
+                c recv = e
+                c line = sl
+                e = c
+                continue
+            }
+            (msg == "clone" && (self check("("))) ifTrue {
+                self advance
+                (self check("{")) ifTrue {
+                    c = self cloneBody
+                    c recv = e
+                    c line = sl
+                    self expect(")", "Expected ')' after clone body")
+                    e = c
+                    continue
+                }
+                s = self send(sl, e, msg, [])
+                s isSuper = nextIsSuper
+                nextIsSuper = false
+                self argList(s items, false)
+                e = s
+                continue
+            }
+
+            s = self send(sl, e, msg, [])
+            s isSuper = nextIsSuper
+            nextIsSuper = false
+            (self match("(")) ifTrue {
+                self argList(s items, true)
+                // trailing block after (args): reduce(0) { |a, x| a + x }
+                (self check("{")) ifTrue { s items push(self block) }
+            } ifFalse {
+                (self check("{")) ifTrue { s items push(self block) }
+            }
+            e = s
+        }
+        e
+    }
+
+    // --- binary operators ---
+
+    precedences = #{
+        "??": 1, "..": 2, "||": 3, "&&": 4, "==": 5, "!=": 5,
+        "<": 6, ">": 6, "<=": 6, ">=": 6, "+": 7, "-": 7, "*": 8, "/": 8, "%": 8
+    }
+
+    binaryExpr(minPrec) {
+        left = self postfix
+        (left == nil) ifTrue { return nil }
+        { prec = precedences get(cur kind); prec != nil && prec >= minPrec } whileTrue {
+            opPrec = precedences get(cur kind)
+            self advance
+            op = prev text
+            l = prev line
+            self skipNewlines
+            right = self binaryExpr(opPrec + 1)
+            left = self binary(l, op, left, right)
+        }
+        left
+    }
+
+    expression() { self binaryExpr(1) }
+
+    // --- statements ---
+
+    compoundOps = #{ "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%" }
+
+    statement() {
+        hadError ifTrue { return nil }
+
+        (self match("RETURN")) ifTrue {
+            n = Node make("Return", prev line)
+            ((self check("NEWLINE")) || (self check(";")) || (self check("}")) || (self check("EOF"))) ifFalse {
+                n expr = self expression
+            }
+            return n
+        }
+        (self match("BREAK")) ifTrue { return Node make("Break", prev line) }
+        (self match("CONTINUE")) ifTrue { return Node make("Continue", prev line) }
+
+        (self check("IMPORT")) ifTrue {
+            self advance
+            self expect("(", "Expected '(' after import")
+            self expect("STRING", "Expected string path in import()")
+            path = prev text
+            self expect(")", "Expected ')' after import path")
+            a = nil
+            (self match("AS")) ifTrue {
+                self expect("IDENT", "Expected identifier after 'as'")
+                a = prev text
+            }
+            n = Node make("Import", prev line)
+            n name = path
+            n alias = a
+            return n
+        }
+
+        // name = expr, name += expr
+        (self check("IDENT")) ifTrue {
+            m = self mark
+            self advance
+            nameTok = prev
+            (self check("=")) ifTrue {
+                self advance
+                n = Node make("Assign", nameTok line)
+                n name = nameTok text
+                n value = self expression
+                return n
+            }
+            cop = compoundOps get(cur kind)
+            (cop != nil) ifTrue {
+                self advance
+                lhs = Node make("Ident", nameTok line)
+                lhs name = nameTok text
+                rhs = self expression
+                n = Node make("Assign", nameTok line)
+                n name = nameTok text
+                n value = self binary(nameTok line, cop, lhs, rhs)
+                return n
+            }
+            self reset(m)
+        }
+
+        // [a, b] = expr
+        (self check("[")) ifTrue {
+            m = self mark
+            dline = cur line
+            self advance
+            targets = []
+            isDestructure = false
+            (self check("IDENT")) ifTrue {
+                t = Node make("Ident", cur line)
+                t name = cur text
+                targets push(t)
+                self advance
+                { self match(",") } whileTrue {
+                    (self check("IDENT")) ifFalse { break }
+                    t = Node make("Ident", cur line)
+                    t name = cur text
+                    targets push(t)
+                    self advance
+                }
+                ((self match("]")) && (self check("="))) ifTrue { isDestructure = true }
+            }
+            isDestructure ifTrue {
+                self advance
+                n = Node make("Destructure", dline)
+                n items = targets
+                n value = self expression
+                return n
+            }
+            self reset(m)
+        }
+
+        e = self expression
+        // receiver slot = value
+        (e != nil && e kind == "Send" && e items size == 0 && (self check("="))) ifTrue {
+            self advance
+            n = Node make("SlotAssign", e line)
+            n recv = e recv
+            n name = e name
+            n value = self expression
+            return n
+        }
+        // receiver slot += value
+        (e != nil && e kind == "Send" && e items size == 0) ifTrue {
+            cop = compoundOps get(cur kind)
+            (cop != nil) ifTrue {
+                self advance
+                readSlot = self send(e line, e recv, e name, [])
+                rhs = self expression
+                n = Node make("SlotAssign", e line)
+                n recv = e recv
+                n name = e name
+                n value = self binary(e line, cop, readSlot, rhs)
+                return n
+            }
+        }
+        e
+    }
+
+    // --- program and imports ---
+
+    parseProgram() {
+        prog = Node make("Program", 1)
+        prog items = []
+        self skipNewlines
+        { (self check("EOF")) == false && hadError == false } whileTrue {
+            stmt = self statement
+            (stmt != nil) ifTrue {
+                (stmt kind == "Import") ifTrue {
+                    self spliceImport(stmt, prog items)
+                } ifFalse {
+                    self addStatement(stmt, prog items)
+                }
+            }
+            ((self check("EOF")) == false && (self check("}")) == false) ifTrue {
+                ((self check("NEWLINE")) == false && (self check(";")) == false) ifTrue {
+                    self error("Expected newline or ';' after statement")
+                    break
+                }
+                self skipNewlines
+            }
+        }
+        prog
+    }
+
+    spliceImport(stmt, stmts) {
+        imp = self parseImportFile(stmt name)
+        (imp == nil) ifTrue { return nil }
+        imp items each { |s| stmts push(s) }
+        (stmt alias == nil) ifTrue { return nil }
+
+        // import("x") as Ns: Ns = Object clone({}), then Ns name = name for
+        // each top-level assignment of the import
+        l = stmt line
+        proto = Node make("Ident", l)
+        proto name = "Object"
+        empty = Node make("Clone", l)
+        empty recv = proto
+        empty items = []
+        obj = Node make("Ident", l)
+        obj name = "Object"
+        ns = Node make("Assign", l)
+        ns name = stmt alias
+        ns value = self send(l, obj, "clone", [empty])
+        stmts push(ns)
+        imp items each { |s|
+            (s kind == "Assign") ifTrue {
+                r = Node make("Ident", s line)
+                r name = stmt alias
+                v = Node make("Ident", s line)
+                v name = s name
+                sa = Node make("SlotAssign", s line)
+                sa recv = r
+                sa name = s name
+                sa value = v
+                stmts push(sa)
+            }
+        }
+    }
+
+    lastSep(path) {
+        i = path length - 1
+        { i >= 0 } whileTrue {
+            c = path byteAt(i)
+            (c == 47 || c == 92) ifTrue { return i }
+            i = i - 1
+        }
+        -1
+    }
+
+    // the "main" of a brick.json, or nil
+    brickMain(manifestPath) {
+        (File exists(manifestPath)) ifFalse { return nil }
+        m = (File read(manifestPath)) match("\"main\"[ \t\r\n]*:[ \t\r\n]*\"[^\"]*\"")
+        (m == nil) ifTrue { return nil }
+        main = (m split("\"")) at(3)
+        (main == nil || main == "") ifTrue { return nil }
+        main
+    }
+
+    resolveImport(path) {
+        isBrick = (path contains(".clay")) == false && (path contains("\\")) == false &&
+                  (path byteAt(0)) != 46
+        isBrick ifTrue {
+            dirs = ["bricks", "../bricks", "../../bricks"]
+            dir = filename
+            sep = self lastSep(dir)
+            (sep >= 0) ifTrue {
+                dir = dir slice(0, sep)
+                up = 0
+                { up < 3 && dirs size < 8 } whileTrue {
+                    dirs push(dir + "/bricks")
+                    sep = self lastSep(dir)
+                    (sep < 0) ifTrue { break }
+                    dir = dir slice(0, sep)
+                    up = up + 1
+                }
+            }
+            dirs each { |d|
+                main = self brickMain(d + "/" + path + "/brick.json")
+                (main != nil) ifTrue {
+                    candidate = d + "/" + path + "/" + main
+                    (File exists(candidate)) ifTrue { return candidate }
+                }
+                fallback = d + "/" + path + "/src/main.clay"
+                (File exists(fallback)) ifTrue { return fallback }
+            }
+        }
+        // relative to the importing file (absolute paths as they are)
+        c0 = path byteAt(0)
+        (c0 == 47 || c0 == 92 || (path byteAt(1)) == 58) ifTrue { return path }
+        sep = self lastSep(filename)
+        (sep < 0) ifTrue { return path }
+        (filename slice(0, sep + 1)) + path
+    }
+
+    parseImportFile(path) {
+        resolved = self resolveImport(path)
+        (imported has(resolved)) ifTrue { return nil }
+        imported set(resolved, true)
+        (File exists(resolved)) ifFalse {
+            Console print("${filename}: cannot open import '${resolved}'\n")
+            hadError = true
+            return nil
+        }
+        sub = Parser new(File read(resolved), resolved, imported)
+        prog = sub parseProgram
+        sub hadError ifTrue { hadError = true }
+        prog
+    }
+}

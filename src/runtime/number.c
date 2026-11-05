@@ -293,6 +293,13 @@ static ClayValue number_abs(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int(v < 0 ? -v : v);
 }
 
+/* 5 negated → -5 (the VM inlines this; native code calls it) */
+static ClayValue number_negated(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (is_float_arg(self, 0, NULL)) return clay_float_tag(-self_float_value(self));
+    return clay_int(-self_int_value(self));
+}
+
 static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     intptr_t n = self_int_value(self);
@@ -333,5 +340,6 @@ void clay_number_init_methods(ClayObject *proto) {
     clay_set_method(proto, "toFloat",  number_toFloat);
     clay_set_method(proto, "toInt",    number_toInt);
     clay_set_method(proto, "abs",      number_abs);
+    clay_set_method(proto, "negated",  number_negated);
     clay_set_method(proto, "times",    number_times);
 }

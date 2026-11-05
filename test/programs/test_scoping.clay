@@ -1,0 +1,52 @@
+// Variable scoping: top-level variables, methods and blocks.
+// - A top-level variable is visible from every method, wherever it is
+//   assigned in the file.
+// - Assignment in a method, or in a block inside one, never changes a
+//   top-level variable: it writes self's slot if there is one, else makes a
+//   local.
+// - Top-level blocks share the program's variables.
+
+check = { |label, got, want|
+    (got != want) ifTrue {
+        raise("FAIL: " + label + " - expected " + want toString + ", got " + got toString)
+    }
+}
+
+M = Object clone {
+    count = 0
+    readLater() { later }
+    blockAssign(xs) {
+        xs each { |x| p = x; total = 99 }
+        [p, total]
+    }
+    methodAssign() {
+        p = "local p"
+        p
+    }
+    slotAssign() {
+        [1, 2] each { |x| count = count + x }
+        count
+    }
+}
+
+p = "global p"
+total = 0
+later = "defined after the methods"
+
+check value("read a later global", M readLater, "defined after the methods")
+check value("block in method reads globals", M blockAssign([1, 2]), ["global p", 0])
+check value("global untouched by block in method", p, "global p")
+check value("total untouched", total, 0)
+check value("method local shadows global", M methodAssign, "local p")
+check value("global untouched by method", p, "global p")
+check value("block in method writes self's slot", M slotAssign, 3)
+
+// Top-level blocks share the program's variables
+[1, 2, 3] each { |x| total = total + x }
+check value("top-level block writes global", total, 6)
+setP = { |v| p = v }
+setP value("changed")
+check value("top-level block assigns global", p, "changed")
+check value("methods see the new value", M blockAssign([]), ["changed", 6])
+
+"PASS: scoping" println

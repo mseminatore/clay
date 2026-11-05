@@ -1,0 +1,62 @@
+// Lookup rule: walking the prototype chain from the receiver, the nearest
+// definition wins -- a slot hides a method inherited from further up; on the
+// same object a method wins over a slot.
+
+check = { |label, got, want|
+    (got != want) ifTrue {
+        raise("FAIL: " + label + " - expected " + want toString + ", got " + got toString)
+    }
+}
+
+// Slots named like Object's methods (type, parent, slots) are readable
+P = Object clone { type = "slot type"; parent = "slot parent"; slots = 3 }
+check value("type slot", P type, "slot type")
+check value("parent slot", P parent, "slot parent")
+check value("slots slot", P slots, 3)
+
+// Objects without the slot still get the method
+Q = Object clone { }
+check value("type method", Q type, "Q")
+x = Object clone
+check value("parent method", x parent == Object, true)
+
+// A tree of nodes with a `parent` slot
+Node = Object clone {
+    kind = nil
+    parent = nil
+    init(k, p) { kind = k; parent = p }
+    depth() {
+        (parent == nil) ifTrue { return 0 }
+        1 + parent depth
+    }
+}
+root = Node new("root", nil)
+leaf = Node new("leaf", Node new("child", root))
+check value("depth via parent slots", leaf depth, 2)
+check value("parent slot chain", leaf parent kind, "child")
+check value("parent from a method", root parent, nil)
+
+// On the same object, the method wins
+R = Object clone {
+    name = "slot"
+    name() { "method" }
+}
+check value("method beats slot on same object", R name, "method")
+
+// A slot on a prototype hides the method for its clones
+S = Object clone { type = "S type" }
+s = S clone
+check value("inherited slot hides method", s type, "S type")
+
+// A method added later to an ancestor is still hidden by an existing slot
+T = Object clone { label = "slot label" }
+Object setMethod("label", { "method label" })
+check value("slot hides later method", T label, "slot label")
+check value("later method elsewhere", Object clone label, "method label")
+
+// Repeated sends through the caches stay correct
+n = 0
+10 times { |i| (s type == "S type") ifTrue { n = n + 1 } }
+check value("cached sends", n, 10)
+
+"PASS: slot shadowing" println

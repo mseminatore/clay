@@ -365,6 +365,7 @@ static AstNode *parse_primary(Parser *p) {
             /* Parse the expression */
             Parser sub;
             lexer_init(&sub.lexer, expr_text);
+            sub.lexer.line = line;   /* nodes and errors report the string's line */
             sub.had_error = 0;
             sub.filename = p->filename;
             sub.imported = NULL;
@@ -595,7 +596,7 @@ static AstNode *parse_block(Parser *p) {
     }
 
     /* Parse body */
-    while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
+    while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF) && !p->had_error) {
         AstNode *stmt = parse_statement(p);
         if (stmt) {
             if (stmt->type == NODE_DESTRUCTURE) {
@@ -622,7 +623,7 @@ static AstNode *parse_clone_body(Parser *p) {
 
     skip_newlines(p);
 
-    while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
+    while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF) && !p->had_error) {
         /* Accept identifiers or operator tokens as member names */
         const char *op_name = operator_method_name(p);
         if (!check(p, TOK_IDENT) && !op_name) {
@@ -685,7 +686,7 @@ static AstNode *parse_clone_body(Parser *p) {
             /* Parse method body */
             expect(p, TOK_LBRACE, "Expected '{' for method body");
             skip_newlines(p);
-            while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF)) {
+            while (!check(p, TOK_RBRACE) && !check(p, TOK_EOF) && !p->had_error) {
                 AstNode *stmt = parse_statement(p);
                 if (stmt) {
                     if (stmt->type == NODE_DESTRUCTURE) {

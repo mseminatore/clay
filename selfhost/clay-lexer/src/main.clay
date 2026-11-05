@@ -7,6 +7,7 @@
 //   lx = Lexer new(source)
 //   tok = lx next                 // a Token: kind, text, line
 //   toks = Lexer tokenize(source) // every token up to EOF or the first ERROR
+//                                 // (optional 2nd argument: first line number)
 //
 // This is a port of src/compiler/lexer.c and produces exactly the same tokens
 // (CTest clay_selfhost_lexer compares the two on every .clay file in the
@@ -87,9 +88,12 @@ Lexer = Object clone {
         line = 1
     }
 
-    // Every token of source, ending with EOF (or the first ERROR)
-    tokenize(source) {
+    // Every token of source, ending with EOF (or the first ERROR). startLine
+    // numbers the first line (an interpolated expression starts on its
+    // string's line).
+    tokenize(source, startLine = 1) {
         lx = Lexer new(source)
+        lx line = startLine
         out = []
         { true } whileTrue {
             tok = lx next

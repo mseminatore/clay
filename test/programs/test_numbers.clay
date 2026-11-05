@@ -55,4 +55,10 @@ x = 6; x *= 4; Test eq(x, 24)
 x = 20; x /= 5; Test eq(x, 4)
 x = 17; x %= 5; Test eq(x, 2)
 
+// negated (inlined by the VM, a method natively)
+Test eq(5 negated, -5)
+Test eq((-2.5) negated, 2.5)
+n = 7
+Test eq(n negated + n, 0)
+
 Test done()

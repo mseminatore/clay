@@ -187,117 +187,137 @@ static void print_indent(int indent) {
     for (int i = 0; i < indent; i++) printf("  ");
 }
 
-void ast_print(AstNode *node, int indent) {
-    if (!node) { print_indent(indent); printf("(null)\n"); return; }
+/* String contents with \, ", newline, CR, tab and other control bytes escaped,
+ * so each node stays on one line */
+static void print_escaped(const char *s) {
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '\\') fputs("\\\\", stdout);
+        else if (c == '"') fputs("\\\"", stdout);
+        else if (c == '\n') fputs("\\n", stdout);
+        else if (c == '\r') fputs("\\r", stdout);
+        else if (c == '\t') fputs("\\t", stdout);
+        else if (c < 0x20 || c == 0x7f) printf("\\x%02x", c);
+        else putchar(c);
+    }
+}
+
+void clay_format_float(float f, char *buf, size_t sz);   /* runtime: shortest round-trip */
+
+static void print_node(AstNode *node, int indent, const char *label);
+
+static void print_list(NodeList *list, int indent, const char *label) {
+    for (int i = 0; i < list->count; i++) print_node(list->items[i], indent, label);
+}
+
+/* One node per line: "<indent>[label]Kind(details) @line", children indented.
+ * Lossless enough to compare two parsers (`clay --ast`): parameters, defaults,
+ * super sends and line numbers are all shown. */
+static void print_node(AstNode *node, int indent, const char *label) {
     print_indent(indent);
+    if (label) fputs(label, stdout);
+    if (!node) { printf("(null)\n"); return; }
     switch (node->type) {
         case NODE_INT_LIT:
-            printf("Int(%lld)\n", node->as.int_lit.value);
+            printf("Int(%lld)", node->as.int_lit.value);
             break;
-        case NODE_FLOAT_LIT:
-            printf("Float(%g)\n", node->as.float_lit.value);
+        case NODE_FLOAT_LIT: {
+            char buf[64];
+            clay_format_float(node->as.float_lit.value, buf, sizeof(buf));
+            printf("Float(%s)", buf);
             break;
+        }
         case NODE_STRING_LIT:
-            printf("String(\"%s\")\n", node->as.string_lit.value);
+            printf("String(\"");
+            print_escaped(node->as.string_lit.value);
+            printf("\")");
             break;
-        case NODE_IDENT:
-            printf("Ident(%s)\n", node->as.ident.name);
-            break;
-        case NODE_SELF:
-            printf("Self\n");
-            break;
-        case NODE_ASSIGN:
-            printf("Assign(%s)\n", node->as.assign.name);
-            ast_print(node->as.assign.value, indent + 1);
-            break;
+        case NODE_IDENT:      printf("Ident(%s)", node->as.ident.name); break;
+        case NODE_SELF:       printf("Self"); break;
+        case NODE_ASSIGN:     printf("Assign(%s)", node->as.assign.name); break;
         case NODE_SEND:
-            printf("Send(.%s)\n", node->as.send.message);
-            ast_print(node->as.send.receiver, indent + 1);
-            for (int i = 0; i < node->as.send.args.count; i++)
-                ast_print(node->as.send.args.items[i], indent + 1);
+            printf("Send(%s.%s)", node->as.send.is_super ? "super" : "", node->as.send.message);
+            break;
+        case NODE_BINARY:     printf("Binary(%s)", node->as.binary.op); break;
+        case NODE_BLOCK:      printf("Block(params=%d)", node->as.block.params.count); break;
+        case NODE_METHOD_DEF:
+            printf("MethodDef(%s, params=%d)", node->as.method_def.name, node->as.method_def.params.count);
+            break;
+        case NODE_SLOT_DEF:   printf("SlotDef(%s)", node->as.slot_def.name); break;
+        case NODE_CLONE:      printf("Clone(members=%d)", node->as.clone.members.count); break;
+        case NODE_ARRAY_LIT:  printf("Array(count=%d)", node->as.array_lit.elements.count); break;
+        case NODE_IMPORT:
+            printf("Import(\"%s\"", node->as.import.path);
+            if (node->as.import.alias) printf(" as %s", node->as.import.alias);
+            printf(")");
+            break;
+        case NODE_TRY_CATCH:  printf("TryCatch"); break;
+        case NODE_RAISE:      printf("Raise"); break;
+        case NODE_SLOT_ASSIGN: printf("SlotAssign(.%s)", node->as.slot_assign.slot_name); break;
+        case NODE_RETURN:     printf("Return"); break;
+        case NODE_BREAK:      printf("Break"); break;
+        case NODE_CONTINUE:   printf("Continue"); break;
+        case NODE_DICT_LIT:   printf("DictLit(count=%d)", node->as.dict_lit.keys.count); break;
+        case NODE_DESTRUCTURE: printf("Destructure(targets=%d)", node->as.destructure.targets.count); break;
+        case NODE_PROGRAM:    printf("Program(stmts=%d)", node->as.program.stmts.count); break;
+    }
+    printf(" @%d\n", node->line);
+
+    int in = indent + 1;
+    switch (node->type) {
+        case NODE_ASSIGN:     print_node(node->as.assign.value, in, NULL); break;
+        case NODE_SEND:
+            print_node(node->as.send.receiver, in, NULL);
+            print_list(&node->as.send.args, in, NULL);
             break;
         case NODE_BINARY:
-            printf("Binary(%s)\n", node->as.binary.op);
-            ast_print(node->as.binary.left, indent + 1);
-            ast_print(node->as.binary.right, indent + 1);
+            print_node(node->as.binary.left, in, NULL);
+            print_node(node->as.binary.right, in, NULL);
             break;
         case NODE_BLOCK:
-            printf("Block(params=%d)\n", node->as.block.params.count);
-            for (int i = 0; i < node->as.block.body.count; i++)
-                ast_print(node->as.block.body.items[i], indent + 1);
+            print_list(&node->as.block.params, in, "param: ");
+            print_list(&node->as.block.body, in, NULL);
             break;
         case NODE_METHOD_DEF:
-            printf("MethodDef(%s, params=%d)\n", node->as.method_def.name, node->as.method_def.params.count);
-            for (int i = 0; i < node->as.method_def.body.count; i++)
-                ast_print(node->as.method_def.body.items[i], indent + 1);
+            print_list(&node->as.method_def.params, in, "param: ");
+            print_list(&node->as.method_def.body, in, NULL);
             break;
-        case NODE_SLOT_DEF:
-            printf("SlotDef(%s)\n", node->as.slot_def.name);
-            ast_print(node->as.slot_def.value, indent + 1);
-            break;
+        case NODE_SLOT_DEF:   print_node(node->as.slot_def.value, in, NULL); break;
         case NODE_CLONE:
-            printf("Clone(members=%d)\n", node->as.clone.members.count);
-            ast_print(node->as.clone.proto, indent + 1);
-            for (int i = 0; i < node->as.clone.members.count; i++)
-                ast_print(node->as.clone.members.items[i], indent + 1);
+            print_node(node->as.clone.proto, in, "proto: ");
+            print_list(&node->as.clone.members, in, NULL);
             break;
-        case NODE_ARRAY_LIT:
-            printf("Array(count=%d)\n", node->as.array_lit.elements.count);
-            for (int i = 0; i < node->as.array_lit.elements.count; i++)
-                ast_print(node->as.array_lit.elements.items[i], indent + 1);
-            break;
-        case NODE_IMPORT:
-            printf("Import(\"%s\")\n", node->as.import.path);
-            break;
+        case NODE_ARRAY_LIT:  print_list(&node->as.array_lit.elements, in, NULL); break;
         case NODE_TRY_CATCH:
-            printf("TryCatch\n");
-            print_indent(indent + 1); printf("try: "); ast_print(node->as.try_catch.try_block, indent + 2);
-            if (node->as.try_catch.catch_block) {
-                print_indent(indent + 1); printf("catch: "); ast_print(node->as.try_catch.catch_block, indent + 2);
-            }
-            if (node->as.try_catch.finally_block) {
-                print_indent(indent + 1); printf("finally: "); ast_print(node->as.try_catch.finally_block, indent + 2);
-            }
+            print_node(node->as.try_catch.try_block, in, "try: ");
+            if (node->as.try_catch.catch_block) print_node(node->as.try_catch.catch_block, in, "catch: ");
+            if (node->as.try_catch.finally_block) print_node(node->as.try_catch.finally_block, in, "finally: ");
             break;
-        case NODE_RAISE:
-            printf("Raise\n");
-            ast_print(node->as.raise.expr, indent + 1);
-            break;
+        case NODE_RAISE:      print_node(node->as.raise.expr, in, NULL); break;
         case NODE_SLOT_ASSIGN:
-            printf("SlotAssign(.%s)\n", node->as.slot_assign.slot_name);
-            ast_print(node->as.slot_assign.receiver, indent + 1);
-            ast_print(node->as.slot_assign.value, indent + 1);
+            print_node(node->as.slot_assign.receiver, in, NULL);
+            print_node(node->as.slot_assign.value, in, NULL);
             break;
         case NODE_RETURN:
-            printf("Return\n");
-            if (node->as.return_stmt.expr) ast_print(node->as.return_stmt.expr, indent + 1);
-            break;
-        case NODE_BREAK:
-            printf("Break\n");
-            break;
-        case NODE_CONTINUE:
-            printf("Continue\n");
+            if (node->as.return_stmt.expr) print_node(node->as.return_stmt.expr, in, NULL);
             break;
         case NODE_DICT_LIT:
-            printf("DictLit(count=%d)\n", node->as.dict_lit.keys.count);
             for (int i = 0; i < node->as.dict_lit.keys.count; i++) {
-                ast_print(node->as.dict_lit.keys.items[i], indent + 1);
-                ast_print(node->as.dict_lit.values.items[i], indent + 2);
+                print_node(node->as.dict_lit.keys.items[i], in, "key: ");
+                print_node(node->as.dict_lit.values.items[i], in, "value: ");
             }
             break;
         case NODE_DESTRUCTURE:
-            printf("Destructure(targets=%d)\n", node->as.destructure.targets.count);
-            for (int i = 0; i < node->as.destructure.targets.count; i++)
-                ast_print(node->as.destructure.targets.items[i], indent + 1);
-            print_indent(indent + 1); printf("= ");
-            ast_print(node->as.destructure.value, indent + 2);
+            print_list(&node->as.destructure.targets, in, "target: ");
+            print_node(node->as.destructure.value, in, "value: ");
             break;
-        case NODE_PROGRAM:
-            printf("Program(stmts=%d)\n", node->as.program.stmts.count);
-            for (int i = 0; i < node->as.program.stmts.count; i++)
-                ast_print(node->as.program.stmts.items[i], indent + 1);
-            break;
+        case NODE_PROGRAM:    print_list(&node->as.program.stmts, in, NULL); break;
+        default: break;
     }
+}
+
+void ast_print(AstNode *node, int indent) {
+    print_node(node, indent, NULL);
 }
 
 /* --- Non-local return analysis ---

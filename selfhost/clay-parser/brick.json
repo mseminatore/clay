@@ -1,0 +1,6 @@
+{
+    "name": "clay-parser",
+    "version": "0.1.0",
+    "description": "The Clay parser, written in Clay",
+    "main": "src/main.clay"
+}

@@ -400,16 +400,24 @@ typedef struct MethodDef {
     CaptureList captures; /* captured variables for blocks */
     const char **clone_slots; /* slot names from enclosing clone (Io-style assign) */
     int clone_slot_count;
+    int in_method_ctx;  /* a method, or a block created (transitively) inside one */
     struct MethodDef *next;
 } MethodDef;
 
 static MethodDef *collected_methods = NULL;
+
+/* Emitting a method body or a block created inside a method. There, as in
+ * the VM, the program's top-level variables are globals: readable, but an
+ * assignment makes a local (or writes self's slot) instead of changing them.
+ * Top-level blocks share the program's variables. */
+static int cur_method_ctx = 0;
 
 static void collect_method(const char *func_name, const char *obj_ctx, AstNode *node) {
     MethodDef *m = (MethodDef *)malloc(sizeof(MethodDef));
     m->func_name = strdup(func_name);
     m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
     m->node = node;
+    m->in_method_ctx = 1;
     capture_init(&m->captures);
     m->clone_slots = NULL;
     m->clone_slot_count = 0;
@@ -423,6 +431,7 @@ static void collect_method_with_captures(const char *func_name, const char *obj_
     m->func_name = strdup(func_name);
     m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
     m->node = node;
+    m->in_method_ctx = cur_method_ctx;
     m->captures = *caps; /* take ownership */
     caps->names = NULL; caps->count = 0; caps->capacity = 0;
     m->clone_slots = NULL;
@@ -616,6 +625,12 @@ static int is_toplevel_var(CodeGen *cg, const char *name) {
         }
     }
     return found;
+}
+
+/* A local of the function being emitted, for assignment purposes: in method
+ * context (see cur_method_ctx) the top-level variables don't count */
+static int is_fn_local(CodeGen *cg, const char *name) {
+    return is_local(cg, name) && !(cur_method_ctx && is_toplevel_var(cg, name));
 }
 
 /* Check if name is a method/block-specific local (not inherited from outer scope) */
@@ -1476,7 +1491,7 @@ static void emit_slot_fallback_decls(CodeGen *cg, NodeList *body) {
         AstNode *stmt = body->items[i];
         if (!stmt || stmt->type != NODE_ASSIGN) continue;
         const char *name = stmt->as.assign.name;
-        if (is_local(cg, name) || is_known_slot(cg, name) || is_builtin_global(name))
+        if (is_fn_local(cg, name) || is_known_slot(cg, name) || is_builtin_global(name))
             continue;
         char flag[160], cname[160];
         slot_flag_name(name, flag, sizeof(flag));
@@ -1542,7 +1557,7 @@ static void emit_fn_assign(CodeGen *cg, AstNode *stmt, int is_method) {
         emit_indent(cg);
         fprintf(cg->out, "clay_set_slot(%s, \"%s\", %s);\n", method_self_expr(cg), name, val);
     } else if (is_boxed(cg, name) ||
-               (is_method ? is_method_local(cg, name) : is_local(cg, name))) {
+               (is_method ? is_method_local(cg, name) : is_fn_local(cg, name))) {
         emit_var_store(cg, name, val, 2 - own);
     } else {
         /* New local variable */
@@ -1834,6 +1849,8 @@ static void emit_method_bodies(CodeGen *cg) {
         int saved_known_slot_count = cg->known_slot_count;
         cg->method_local_base = cg->local_count;
         cg->in_method = 1;
+        int saved_method_ctx = cur_method_ctx;
+        cur_method_ctx = cur->in_method_ctx;
         /* Fresh ownership lists for this function */
         int saved_in_function = cg->in_function;
         cg->in_function = 1;
@@ -1962,6 +1979,7 @@ static void emit_method_bodies(CodeGen *cg) {
         cg->fn_cell_count = 0;
         cg->in_function = saved_in_function;
         cg->in_method = saved_in_method;
+        cur_method_ctx = saved_method_ctx;
         cg->super_proto = saved_super_proto;
         cg->method_local_base = saved_method_local_base;
         cg->known_slots = saved_known_slots;

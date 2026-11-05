@@ -1,0 +1,3 @@
+helperValue = 42
+helperFn = { |x| x * 2 }
+Helper = Object clone { v = 1 }

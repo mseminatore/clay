@@ -135,6 +135,22 @@ Point x println // 0 — writes are always local to the receiver
 
 Slot reads walk the prototype chain — if the object doesn't have the slot, its parent is checked, and so on.
 
+Slots and methods share one namespace, and the nearest definition along the
+chain wins: a slot hides a method of the same name inherited from further up
+(on the same object, a method wins over a slot). So a slot may be named like
+one of `Object`'s methods:
+
+```clay
+Node = Object clone {
+  parent = nil      // hides Object's `parent` method for nodes
+  type = "node"     // hides Object's `type`
+}
+n = Node clone
+n parent println    // nil
+n type println      // node
+(Object clone parent == Object) println   // true — the method, elsewhere
+```
+
 ## Implicit self in methods
 
 Inside a method body, bare identifiers that aren't local variables automatically resolve to `self` slots. This means you can write:
@@ -147,7 +163,7 @@ Point = Object clone {
 }
 ```
 
-The lookup order is: local variable → upvalue (captured variable) → `self` slot → global. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable:
+The lookup order is: local variable → captured variable → top-level variable (wherever it is assigned in the file) → `self` slot or method. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (top-level blocks do share the program's variables):
 
 ```clay
 Point = Object clone {

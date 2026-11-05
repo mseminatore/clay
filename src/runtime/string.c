@@ -448,7 +448,7 @@ static ClayValue string_chr(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     if (argc < 1) return CLAY_NIL;
     intptr_t code = clay_to_int(argv[0]);
-    if (code < 0 || code > 127) return CLAY_NIL;
+    if (code < 0 || code > 255) return CLAY_NIL;   /* one byte */
     char buf[2] = { (char)code, '\0' };
     return CLAY_VAL(clay_string_new(buf));
 }

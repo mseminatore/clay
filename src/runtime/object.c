@@ -57,6 +57,101 @@ static int object_pool_count = 0;
   static void pool_unlock(void) {}
 #endif
 
+/* --- Slots that shadow inherited methods ---
+ * Lookup rule: walking the prototype chain from the receiver, the nearest
+ * definition wins -- a slot on an object hides a method inherited from
+ * further up (on the same object a method wins). Checking slots on every
+ * send would slow all dispatch, so only "shadowed" selectors -- names some
+ * object has as a slot while a method of that name exists above it -- take
+ * the careful walk (clay_lookup_nearest); everything else uses the method
+ * caches as before.
+ *
+ * Two small Bloom filters of slot and method names pre-filter the checks
+ * (false positives only cost speed). Shadowed selectors are an append-only
+ * list read without locks; the count is published after the entry. */
+#define NAME_BLOOM_BITS 8192
+static volatile unsigned char g_slot_bloom[NAME_BLOOM_BITS / 8];
+static volatile unsigned char g_method_bloom[NAME_BLOOM_BITS / 8];
+
+#define SHADOW_MAX 128
+static const char *g_shadowed[SHADOW_MAX];
+volatile long clay_shadow_count = 0;
+static volatile int g_shadow_overflow = 0;   /* too many: treat every selector as shadowed */
+
+static void name_hashes(const char *s, unsigned *h1, unsigned *h2) {
+    unsigned h = 2166136261u;
+    for (; *s; s++) h = (h ^ (unsigned char)*s) * 16777619u;
+    *h1 = h & (NAME_BLOOM_BITS - 1);
+    *h2 = (h >> 13) & (NAME_BLOOM_BITS - 1);
+}
+
+static int bloom_has(volatile unsigned char *b, const char *name) {
+    unsigned h1, h2;
+    name_hashes(name, &h1, &h2);
+    return (b[h1 >> 3] & (1u << (h1 & 7))) && (b[h2 >> 3] & (1u << (h2 & 7)));
+}
+
+static void bloom_add(volatile unsigned char *b, const char *name) {
+    if (bloom_has(b, name)) return;
+    unsigned h1, h2;
+    name_hashes(name, &h1, &h2);
+    pool_lock();
+    b[h1 >> 3] |= (unsigned char)(1u << (h1 & 7));
+    b[h2 >> 3] |= (unsigned char)(1u << (h2 & 7));
+    pool_unlock();
+}
+
+int clay_selector_shadowed_slow(const char *selector) {
+    if (g_shadow_overflow) return 1;
+    long n = clay_shadow_count;
+    for (long i = 0; i < n; i++)
+        if (strcmp(g_shadowed[i], selector) == 0) return 1;
+    return 0;
+}
+
+static void shadow_add(const char *name) {
+    if (clay_selector_shadowed_slow(name)) return;
+    pool_lock();
+    if (!clay_selector_shadowed_slow(name)) {
+        if (clay_shadow_count < SHADOW_MAX) {
+            g_shadowed[clay_shadow_count] = strdup(name);
+            CLAY_ATOMIC_INC(&clay_shadow_count);
+        } else {
+            g_shadow_overflow = 1;
+            CLAY_ATOMIC_INC(&clay_shadow_count);   /* keep the fast check true */
+        }
+    }
+    pool_unlock();
+}
+
+/* A new slot `name` on obj: does it hide a method inherited by obj? */
+static void note_new_slot(ClayObject *obj, const char *name) {
+    bloom_add(g_slot_bloom, name);
+    if (!bloom_has(g_method_bloom, name)) return;
+    if (obj->methods) {
+        ht_value_t v;
+        if (ht_lookup(obj->methods, name, &v)) return;   /* own method wins */
+    }
+    if (obj->parent && clay_lookup_method(obj->parent, name)) shadow_add(name);
+}
+
+/* A new method `name`: an existing slot of that name below it may now hide it */
+static void note_new_method(const char *name) {
+    bloom_add(g_method_bloom, name);
+    if (bloom_has(g_slot_bloom, name)) shadow_add(name);
+}
+
+/* Method lookup by the nearest-definition rule (see above): NULL when a slot
+ * named `name` is found first, or nothing is found */
+ClayMethod *clay_lookup_nearest(ClayObject *obj, const char *name) {
+    for (ClayObject *cur = obj; cur; cur = cur->parent) {
+        ht_value_t val;
+        if (cur->methods && ht_lookup(cur->methods, name, &val)) return (ClayMethod *)val;
+        if (cur->slots && ht_lookup(cur->slots, name, &val)) return NULL;
+    }
+    return NULL;
+}
+
 /* Return an object to the pool (called from clay_dealloc after cleanup).
  * The object's slots hash table is already cleared; methods is NULL. */
 void clay_object_pool_return(ClayObject *obj) {
@@ -211,6 +306,7 @@ void clay_set_slot(ClayObject *obj, const char *name, ClayValue value) {
 
     char *key_copy = strdup(name);
     ht_insert(obj->slots, key_copy, (ht_value_t)(uintptr_t)value);
+    note_new_slot(obj, name);
 }
 
 void clay_set_slot_take(ClayObject *obj, const char *name, ClayValue value) {
@@ -271,6 +367,7 @@ void clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func,
 
     char *key_copy = strdup(name);
     ht_insert(obj->methods, key_copy, (ht_value_t)m);
+    note_new_method(name);
 
     /* Invalidate method cache — methods table changed */
     clay_method_cache_clear();

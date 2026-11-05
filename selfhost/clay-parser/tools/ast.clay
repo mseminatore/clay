@@ -1,0 +1,18 @@
+// ast.clay -- print a file's AST in the format of `clay --ast`
+//
+//   clay selfhost/clay-parser/tools/ast.clay <file.clay>
+import("../src/main.clay")
+
+args = System args
+(args size < 1) ifTrue {
+    "usage: clay ast.clay <file.clay>" println
+    System exit(2)
+}
+path = args at(0)
+p = Parser new(File read(path), path)
+program = p parseProgram
+p hadError ifTrue {
+    Console print("clay: compilation failed due to parse errors\n")
+    System exit(1)
+}
+Console print(AstPrinter print(program))

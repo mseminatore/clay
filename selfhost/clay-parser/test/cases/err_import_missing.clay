@@ -1,0 +1,2 @@
+import("no_such_file.clay")
+x = 1

@@ -1004,7 +1004,8 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     if (target_obj &&
         ic->callsite_ip == site_ip &&
         ic->methods_key == target_methods &&
-        ic->selector == selector) {
+        ic->selector == selector &&
+        !clay_selector_shadowed(selector)) {
         /* Method IC hit — invoke directly, skip dispatch */
         if (CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) {
             ClayObject *wrapper = clay_clone(clay_Number);
@@ -1026,7 +1027,8 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
 
     /* Slot-read IC check (separate table, only for 0-arg sends on objects) */
     if (!ic_handled && msg_argc == 0 && target_obj &&
-        !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver)) {
+        !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver) &&
+        !clay_selector_shadowed(selector)) {
         SlotICEntry *sic = &g_slot_ic[ic_idx];
         if (sic->callsite_ip == site_ip &&
             sic->methods_key == target_methods &&
@@ -2253,6 +2255,8 @@ static int bc_is_known_slot(BcCompiler *bc, const char *name) {
 
 /* Pre-register method-local variables: walk the body for bare NODE_ASSIGN
  * names that aren't already locals or builtins, and register them as locals.
+ * In a method (or a block inside one) this includes names of top-level
+ * variables: assignment there never changes the program's variables.
  * Skip names that are known slots — those should be slot writes to self.
  * This ensures prescan can correctly identify which locals nested blocks capture. */
 static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
@@ -2260,14 +2264,14 @@ static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
         AstNode *stmt = body->items[i];
         if (stmt && stmt->type == NODE_ASSIGN) {
             const char *name = stmt->as.assign.name;
-            if (!is_builtin_global(name) && !bc_is_user_global(name) &&
+            if (!is_builtin_global(name) && (bc->in_method || !bc_is_user_global(name)) &&
                 !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
                 bc_add_local(bc, name);
             }
         } else if (stmt && stmt->type == NODE_DESTRUCTURE) {
             for (int j = 0; j < stmt->as.destructure.targets.count; j++) {
                 const char *name = stmt->as.destructure.targets.items[j]->as.ident.name;
-                if (!is_builtin_global(name) && !bc_is_user_global(name) &&
+                if (!is_builtin_global(name) && (bc->in_method || !bc_is_user_global(name)) &&
                     !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
                     bc_add_local(bc, name);
                 }
@@ -2610,8 +2614,8 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
                 }
                 /* Value stays on stack (expression context) */
-            } else if (bc->in_method && !is_builtin_global(node->as.assign.name) && !bc_is_user_global(node->as.assign.name)) {
-                /* Inside a method scope: write to self slot.
+            } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
+                /* Inside a method scope: write to self slot (never a global).
                  * Method-level locals are pre-registered; this path handles
                  * bare assigns inside blocks within methods. */
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
@@ -3032,7 +3036,7 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
                 emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
             }
             emit_op(bc, CLAYVM_OP_POP); /* discard (stmt context) */
-        } else if (bc->in_method && !is_builtin_global(node->as.assign.name) && !bc_is_user_global(node->as.assign.name)) {
+        } else if (bc->in_method && !is_builtin_global(node->as.assign.name)) {
             bc_emit_expr(bc, node);  /* delegates to bc_emit_expr NODE_ASSIGN */
             emit_op(bc, CLAYVM_OP_POP);
         } else {
@@ -3143,6 +3147,14 @@ int bc_compile(BcCompiler *bc, AstNode *program) {
 
     bc->len = 0;
     bc->had_error = 0;
+
+    /* Every top-level variable is a global from the start, so methods see
+     * the ones assigned later in the file too (order doesn't matter) */
+    for (int i = 0; i < program->as.program.stmts.count; i++) {
+        AstNode *stmt = program->as.program.stmts.items[i];
+        if (stmt->type == NODE_ASSIGN && !is_builtin_global(stmt->as.assign.name))
+            bc_register_global(bc, stmt->as.assign.name);
+    }
 
     for (int i = 0; i < program->as.program.stmts.count; i++) {
         AstNode *stmt = program->as.program.stmts.items[i];

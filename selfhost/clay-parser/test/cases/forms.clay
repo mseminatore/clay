@@ -1,0 +1,53 @@
+// valid syntax of every kind
+P = Object clone {
+    x = 1
+    +(o) { x + o x }
+    ==(o) { true }
+    <=(o) { false }
+    go(a, b = 2, c = "d") {
+        super go(a)
+        super go
+        return
+    }
+    run() {
+        return a + b * c - d / e % f
+    }
+}
+Q = P clone({ y = 2 })
+R = P clone()
+S = P clone(1, 2)
+t = try { 1 } catch { |e| 2 } finally { 3 }
+t2 = try({ 1 }) catch({ |e| 2 })
+t3 = try { 1 }
+t4 = try { 1 }
+    catch { |e| e }
+
+    finally { 0 }
+d = #{ a: 1, "b c": [1, 2], d: #{ } }
+d2 = #{
+    k: 1,
+    m: 2
+}
+e = #{}
+[a, b] = [1, 2]
+[c] = x
+[1, 2] size
+[a, 1] size
+[a b] size
+arr = [1,
+    2, 3]
+s = x foo(1,
+    2) bar { |q| q } baz(3) { 4 }
+v = a ?? b .. c || d && e == f != g < h > i <= j >= k + l - m * n / o % p
+w = -x + -1 + -2.5 - -(y) + !z
+n += 1; n -= 2; n *= 3; n /= 4; n %= 5
+p q += 1
+p q = 2
+p q r = 3
+{ |a, b| a } value(1, 2)
+{ || 1 }
+{ 1 } value
+raise("x")
+break
+continue
+self foo
