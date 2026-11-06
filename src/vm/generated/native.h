@@ -9,7 +9,10 @@
 
 #include <stddef.h>
 
+#ifndef CLAYVM_VM_T_DECLARED
+#define CLAYVM_VM_T_DECLARED
 typedef struct clayvm_vm clayvm_vm_t;
+#endif
 
 typedef int (*clayvm_native_fn_t)(clayvm_vm_t *vm, int arg_count);
 

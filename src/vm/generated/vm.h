@@ -76,7 +76,12 @@ typedef struct {
     int saved_frame_count;
 } clayvm_exception_frame_t;
 
-typedef struct clayvm_vm {
+#ifndef CLAYVM_VM_T_DECLARED
+#define CLAYVM_VM_T_DECLARED
+typedef struct clayvm_vm clayvm_vm_t;
+#endif
+
+struct clayvm_vm {
     const uint8_t *code;
     size_t code_len;
     size_t ip;
@@ -106,7 +111,7 @@ typedef struct clayvm_vm {
     void (*retain_fn)(clayvm_value_t); /* Retain callback for OBJECT values (refcount++) */
     void (*release_fn)(clayvm_value_t); /* Release callback for OBJECT values (refcount--) */
     void (*cleanup)(struct clayvm_vm *vm);
-} clayvm_vm_t;
+};
 
 void clayvm_vm_init(clayvm_vm_t *vm);
 void clayvm_vm_free(clayvm_vm_t *vm);
