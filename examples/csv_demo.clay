@@ -1,5 +1,5 @@
 // Demo: clay-csv brick -- CSV parsing and generation
-import("clay-stdlib/clay-csv")
+import("stdlib/csv")
 
 "=== parse ===" println
 rows = Csv parse("name,age,city\nAlice,30,NYC\nBob,25,LA")

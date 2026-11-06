@@ -130,7 +130,7 @@ Http serve(8080, { |req|
 For routing, use the `clay-http-server` brick:
 
 ```clay norun
-import("clay-stdlib/clay-http-server")
+import("stdlib/http-server")
 
 server = HttpServer new(8080)
 server get("/", { |req| server html(200, "<h1>Hello!</h1>") })

@@ -1,5 +1,5 @@
 // Demo: clay-log brick -- structured logging
-import("clay-stdlib/clay-log")
+import("stdlib/log")
 
 "=== default level (info) ===" println
 Log debug("this won't show at info level")

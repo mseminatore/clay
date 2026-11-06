@@ -1,5 +1,5 @@
 // Demo: clay-iter brick -- lazy iterator pipelines
-import("clay-stdlib/clay-iter")
+import("stdlib/iter")
 
 "=== from + toArray ===" println
 Iter from([10, 20, 30]) toArray toString println

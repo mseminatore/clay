@@ -1,5 +1,5 @@
 // Demo: clay-path brick
-import("clay-stdlib/clay-path")
+import("stdlib/path")
 
 "=== join ===" println
 Path join(["src", "compiler", "main.c"]) println

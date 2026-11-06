@@ -1,5 +1,5 @@
 // Demo: clay-template brick -- string templates
-import("clay-stdlib/clay-template")
+import("stdlib/template")
 
 "=== basic render ===" println
 data = #{name: "World", count: 42}

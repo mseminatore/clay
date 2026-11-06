@@ -1,5 +1,5 @@
 // Test clay-config brick
-import("clay-stdlib/clay-config")
+import("stdlib/config")
 
 // Test parse with INI-style input
 input = "[database]

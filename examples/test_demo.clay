@@ -1,5 +1,5 @@
 // Demo: clay-test brick -- testing framework
-import("clay-stdlib/clay-test")
+import("stdlib/test")
 
 Test describe("Arithmetic") {
     Test it("adds numbers") {

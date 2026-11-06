@@ -1,5 +1,5 @@
 // Demo: clay-validate brick -- schema validation
-import("clay-stdlib/clay-validate")
+import("stdlib/validate")
 
 "=== valid data ===" println
 schema = Schema new

@@ -1,5 +1,5 @@
 // Demo: clay-args brick -- CLI argument parsing
-import("clay-stdlib/clay-args")
+import("stdlib/args")
 
 "=== define parser ===" println
 parser = ArgParser new("myapp", "A demo application")

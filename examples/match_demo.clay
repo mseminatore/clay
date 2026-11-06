@@ -1,5 +1,5 @@
 // Demo: clay-match brick -- pattern matching
-import("clay-stdlib/clay-match")
+import("stdlib/match")
 
 "=== value matching ===" println
 x = 2

@@ -1,5 +1,5 @@
 // Demo: clay-queue brick -- persistent job queue
-import("clay-stdlib/clay-queue")
+import("stdlib/queue")
 
 "=== create queue ===" println
 db = Db open(":memory:")

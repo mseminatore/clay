@@ -229,6 +229,7 @@ static void split_url_parts(const char *url,
                              char *subpath, size_t sub_sz,
                              char *ref, size_t ref_sz);
 static void url_to_repo_name(const char *url, char *name, size_t sz);
+static void dep_repo_dir(const char *url, const char *name, char *out, size_t sz);
 
 typedef struct {
     char name[BRICK_MAX_NAME];
@@ -345,9 +346,9 @@ static int bricks_has_lock(void) {
     return stat(BRICK_LOCK_FILE, &st) == 0;
 }
 
-/* Get the resolved git commit SHA for a dependency directory.
- * Returns 0 on success, -1 if not a git repo or error. */
-static int get_dep_resolved(const char *dep_dir, char *out, size_t out_sz) {
+/* Run `git -C <dir> <args>` and capture the first line of its output.
+ * Returns 0 on success, -1 if git failed or printed nothing. */
+static int git_output(const char *dir, const char *args, char *out, size_t out_sz) {
     char cmd[2048];
     char tmp_file[BRICK_MAX_PATH];
     const char *null_device;
@@ -359,25 +360,28 @@ static int get_dep_resolved(const char *dep_dir, char *out, size_t out_sz) {
     null_device = "/dev/null";
 #endif
 
-    snprintf(tmp_file, sizeof(tmp_file), "bricks/.brick_resolve_tmp");
-    snprintf(cmd, sizeof(cmd),
-             "git -C \"%s\" rev-parse HEAD > \"%s\" 2>%s",
-             dep_dir, tmp_file, null_device);
+    snprintf(tmp_file, sizeof(tmp_file), "bricks/.brick_git_tmp");
+    snprintf(cmd, sizeof(cmd), "git -C \"%s\" %s > \"%s\" 2>%s",
+             dir, args, tmp_file, null_device);
 
     int rc = system(cmd);
-    if (rc != 0) return -1;
-
     FILE *f = fopen(tmp_file, "r");
-    if (!f) return -1;
-    if (fgets(out, (int)out_sz, f)) {
-        /* Trim trailing newline */
-        size_t len = strlen(out);
-        while (len > 0 && (out[len-1] == '\n' || out[len-1] == '\r'))
-            out[--len] = '\0';
+    if (f) {
+        if (rc == 0 && fgets(out, (int)out_sz, f)) {
+            size_t len = strlen(out);
+            while (len > 0 && (out[len-1] == '\n' || out[len-1] == '\r'))
+                out[--len] = '\0';
+        }
+        fclose(f);
+        remove(tmp_file);
     }
-    fclose(f);
-    remove(tmp_file);
-    return (out[0] != '\0') ? 0 : -1;
+    return (rc == 0 && out[0] != '\0') ? 0 : -1;
+}
+
+/* Get the resolved git commit SHA for a dependency directory.
+ * Returns 0 on success, -1 if not a git repo or error. */
+static int get_dep_resolved(const char *dep_dir, char *out, size_t out_sz) {
+    return git_output(dep_dir, "rev-parse HEAD", out, out_sz);
 }
 
 /* Write brick.lock from the current manifest and installed deps. */
@@ -399,13 +403,7 @@ static void bricks_write_lock(const BrickManifest *m) {
 
         /* Determine the git directory for this dep */
         char git_dir[BRICK_MAX_PATH];
-        if (subpath[0]) {
-            char repo_name[BRICK_MAX_NAME];
-            url_to_repo_name(m->deps[i].url, repo_name, sizeof(repo_name));
-            snprintf(git_dir, sizeof(git_dir), "bricks/%s", repo_name);
-        } else {
-            snprintf(git_dir, sizeof(git_dir), "bricks/%s", m->deps[i].name);
-        }
+        dep_repo_dir(m->deps[i].url, m->deps[i].name, git_dir, sizeof(git_dir));
 
         /* Try to resolve commit SHA */
         char resolved[128] = "";
@@ -605,6 +603,59 @@ static void url_to_name(const char *url, char *name, size_t sz) {
     }
 }
 
+/* The directory holding a dependency's git checkout. A dependency's name is
+ * its import path, so the name decides where it lives, not the repository:
+ * a single brick "json" is bricks/json, and a monorepo sub-brick "std/json"
+ * lives in the checkout bricks/std, whatever the repository is called. A
+ * monorepo name without a slash falls back to the repository's name. */
+static void dep_repo_dir(const char *url, const char *name, char *out, size_t sz) {
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+    const char *slash = strchr(name, '/');
+    if (!subpath[0]) {
+        snprintf(out, sz, "bricks/%s", name);
+    } else if (slash) {
+        snprintf(out, sz, "bricks/%.*s", (int)(slash - name), name);
+    } else {
+        char repo_name[BRICK_MAX_NAME];
+        url_to_repo_name(url, repo_name, sizeof(repo_name));
+        snprintf(out, sz, "bricks/%s", repo_name);
+    }
+}
+
+/* Compare two git URLs ignoring the protocol, a trailing ".git" and '/' */
+static int same_repo_url(const char *a, const char *b) {
+    const char *ua[2] = { a, b };
+    char norm[2][BRICK_MAX_PATH];
+    for (int k = 0; k < 2; k++) {
+        const char *p = ua[k];
+        if (strncmp(p, "https://", 8) == 0) p += 8;
+        else if (strncmp(p, "http://", 7) == 0) p += 7;
+        strncpy(norm[k], p, BRICK_MAX_PATH - 1);
+        norm[k][BRICK_MAX_PATH - 1] = '\0';
+        size_t n = strlen(norm[k]);
+        while (n > 0 && norm[k][n-1] == '/') norm[k][--n] = '\0';
+        if (n > 4 && strcmp(norm[k] + n - 4, ".git") == 0) norm[k][n-4] = '\0';
+    }
+    return strcmp(norm[0], norm[1]) == 0;
+}
+
+/* An existing checkout at `dir` must come from `clone_url`: two different
+ * repositories installed under the same name would otherwise share it.
+ * Returns 0 if it matches (or its origin can't be read), -1 on a clash. */
+static int check_repo_origin(const char *dir, const char *clone_url, const char *name) {
+    char origin[BRICK_MAX_PATH];
+    if (git_output(dir, "config --get remote.origin.url", origin, sizeof(origin)) != 0)
+        return 0;
+    if (same_repo_url(origin, clone_url)) return 0;
+    fprintf(stderr, "  error: %s is already installed from %s, not %s\n"
+                    "         (give one of them another name: clay bricks add <url> <name>)\n",
+            dir, origin, clone_url);
+    (void)name;
+    return -1;
+}
+
 /* Lock file consulted by install_dep() to pin each dependency to the commit
  * recorded in brick.lock (set by cmd_install when a matching lock exists). */
 static const BrickLock *g_install_lock = NULL;
@@ -686,12 +737,10 @@ static int install_dep(const char *url, const char *name) {
                     subpath, sizeof(subpath), ref, sizeof(ref));
 
     if (subpath[0]) {
-        /* Monorepo: clone into bricks/<repo-name>/, brick at subpath */
-        char repo_name[BRICK_MAX_NAME];
-        url_to_repo_name(url, repo_name, sizeof(repo_name));
-
+        /* Monorepo: one checkout (named by the dependency, see dep_repo_dir)
+         * shared by its sub-bricks, each at its subpath */
         char repo_dest[BRICK_MAX_PATH];
-        snprintf(repo_dest, sizeof(repo_dest), "bricks/%s", repo_name);
+        dep_repo_dir(url, name, repo_dest, sizeof(repo_dest));
 
         struct stat st;
         if (stat(repo_dest, &st) != 0) {
@@ -699,25 +748,33 @@ static int install_dep(const char *url, const char *name) {
             char cmd[2048];
             snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"",
                      clone_url, repo_dest);
-            printf("  Cloning %s...\n", repo_name);
+            printf("  Cloning %s into %s...\n", clone_url, repo_dest);
             if (system(cmd) != 0) {
                 fprintf(stderr, "  error: failed to clone %s\n", clone_url);
                 return -1;
             }
             brick_checkout(repo_dest, name, url, ref);
-        }
-
-        /* Verify the sub-brick exists */
-        char brick_dir[BRICK_MAX_PATH];
-        snprintf(brick_dir, sizeof(brick_dir), "bricks/%s/%s", repo_name, subpath);
-        struct stat st2;
-        if (stat(brick_dir, &st2) != 0) {
-            fprintf(stderr, "  error: sub-brick '%s' not found in %s\n",
-                    subpath, repo_name);
+        } else if (check_repo_origin(repo_dest, clone_url, name) != 0) {
             return -1;
         }
 
-        printf("  Installed %s (from %s)\n", name, repo_name);
+        /* Verify the sub-brick exists */
+        char brick_dir[BRICK_MAX_PATH * 2];
+        snprintf(brick_dir, sizeof(brick_dir), "%s/%s", repo_dest, subpath);
+        struct stat st2;
+        if (stat(brick_dir, &st2) != 0) {
+            fprintf(stderr, "  error: sub-brick '%s' not found in %s\n",
+                    subpath, clone_url);
+            return -1;
+        }
+
+        /* The import path is the directory under bricks/ */
+        const char *slash = strchr(name, '/');
+        if (slash && strcmp(slash + 1, subpath) != 0)
+            fprintf(stderr, "  warning: '%s' is installed at %s; import it as \"%s\"\n",
+                    name, brick_dir, brick_dir + strlen("bricks/"));
+
+        printf("  Installed %s\n", name);
         return install_subdeps(brick_dir, name);
     }
 
@@ -727,6 +784,7 @@ static int install_dep(const char *url, const char *name) {
 
     struct stat st;
     if (stat(dest, &st) == 0) {
+        if (check_repo_origin(dest, clone_url, name) != 0) return -1;
         printf("  %s: already installed\n", name);
         return 0;
     }
@@ -742,18 +800,15 @@ static int install_dep(const char *url, const char *name) {
     return install_subdeps(dest, name);
 }
 
-/* Directory a dependency is installed into (bricks/<name> or bricks/<repo>/<sub>) */
+/* Directory a dependency is installed into (bricks/<name> or <checkout>/<sub>) */
 static void brick_install_dir(const char *url, const char *name, char *out, size_t sz) {
     char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
     split_url_parts(url, clone_url, sizeof(clone_url),
                     subpath, sizeof(subpath), ref, sizeof(ref));
-    if (subpath[0]) {
-        char repo_name[BRICK_MAX_NAME];
-        url_to_repo_name(url, repo_name, sizeof(repo_name));
-        snprintf(out, sz, "bricks/%s/%s", repo_name, subpath);
-    } else {
-        snprintf(out, sz, "bricks/%s", name);
-    }
+    char repo_dir[BRICK_MAX_PATH];
+    dep_repo_dir(url, name, repo_dir, sizeof(repo_dir));
+    if (subpath[0]) snprintf(out, sz, "%.*s/%s", (int)(sz / 2), repo_dir, subpath);
+    else snprintf(out, sz, "%s", repo_dir);
 }
 
 static int cmd_init(void) {
@@ -840,7 +895,10 @@ static int cmd_install(void) {
     return 0;
 }
 
-static int cmd_add(const char *url) {
+/* Add a dependency. `as` (optional) names it, which is also its import path
+ * and install directory: "stdlib" for a repository, or the part before the
+ * sub-brick for a monorepo URL ("stdlib" + ".../markdown" → "stdlib/markdown"). */
+static int cmd_add(const char *url, const char *as) {
     BrickManifest m;
     int prc = brick_parse("brick.json", &m);
     if (prc != 0) {
@@ -857,6 +915,17 @@ static int cmd_add(const char *url) {
     /* Determine brick name */
     char name[BRICK_MAX_NAME];
     url_to_name(url, name, sizeof(name));
+    if (as) {
+        char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+        split_url_parts(url, clone_url, sizeof(clone_url),
+                        subpath, sizeof(subpath), ref, sizeof(ref));
+        if (!brick_safe_path(as, 0)) {
+            fprintf(stderr, "error: invalid brick name '%s'\n", as);
+            return 1;
+        }
+        if (subpath[0]) snprintf(name, sizeof(name), "%s/%s", as, subpath);
+        else snprintf(name, sizeof(name), "%s", as);
+    }
     if (!brick_safe_path(name, 1)) {
         fprintf(stderr, "error: invalid brick name '%s' derived from URL\n", name);
         return 1;
@@ -910,10 +979,12 @@ static int cmd_remove(const char *name) {
         return 1;
     }
 
-    /* Check if this is a monorepo sub-brick */
+    /* The checkout this dependency lives in, worked out before it's removed */
     char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
     split_url_parts(m.deps[found].url, clone_url, sizeof(clone_url),
                     subpath, sizeof(subpath), ref, sizeof(ref));
+    char repo_dir[BRICK_MAX_PATH];
+    dep_repo_dir(m.deps[found].url, m.deps[found].name, repo_dir, sizeof(repo_dir));
 
     /* Remove from array */
     for (int i = found; i < m.dep_count - 1; i++) {
@@ -923,50 +994,23 @@ static int cmd_remove(const char *name) {
     brick_write("brick.json", &m);
     printf("Removed '%s' from brick.json\n", name);
 
-    if (subpath[0]) {
-        /* Monorepo: only remove repo dir if no other deps use it */
-        char repo_name[BRICK_MAX_NAME];
-        url_to_repo_name(m.deps[found < m.dep_count ? found : 0].url,
-                         repo_name, sizeof(repo_name));
-        /* Re-derive repo name from the removed dep's URL (saved before shift) */
-        /* Actually we need the original URL — use clone_url to get repo name */
-        {
-            const char *p = clone_url;
-            if (strncmp(p, "https://", 8) == 0) p += 8;
-            else if (strncmp(p, "http://", 7) == 0) p += 7;
-            const char *last = strrchr(p, '/');
-            if (last) {
-                strncpy(repo_name, last + 1, sizeof(repo_name) - 1);
-                repo_name[sizeof(repo_name) - 1] = '\0';
-            }
+    /* Delete the checkout unless another dependency still lives in it */
+    int others_use_repo = 0;
+    for (int i = 0; i < m.dep_count; i++) {
+        char other_dir[BRICK_MAX_PATH];
+        dep_repo_dir(m.deps[i].url, m.deps[i].name, other_dir, sizeof(other_dir));
+        if (strcmp(other_dir, repo_dir) == 0) {
+            others_use_repo = 1;
+            break;
         }
-
-        int others_use_repo = 0;
-        for (int i = 0; i < m.dep_count; i++) {
-            char other_repo[BRICK_MAX_NAME];
-            url_to_repo_name(m.deps[i].url, other_repo, sizeof(other_repo));
-            if (strcmp(other_repo, repo_name) == 0) {
-                others_use_repo = 1;
-                break;
-            }
-        }
-        if (!others_use_repo) {
-            char cmd[BRICK_MAX_PATH];
+    }
+    if (!others_use_repo) {
+        char cmd[BRICK_MAX_PATH * 2];
 #ifdef _WIN32
-            snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul",
-                     repo_name);
+        snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul",
+                 repo_dir + strlen("bricks/"));
 #else
-            snprintf(cmd, sizeof(cmd), "rm -rf \"bricks/%s\"", repo_name);
-#endif
-            system(cmd);
-        }
-    } else {
-        /* Simple brick: remove its directory */
-        char cmd[BRICK_MAX_PATH];
-#ifdef _WIN32
-        snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul", name);
-#else
-        snprintf(cmd, sizeof(cmd), "rm -rf \"bricks/%s\"", name);
+        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", repo_dir);
 #endif
         system(cmd);
     }
@@ -1002,13 +1046,7 @@ static int update_dep(const char *url, const char *name) {
 
     /* For monorepo, git operations target the repo root */
     char git_dir[BRICK_MAX_PATH];
-    if (subpath[0]) {
-        char repo_name[BRICK_MAX_NAME];
-        url_to_repo_name(url, repo_name, sizeof(repo_name));
-        snprintf(git_dir, sizeof(git_dir), "bricks/%s", repo_name);
-    } else {
-        snprintf(git_dir, sizeof(git_dir), "bricks/%s", name);
-    }
+    dep_repo_dir(url, name, git_dir, sizeof(git_dir));
 
     struct stat st;
     if (stat(git_dir, &st) != 0) {
@@ -1077,7 +1115,7 @@ int brick_command(int argc, char **argv) {
         fprintf(stderr, "  init              Create a new brick.json\n");
         fprintf(stderr, "  install           Install dependencies from brick.json\n");
         fprintf(stderr, "  update            Update installed dependencies\n");
-        fprintf(stderr, "  add <url>         Add a dependency\n");
+        fprintf(stderr, "  add <url> [name]  Add a dependency (name = its import path)\n");
         fprintf(stderr, "  remove <name>     Remove a dependency\n");
         fprintf(stderr, "  list              Show project info and dependencies\n");
         return 1;
@@ -1092,10 +1130,10 @@ int brick_command(int argc, char **argv) {
         return cmd_update();
     } else if (strcmp(cmd, "add") == 0) {
         if (argc < 2) {
-            fprintf(stderr, "Usage: clay bricks add <url>\n");
+            fprintf(stderr, "Usage: clay bricks add <url> [name]\n");
             return 1;
         }
-        return cmd_add(argv[1]);
+        return cmd_add(argv[1], argc >= 3 ? argv[2] : NULL);
     } else if (strcmp(cmd, "remove") == 0) {
         if (argc < 2) {
             fprintf(stderr, "Usage: clay bricks remove <name>\n");

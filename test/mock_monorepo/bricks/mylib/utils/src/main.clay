@@ -1,0 +1,2 @@
+// mylib/utils brick
+double = { |n| n * 2 }

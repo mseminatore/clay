@@ -1,5 +1,5 @@
 // Test clay-base64 brick
-import("clay-stdlib/clay-base64")
+import("stdlib/base64")
 
 // Test encoding
 result = Base64 encode("Hello, World!")

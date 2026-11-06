@@ -1,5 +1,5 @@
 // Full collections test
-import("clay-stdlib/clay-collections")
+import("stdlib/collections")
 
 "=== Set ===" println
 s = Set new
@@ -27,10 +27,10 @@ q enqueue("b")
 ("dequeue: " + q dequeue) println
 
 "=== Range ===" println
-Range new(1, 5) each { |i| (i toString + " ") print }
+(1..5) each { |i| (i toString + " ") print }
 "" println
-Range new(1, 5) map { |i| i * i } toString println
-("contains 3: " + Range new(1, 5) contains(3) toString) println
-("size: " + Range new(1, 5) size toString) println
+(1..5) map { |i| i * i } toString println
+("contains 3: " + (1..5) contains(3) toString) println
+("size: " + (1..5) size toString) println
 
 "all done!" println

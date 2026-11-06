@@ -1,8 +1,8 @@
 // -- A simple Markdown to HTML converter using Clay's markdown library. --
-import("clay-stdlib/clay-markdown")
-import("clay-stdlib/clay-cli")
-import("clay-stdlib/clay-args")
-import("clay-stdlib/clay-path")
+import("stdlib/markdown")
+import("stdlib/cli")
+import("stdlib/args")
+import("stdlib/path")
 
 Converter = Object clone {
     render(input, output) {

@@ -1,5 +1,5 @@
 // Demo: clay-router brick -- URL pattern matching
-import("clay-stdlib/clay-router")
+import("stdlib/router")
 
 "=== set up routes ===" println
 router = Router new

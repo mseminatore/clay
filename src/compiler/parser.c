@@ -1106,7 +1106,7 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     /* Check if this is a brick import.
      * Bricks: no .clay extension, no backslash, doesn't start with "." (relative path).
      * Simple brick: "clay-match" (no /)
-     * Monorepo brick: "clay-stdlib/match" (has /) */
+     * Monorepo brick: "stdlib/match" (has /) */
     int is_brick = !strstr(import_path, ".clay") &&
                    !strchr(import_path, '\\') &&
                    import_path[0] != '.';

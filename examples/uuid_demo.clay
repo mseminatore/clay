@@ -1,5 +1,5 @@
 // Demo: clay-uuid brick
-import("clay-stdlib/clay-uuid")
+import("stdlib/uuid")
 
 "=== generate UUID v4 ===" println
 id1 = Uuid v4

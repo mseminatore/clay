@@ -1,5 +1,5 @@
 // Demo: clay-cli brick -- ANSI terminal colors and styles
-import("clay-stdlib/clay-cli")
+import("stdlib/cli")
 
 "=== foreground colors ===" println
 Cli red("This is red") println

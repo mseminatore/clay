@@ -1,5 +1,5 @@
 // Test clay-url brick
-import("clay-stdlib/clay-url")
+import("stdlib/url")
 
 // Test parse
 parts = Url parse("https://example.com:8080/path/to/resource?key=val&x=1#section")

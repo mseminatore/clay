@@ -1,2 +1,0 @@
-// clay-stdlib/utils brick
-double = { |n| n * 2 }

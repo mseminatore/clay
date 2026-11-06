@@ -1,5 +1,5 @@
 // Demo: clay-cache brick -- LRU cache with TTL
-import("clay-stdlib/clay-cache")
+import("stdlib/cache")
 
 "=== basic set/get ===" println
 c = Cache new

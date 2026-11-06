@@ -1,5 +1,5 @@
 // Test clay-functional brick
-import("clay-stdlib/clay-functional")
+import("stdlib/functional")
 
 "=== map ===" println
 Fn map([1, 2, 3], { |x| x * 2 }) toString println

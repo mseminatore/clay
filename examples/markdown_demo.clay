@@ -1,5 +1,5 @@
 // Demo: clay-markdown brick -- markdown to HTML
-import("clay-stdlib/clay-markdown")
+import("stdlib/markdown")
 
 "=== headings ===" println
 Markdown render("# Hello World") println

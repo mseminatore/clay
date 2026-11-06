@@ -1,6 +1,6 @@
-// Test monorepo brick imports
-import("clay-stdlib/utils")
-import("clay-stdlib/helpers")
+// Test monorepo brick imports (a third-party monorepo "mylib")
+import("mylib/utils")
+import("mylib/helpers")
 
 passed = 0
 failed = 0

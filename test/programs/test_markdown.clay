@@ -1,5 +1,5 @@
 // Test clay-markdown brick: escaping, code spans and blocks, heading anchors, pages
-import("clay-stdlib/clay-markdown")
+import("stdlib/markdown")
 
 Test = Object clone {
     _p = 0
