@@ -1,29 +1,33 @@
 /*
- * crypto_plugin.c — Crypto plugin for Clay language
+ * crypto.c — the Crypto prototype: hashes, HMAC and secure random bytes.
  *
- * Provides SHA-256, SHA-1, MD5 hashing, HMAC-SHA256, Base64 encode/decode,
- * and cryptographic random bytes. All implementations are pure C with no
- * external dependencies.
+ *   Crypto sha256("hello")            // "2cf24dba5fb0a30e..." (hex)
+ *   Crypto sha1("hello")  Crypto md5("hello")
+ *   Crypto hmacSha256("key", "data")  // hex
+ *   Crypto randomBytes(16)            // 32 hex chars from the OS CSPRNG
+ *   Crypto constantTimeEquals(a, b)   // compare secrets without timing leaks
  *
- * Usage in Clay:
- *   Crypto = System plugin("crypto")
- *   Crypto sha256("hello")           // "2cf24dba5fb0a30e..."
- *   Crypto md5("hello")              // "5d41402abc4b2a76..."
- *   Crypto base64Encode("hello")     // "aGVsbG8="
- *   Crypto base64Decode("aGVsbG8=")  // "hello"
- *   Crypto hmacSha256("key", "data") // hex string
- *   Crypto randomBytes(16)           // 32-char hex string
+ * Pure C, no dependencies (promoted from examples/plugins/crypto_plugin.c).
+ * Strings are hashed by length, so embedded NUL bytes count. SHA-1 and MD5
+ * are for checksums and legacy protocols, not for security.
  */
-#include "clay_plugin.h"
-#include <string.h>
+#include "clay.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-static const ClayPluginAPI *api;
-
-/* ================================================================== */
-/*  Utility                                                            */
-/* ================================================================== */
+#ifdef _WIN32
+/* Hand-declared (as main.c does with the console API) to avoid windows.h */
+typedef long CLAY_NTSTATUS;
+__declspec(dllimport) CLAY_NTSTATUS __stdcall BCryptGenRandom(
+    void *hAlgorithm, unsigned char *pbBuffer, unsigned long cbBuffer,
+    unsigned long dwFlags);
+#define CLAY_BCRYPT_USE_SYSTEM_PREFERRED_RNG 0x00000002
+#ifdef _MSC_VER
+#pragma comment(lib, "bcrypt.lib")
+#endif
+#endif
 
 static void bytes_to_hex(const unsigned char *bytes, size_t len, char *out) {
     static const char hex[] = "0123456789abcdef";
@@ -316,196 +320,121 @@ static void compute_hmac_sha256(const char *key, size_t key_len,
 }
 
 /* ================================================================== */
-/*  Base64 (RFC 4648)                                                  */
+/*  Secure random bytes                                                */
 /* ================================================================== */
 
-static const char b64_chars[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static char *base64_encode(const uint8_t *data, size_t len) {
-    size_t out_len = 4 * ((len + 2) / 3);
-    char *out = (char *)malloc(out_len + 1);
-    size_t j = 0;
-    for (size_t i = 0; i < len; i += 3) {
-        uint32_t n = (uint32_t)data[i] << 16;
-        if (i + 1 < len) n |= (uint32_t)data[i + 1] << 8;
-        if (i + 2 < len) n |= (uint32_t)data[i + 2];
-        out[j++] = b64_chars[(n >> 18) & 63];
-        out[j++] = b64_chars[(n >> 12) & 63];
-        out[j++] = (i + 1 < len) ? b64_chars[(n >> 6) & 63] : '=';
-        out[j++] = (i + 2 < len) ? b64_chars[n & 63] : '=';
-    }
-    out[j] = '\0';
-    return out;
-}
-
-static int b64_decode_char(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
-
-static uint8_t *base64_decode(const char *input, size_t *out_len) {
-    size_t in_len = strlen(input);
-    if (in_len % 4 != 0) { *out_len = 0; return NULL; }
-    size_t alloc = in_len / 4 * 3;
-    if (in_len > 0 && input[in_len - 1] == '=') alloc--;
-    if (in_len > 1 && input[in_len - 2] == '=') alloc--;
-    uint8_t *out = (uint8_t *)malloc(alloc + 1);
-    size_t j = 0;
-    for (size_t i = 0; i < in_len; i += 4) {
-        int a = b64_decode_char(input[i]);
-        int b = b64_decode_char(input[i + 1]);
-        int c = (input[i + 2] != '=') ? b64_decode_char(input[i + 2]) : 0;
-        int d = (input[i + 3] != '=') ? b64_decode_char(input[i + 3]) : 0;
-        if (a < 0 || b < 0) break;
-        uint32_t n = ((uint32_t)a << 18) | ((uint32_t)b << 12) | ((uint32_t)c << 6) | (uint32_t)d;
-        out[j++] = (uint8_t)(n >> 16);
-        if (input[i + 2] != '=') out[j++] = (uint8_t)(n >> 8);
-        if (input[i + 3] != '=') out[j++] = (uint8_t)n;
-    }
-    out[j] = '\0';
-    *out_len = j;
-    return out;
-}
-
-/* ================================================================== */
-/*  Random bytes                                                       */
-/* ================================================================== */
-
-static void random_bytes(uint8_t *buf, size_t len) {
+/* Fill buf from the operating system's CSPRNG. Returns 0 on success, -1 if it
+ * isn't available; there is deliberately no insecure fallback. */
+static int secure_random(uint8_t *buf, size_t len) {
 #ifdef _WIN32
-    /* Use BCryptGenRandom on Windows */
-    typedef long NTSTATUS;
-    typedef void *BCRYPT_ALG_HANDLE;
-    __declspec(dllimport) NTSTATUS __stdcall BCryptGenRandom(
-        BCRYPT_ALG_HANDLE hAlg, unsigned char *pbBuffer,
-        unsigned long cbBuffer, unsigned long dwFlags);
-    #define BCRYPT_USE_SYSTEM_PREFERRED_RNG 0x00000002
-    BCryptGenRandom(NULL, buf, (unsigned long)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    return BCryptGenRandom(NULL, buf, (unsigned long)len,
+                           CLAY_BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
 #else
-    /* Use /dev/urandom on Unix */
     FILE *f = fopen("/dev/urandom", "rb");
-    if (f) {
-        fread(buf, 1, len, f);
-        fclose(f);
-    } else {
-        /* Fallback: use rand() (not cryptographically secure) */
-        for (size_t i = 0; i < len; i++)
-            buf[i] = (uint8_t)(rand() & 0xff);
-    }
+    if (!f) return -1;
+    size_t got = fread(buf, 1, len, f);
+    fclose(f);
+    return got == len ? 0 : -1;
 #endif
 }
 
 /* ================================================================== */
-/*  Plugin methods                                                     */
+/*  Methods                                                            */
 /* ================================================================== */
 
-static ClayPluginValue crypto_sha256(ClayPluginObject self, int argc, ClayPluginValue *argv) {
-    (void)self;
-    if (argc < 1) { api->raise("sha256 requires 1 argument", "ArgumentError"); return 0; }
-    const char *input = api->to_string(argv[0]);
-    uint8_t hash[32];
-    compute_sha256(input, strlen(input), hash);
-    char hex[65];
-    bytes_to_hex(hash, 32, hex);
-    return api->make_string(hex);
+/* argv[i] as a string (raising ArgumentError/TypeError), with its length */
+static const char *crypto_str_arg(int argc, ClayValue *argv, int i,
+                                  const char *who, size_t *len) {
+    const char *s = clay_arg_string(argc, argv, i, who);
+    *len = CLAY_OBJ(argv[i])->as.string.length;
+    return s;
 }
 
-static ClayPluginValue crypto_sha1(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+static ClayValue hex_result(const uint8_t *bytes, size_t n) {
+    char hex[65];
+    bytes_to_hex(bytes, n, hex);
+    return CLAY_VAL(clay_string_new(hex));
+}
+
+static ClayValue crypto_sha256(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 1) { api->raise("sha1 requires 1 argument", "ArgumentError"); return 0; }
-    const char *input = api->to_string(argv[0]);
+    size_t len;
+    const char *s = crypto_str_arg(argc, argv, 0, "Crypto sha256", &len);
+    uint8_t hash[32];
+    compute_sha256(s, len, hash);
+    return hex_result(hash, 32);
+}
+
+static ClayValue crypto_sha1(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    size_t len;
+    const char *s = crypto_str_arg(argc, argv, 0, "Crypto sha1", &len);
     uint8_t hash[20];
-    compute_sha1(input, strlen(input), hash);
-    char hex[41];
-    bytes_to_hex(hash, 20, hex);
-    return api->make_string(hex);
+    compute_sha1(s, len, hash);
+    return hex_result(hash, 20);
 }
 
-static ClayPluginValue crypto_md5(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+static ClayValue crypto_md5(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 1) { api->raise("md5 requires 1 argument", "ArgumentError"); return 0; }
-    const char *input = api->to_string(argv[0]);
+    size_t len;
+    const char *s = crypto_str_arg(argc, argv, 0, "Crypto md5", &len);
     uint8_t hash[16];
-    compute_md5(input, strlen(input), hash);
-    char hex[33];
-    bytes_to_hex(hash, 16, hex);
-    return api->make_string(hex);
+    compute_md5(s, len, hash);
+    return hex_result(hash, 16);
 }
 
-static ClayPluginValue crypto_hmac_sha256(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+static ClayValue crypto_hmac_sha256(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 2) { api->raise("hmacSha256 requires 2 arguments (key, data)", "ArgumentError"); return 0; }
-    const char *key  = api->to_string(argv[0]);
-    const char *data = api->to_string(argv[1]);
+    size_t klen, dlen;
+    const char *key  = crypto_str_arg(argc, argv, 0, "Crypto hmacSha256", &klen);
+    const char *data = crypto_str_arg(argc, argv, 1, "Crypto hmacSha256", &dlen);
     uint8_t hash[32];
-    compute_hmac_sha256(key, strlen(key), data, strlen(data), hash);
-    char hex[65];
-    bytes_to_hex(hash, 32, hex);
-    return api->make_string(hex);
+    compute_hmac_sha256(key, klen, data, dlen, hash);
+    return hex_result(hash, 32);
 }
 
-static ClayPluginValue crypto_base64_encode(ClayPluginObject self, int argc, ClayPluginValue *argv) {
-    (void)self;
-    if (argc < 1) { api->raise("base64Encode requires 1 argument", "ArgumentError"); return 0; }
-    const char *input = api->to_string(argv[0]);
-    char *encoded = base64_encode((const uint8_t *)input, strlen(input));
-    ClayPluginValue result = api->make_string(encoded);
-    free(encoded);
-    return result;
-}
+#define CRYPTO_MAX_RANDOM 65536
 
-static ClayPluginValue crypto_base64_decode(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+static ClayValue crypto_random_bytes(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    if (argc < 1) { api->raise("base64Decode requires 1 argument", "ArgumentError"); return 0; }
-    const char *input = api->to_string(argv[0]);
-    size_t out_len;
-    uint8_t *decoded = base64_decode(input, &out_len);
-    if (!decoded) {
-        api->raise("Invalid base64 input", "CryptoError");
-        return 0;
-    }
-    ClayPluginValue result = api->make_string((const char *)decoded);
-    free(decoded);
-    return result;
-}
-
-static ClayPluginValue crypto_random_bytes(ClayPluginObject self, int argc, ClayPluginValue *argv) {
-    (void)self;
-    if (argc < 1) { api->raise("randomBytes requires 1 argument (byte count)", "ArgumentError"); return 0; }
-    intptr_t n = api->to_int(argv[0]);
-    if (n <= 0 || n > 1024) { api->raise("randomBytes: count must be 1-1024", "ArgumentError"); return 0; }
+    intptr_t n = clay_arg_integer(argc, argv, 0, "Crypto randomBytes");
+    if (n <= 0 || n > CRYPTO_MAX_RANDOM)
+        clay_raise_argument_error("Crypto randomBytes", "count must be 1-65536");
     uint8_t *buf = (uint8_t *)malloc((size_t)n);
-    random_bytes(buf, (size_t)n);
-    char *hex = (char *)malloc((size_t)(n * 2 + 1));
+    char *hex = (char *)malloc((size_t)n * 2 + 1);
+    if (!buf || !hex || secure_random(buf, (size_t)n) != 0) {
+        free(buf);
+        free(hex);
+        clay_raise(CLAY_VAL(clay_error_new(
+            "Crypto randomBytes: the system random number generator is unavailable",
+            "RuntimeError")));
+        return CLAY_NIL;
+    }
     bytes_to_hex(buf, (size_t)n, hex);
-    ClayPluginValue result = api->make_string(hex);
+    ClayValue result = CLAY_VAL(clay_string_new_len(hex, (size_t)n * 2));
     free(buf);
     free(hex);
     return result;
 }
 
-/* ================================================================== */
-/*  Plugin registration                                                */
-/* ================================================================== */
+/* Equal strings → true, in time that depends only on their lengths, so a
+ * caller checking an HMAC or token doesn't leak how many bytes matched. */
+static ClayValue crypto_constant_time_equals(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    size_t alen, blen;
+    const char *a = crypto_str_arg(argc, argv, 0, "Crypto constantTimeEquals", &alen);
+    const char *b = crypto_str_arg(argc, argv, 1, "Crypto constantTimeEquals", &blen);
+    if (alen != blen) return CLAY_FALSE;
+    volatile unsigned char diff = 0;
+    for (size_t i = 0; i < alen; i++) diff |= (unsigned char)(a[i] ^ b[i]);
+    return diff == 0 ? CLAY_TRUE : CLAY_FALSE;
+}
 
-static ClayPluginMethod methods[] = {
-    { "sha256",       crypto_sha256 },
-    { "sha1",         crypto_sha1 },
-    { "md5",          crypto_md5 },
-    { "hmacSha256",   crypto_hmac_sha256 },
-    { "base64Encode", crypto_base64_encode },
-    { "base64Decode", crypto_base64_decode },
-    { "randomBytes",  crypto_random_bytes },
-    { NULL, NULL }
-};
-
-CLAY_PLUGIN_EXPORT void clay_plugin_init(const ClayPluginAPI *clay_api) {
-    api = clay_api;
-    ClayPluginType def = { "Crypto", methods, NULL, 0 };
-    api->register_type(&def);
+void clay_crypto_init_methods(ClayObject *proto) {
+    clay_set_method(proto, "sha256",             crypto_sha256);
+    clay_set_method(proto, "sha1",               crypto_sha1);
+    clay_set_method(proto, "md5",                crypto_md5);
+    clay_set_method(proto, "hmacSha256",         crypto_hmac_sha256);
+    clay_set_method(proto, "randomBytes",        crypto_random_bytes);
+    clay_set_method(proto, "constantTimeEquals", crypto_constant_time_equals);
 }

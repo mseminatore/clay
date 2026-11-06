@@ -89,6 +89,7 @@ set(RUNTIME_SOURCES
     src/runtime/date.c
     src/runtime/http.c
     src/runtime/regex.c
+    src/runtime/crypto.c
     src/runtime/db.c
     src/runtime/bootstrap.c
     src/runtime/intern.c
@@ -139,7 +140,7 @@ if(SDL2_FOUND)
     )
 endif()
 if(WIN32)
-    target_link_libraries(clay_runtime PUBLIC winhttp ws2_32)
+    target_link_libraries(clay_runtime PUBLIC winhttp ws2_32 bcrypt)
 endif()
 if(UNIX)
     target_compile_definitions(clay_runtime PRIVATE _POSIX_C_SOURCE=200809L)
@@ -234,7 +235,7 @@ if(MSVC)
     endif()
     set(CLAY_NATIVE_CFLAGS "/nologo /O2 ${CLAY_NATIVE_CRT} ${CMAKE_C_FLAGS} /D_CRT_SECURE_NO_WARNINGS ${CLAY_NATIVE_DEFS} /I\"${CMAKE_CURRENT_SOURCE_DIR}/src/runtime\" /I\"${CMAKE_CURRENT_SOURCE_DIR}/deps/hash\"")
     # user32: crossline (Console readLine) reads key states
-    string(APPEND CLAY_NATIVE_LIBS " winhttp.lib ws2_32.lib user32.lib")
+    string(APPEND CLAY_NATIVE_LIBS " winhttp.lib ws2_32.lib user32.lib bcrypt.lib")
 else()
     set(CLAY_NATIVE_KIND "cc")
     set(CLAY_NATIVE_CFLAGS "-std=c99 -O2 ${CMAKE_C_FLAGS} ${CLAY_NATIVE_DEFS} -I\"${CMAKE_CURRENT_SOURCE_DIR}/src/runtime\" -I\"${CMAKE_CURRENT_SOURCE_DIR}/deps/hash\"")
@@ -322,6 +323,7 @@ add_test(NAME clay_test_system COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME clay_test_date COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_date.clay)
 add_test(NAME clay_test_http COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_http.clay)
 add_test(NAME clay_test_regex COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_regex.clay)
+add_test(NAME clay_test_crypto COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_crypto.clay)
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)
 add_test(NAME clay_test_new_methods COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_new_methods.clay)
 add_test(NAME clay_test_trailing_blocks COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_trailing_blocks.clay)
@@ -473,20 +475,4 @@ if(WIN32)
         LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins
         RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
         RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins)
-endif()
-
-# Crypto plugin
-add_library(crypto MODULE examples/plugins/crypto_plugin.c)
-target_include_directories(crypto PRIVATE src/runtime)
-set_target_properties(crypto PROPERTIES
-    PREFIX ""
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
-if(WIN32)
-    set_target_properties(crypto PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins)
-    target_link_libraries(crypto PRIVATE bcrypt)
 endif()

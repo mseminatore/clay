@@ -32,6 +32,7 @@ ClayObject *clay_FFI     = NULL;
 ClayObject *clay_Date    = NULL;
 ClayObject *clay_Http    = NULL;
 ClayObject *clay_Regex   = NULL;
+ClayObject *clay_Crypto  = NULL;
 ClayObject *clay_Fiber   = NULL;
 ClayObject *clay_Db     = NULL;
 ClayObject *clay_Range  = NULL;
@@ -771,6 +772,16 @@ void clay_bootstrap(void) {
     clay_Regex->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Regex, "_name", CLAY_VAL(clay_string_new("Regex")));
     clay_regex_init_methods(clay_Regex);
+
+    /* Crypto prototype: hashes, HMAC, secure random bytes (crypto.c) */
+    clay_Crypto = clay_object_new();
+    clay_Crypto->parent = clay_Object;
+    clay_Crypto->refcount = CLAY_REFCOUNT_IMMORTAL;
+    clay_set_slot_take(clay_Crypto, "_name", CLAY_VAL(clay_string_new("Crypto")));
+    {
+        extern void clay_crypto_init_methods(ClayObject *proto);
+        clay_crypto_init_methods(clay_Crypto);
+    }
 
     /* Fiber prototype */
     clay_Fiber = clay_object_new();

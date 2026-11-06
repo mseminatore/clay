@@ -109,12 +109,69 @@ static ClayValue math_random(ClayObject *self, int argc, ClayValue *argv) {
     return clay_float_tag((float)xorshift32() / (float)UINT32_MAX);
 }
 
+/* --- clamp / lerp / sign: shared by Math and Number (number.c) --- */
+
+static int num_less(ClayValue a, ClayValue b) {
+    if (CLAY_IS_INT(a) && CLAY_IS_INT(b)) return clay_to_int(a) < clay_to_int(b);
+    return clay_to_float(a) < clay_to_float(b);
+}
+
+/* n limited to [lo, hi]; returns whichever of the three is chosen, so integer
+ * arguments give an integer. Raises ArgumentError if lo > hi. */
+ClayValue clay_math_clamp(ClayValue n, ClayValue lo, ClayValue hi, const char *who) {
+    if (num_less(hi, lo)) clay_raise_argument_error(who, "lower bound is greater than upper bound");
+    if (num_less(n, lo)) return lo;
+    if (num_less(hi, n)) return hi;
+    return n;
+}
+
+/* a + (b - a) * t: an integer when all three are integers, else a float */
+ClayValue clay_math_lerp(ClayValue a, ClayValue b, ClayValue t) {
+    if (CLAY_IS_INT(a) && CLAY_IS_INT(b) && CLAY_IS_INT(t)) {
+        intptr_t ia = clay_to_int(a), ib = clay_to_int(b);
+        return clay_int(ia + clay_int_mul(ib - ia, clay_to_int(t)));
+    }
+    float fa = clay_to_float(a), fb = clay_to_float(b);
+    return clay_float_tag(fa + (fb - fa) * clay_to_float(t));
+}
+
+/* -1, 0 or 1 (always an integer) */
+ClayValue clay_math_sign(ClayValue n) {
+    if (CLAY_IS_INT(n)) {
+        intptr_t v = clay_to_int(n);
+        return clay_int(v > 0 ? 1 : (v < 0 ? -1 : 0));
+    }
+    float f = clay_to_float(n);
+    return clay_int(f > 0 ? 1 : (f < 0 ? -1 : 0));
+}
+
+static ClayValue math_clamp(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    for (int i = 0; i < 3; i++) clay_arg_float(argc, argv, i, "Math clamp");
+    return clay_math_clamp(argv[0], argv[1], argv[2], "Math clamp");
+}
+
+static ClayValue math_lerp(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    for (int i = 0; i < 3; i++) clay_arg_float(argc, argv, i, "Math lerp");
+    return clay_math_lerp(argv[0], argv[1], argv[2]);
+}
+
+static ClayValue math_sign(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    clay_arg_float(argc, argv, 0, "Math sign");
+    return clay_math_sign(argv[0]);
+}
+
 void clay_math_init(ClayObject *proto) {
     clay_set_method(proto, "abs",    math_abs);
     clay_set_method(proto, "sqrt",   math_sqrt);
     clay_set_method(proto, "pow",    math_pow);
     clay_set_method(proto, "min",    math_min);
     clay_set_method(proto, "max",    math_max);
+    clay_set_method(proto, "clamp",  math_clamp);
+    clay_set_method(proto, "lerp",   math_lerp);
+    clay_set_method(proto, "sign",   math_sign);
     clay_set_method(proto, "floor",  math_floor);
     clay_set_method(proto, "ceil",   math_ceil);
     clay_set_method(proto, "round",  math_round);

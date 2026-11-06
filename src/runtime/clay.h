@@ -311,6 +311,7 @@ extern ClayObject *clay_FFI;
 extern ClayObject *clay_Date;
 extern ClayObject *clay_Http;
 extern ClayObject *clay_Regex;
+extern ClayObject *clay_Crypto;
 extern ClayObject *clay_Fiber;
 
 /* Fiber engine hooks: the bytecode VM gives each fiber its own VM stack and

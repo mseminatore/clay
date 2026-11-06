@@ -293,6 +293,38 @@ static ClayValue number_abs(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int(v < 0 ? -v : v);
 }
 
+/* The receiver as a plain number value (tagged int or tagged float) */
+static ClayValue self_number(ClayObject *self) {
+    if (is_float_arg(self, 0, NULL)) return clay_float_tag(self_float_value(self));
+    return clay_int(self_int_value(self));
+}
+
+ClayValue clay_math_clamp(ClayValue n, ClayValue lo, ClayValue hi, const char *who);
+ClayValue clay_math_lerp(ClayValue a, ClayValue b, ClayValue t);
+ClayValue clay_math_sign(ClayValue n);
+
+/* 15 clamp(0, 10) → 10 */
+static ClayValue number_clamp(ClayObject *self, int argc, ClayValue *argv) {
+    clay_arg_float(argc, argv, 0, "Number clamp");
+    clay_arg_float(argc, argv, 1, "Number clamp");
+    ClayValue n = self_number(self);
+    ClayValue r = clay_math_clamp(n, argv[0], argv[1], "Number clamp");
+    return r;
+}
+
+/* 0 lerp(10, 0.25) → 2.5 */
+static ClayValue number_lerp(ClayObject *self, int argc, ClayValue *argv) {
+    clay_arg_float(argc, argv, 0, "Number lerp");
+    clay_arg_float(argc, argv, 1, "Number lerp");
+    return clay_math_lerp(self_number(self), argv[0], argv[1]);
+}
+
+/* -3 sign → -1 */
+static ClayValue number_sign(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    return clay_math_sign(self_number(self));
+}
+
 /* 5 negated → -5 (the VM inlines this; native code calls it) */
 static ClayValue number_negated(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
@@ -340,6 +372,9 @@ void clay_number_init_methods(ClayObject *proto) {
     clay_set_method(proto, "toFloat",  number_toFloat);
     clay_set_method(proto, "toInt",    number_toInt);
     clay_set_method(proto, "abs",      number_abs);
+    clay_set_method(proto, "clamp",    number_clamp);
+    clay_set_method(proto, "lerp",     number_lerp);
+    clay_set_method(proto, "sign",     number_sign);
     clay_set_method(proto, "negated",  number_negated);
     clay_set_method(proto, "times",    number_times);
 }

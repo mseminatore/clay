@@ -119,7 +119,7 @@ BcGen = Object clone {
     // The globals a new VM starts with (bc_compiler_init)
     vmStartGlobals = ["Object", "Number", "String", "Array", "Block", "Nil", "Boolean",
                       "Error", "Dict", "Math", "Console", "File", "System", "FFI", "Date",
-                      "Http", "Regex", "Range", "Fiber", "Db", "Graphics", "Vec3", "Thread",
+                      "Http", "Regex", "Crypto", "Range", "Fiber", "Db", "Graphics", "Vec3", "Thread",
                       "BreakSignal", "ContinueSignal", "VM", "true", "false", "nil"]
 
     // --- state kept across compiles (the VM's, mirrored) ---

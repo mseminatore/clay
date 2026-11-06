@@ -1,0 +1,66 @@
+// test_crypto.clay — the Crypto prototype, and Math/Number clamp, lerp, sign
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+long = "a" repeat(1000)
+
+// Digests (reference values from Python's hashlib / hmac)
+T eq(Crypto sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 empty")
+T eq(Crypto sha256("hello"), "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", "sha256 hello")
+T eq(Crypto sha256(long), "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3", "sha256 multi-block")
+T eq(Crypto sha256("héllo"), "3c48591d8d098a4538f5e013dfcf406e948eac4d3277b10bf614e295d6068179", "sha256 UTF-8")
+T eq(Crypto sha1(""), "da39a3ee5e6b4b0d3255bfef95601890afd80709", "sha1 empty")
+T eq(Crypto sha1("hello"), "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d", "sha1 hello")
+T eq(Crypto sha1(long), "291e9a6c66994949b57ba5e650361e98fc36b1ba", "sha1 multi-block")
+T eq(Crypto md5(""), "d41d8cd98f00b204e9800998ecf8427e", "md5 empty")
+T eq(Crypto md5("hello"), "5d41402abc4b2a76b9719d911017c592", "md5 hello")
+T eq(Crypto md5(long), "cabe45dcc9ae5b66ba86600cca6b8ba8", "md5 multi-block")
+T eq(Crypto hmacSha256("key", "The quick brown fox jumps over the lazy dog"),
+     "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8", "hmac")
+T eq(Crypto hmacSha256("k" repeat(100), "data"),
+     "09380ee4b802da2363bc96e8e0d133ba275458ea8ddbc564f986fc12b31f8cb1", "hmac long key")
+
+// Random bytes: hex of the requested length, and different each time
+r = Crypto randomBytes(16)
+T eq(r length, 32, "randomBytes length")
+T eq(Regex test(r, "^[0-9a-f]+$"), true, "randomBytes is hex")
+T eq(r == Crypto randomBytes(16), false, "randomBytes differ")
+T eq(try { Crypto randomBytes(0) } catch { |e| e type }, "ArgumentError", "randomBytes(0) raises")
+T eq(try { Crypto sha256(42) } catch { |e| e type }, "TypeError", "sha256 needs a string")
+
+T eq(Crypto constantTimeEquals("abc", "abc"), true, "constantTimeEquals same")
+T eq(Crypto constantTimeEquals("abc", "abd"), false, "constantTimeEquals differ")
+T eq(Crypto constantTimeEquals("abc", "abcd"), false, "constantTimeEquals lengths")
+
+// clamp / lerp / sign, on Math and on Number
+T eq(Math clamp(15, 0, 10), 10, "Math clamp high")
+T eq(Math clamp(-5, 0, 10), 0, "Math clamp low")
+T eq(Math clamp(7, 0, 10), 7, "Math clamp inside")
+T eq(Math clamp(2.5, 0, 3), 2.5, "Math clamp float")
+T eq(15 clamp(0, 10), 10, "Number clamp")
+T eq(0.5 clamp(1, 2), 1, "Number clamp float receiver")
+T eq(try { Math clamp(1, 10, 0) } catch { |e| e type }, "ArgumentError", "clamp bad bounds")
+T eq(Math lerp(0, 10, 0.25), 2.5, "Math lerp")
+T eq(Math lerp(0, 10, 2), 20, "Math lerp int")
+T eq(0 lerp(10, 0.5), 5, "Number lerp")
+T eq(Math sign(-3), -1, "Math sign negative")
+T eq(Math sign(0), 0, "Math sign zero")
+T eq(Math sign(2.5), 1, "Math sign float")
+T eq(-3 sign, -1, "Number sign")
+T eq(0.0 sign, 0, "Number sign float zero")
+
+T done
