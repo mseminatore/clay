@@ -137,6 +137,16 @@ static void skip_newlines(Parser *p) {
     }
 }
 
+/* Is the current token a newline, followed (after any more newlines) by a
+ * `{`? Looks ahead on a copy of the lexer; nothing is consumed. */
+static int newlines_then_lbrace(Parser *p) {
+    if (!check(p, TOK_NEWLINE)) return 0;
+    Lexer look = p->lexer;
+    Token t;
+    do { t = lexer_next(&look); } while (t.type == TOK_NEWLINE);
+    return t.type == TOK_LBRACE;
+}
+
 /* Return the operator string if the current token is an overloadable operator,
  * or NULL if not. Does NOT consume the token. */
 static const char *operator_method_name(Parser *p) {
@@ -732,7 +742,11 @@ static AstNode *parse_postfix(Parser *p) {
             char *msg_name = token_strdup(&p->previous);
             int send_line = p->previous.line;
 
-            /* Check for clone with body: expr clone { ... } or expr clone({ ... }) */
+            /* Check for clone with body: expr clone { ... } or expr clone({ ... }).
+             * The `{` may start the next line (`X = Object clone` newline `{`). */
+            if (strcmp(msg_name, "clone") == 0 && newlines_then_lbrace(p)) {
+                while (check(p, TOK_NEWLINE)) parser_advance(p);
+            }
             if (strcmp(msg_name, "clone") == 0 && check(p, TOK_LBRACE)) {
                 /* Short form: clone { ... } (no parens) */
                 AstNode *clone = parse_clone_body(p);

@@ -348,8 +348,9 @@ add_test(NAME clay_test_base64 COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME clay_test_url COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_url.clay)
 add_test(NAME clay_test_config COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_config.clay)
 add_test(NAME clay_test_env COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_env.clay)
+add_test(NAME clay_test_markdown COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_markdown.clay)
 add_test(NAME clay_test_overflow COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_overflow.clay)
-set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_env
+set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_env clay_test_markdown
     PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                LABELS "bricks")
 
@@ -362,7 +363,7 @@ list(APPEND CLAY_NATIVE_TEST_PROGRAMS
      closures.clay compound_ops.clay dict.clay errors.clay hello.clay implicit_self.clay
      import_test.clay interp.clay logic.clay point.clay proto_chain.clay self.clay
      stack_trace.clay stack_trace2.clay)
-set(CLAY_ROOT_CWD_TESTS test_base64 test_url test_config test_env)
+set(CLAY_ROOT_CWD_TESTS test_base64 test_url test_config test_env test_markdown)
 foreach(prog ${CLAY_NATIVE_TEST_PROGRAMS})
     get_filename_component(name ${prog} NAME_WE)
     add_test(NAME clay_native_${name}

@@ -242,6 +242,14 @@ Parser = Object clone {
         { cur kind == "NEWLINE" || cur kind == ";" } whileTrue { self advance }
     }
 
+    // newline(s) then `{` (looking ahead, nothing consumed)
+    newlinesThenBrace() {
+        (cur kind != "NEWLINE") ifTrue { return false }
+        i = idx
+        { (self tokenAt(i)) kind == "NEWLINE" } whileTrue { i = i + 1 }
+        (self tokenAt(i)) kind == "{"
+    }
+
     mark() { [idx, cur, prev] }
     reset(m) {
         idx = m at(0)
@@ -732,6 +740,10 @@ Parser = Object clone {
             msg = prev text
             sl = prev line
 
+            // the `{` may start the next line (`X = Object clone` newline `{`)
+            (msg == "clone" && (self newlinesThenBrace)) ifTrue {
+                { self check("NEWLINE") } whileTrue { self advance }
+            }
             (msg == "clone" && (self check("{"))) ifTrue {
                 c = self cloneBody
                 c recv = e

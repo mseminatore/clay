@@ -1,0 +1,20 @@
+// A clone body's `{` may start the next line (blank lines and comments too)
+A = Object clone
+{
+    x = 1
+    f(a)
+    {
+        a + x
+    }
+}
+
+B = A clone
+
+    // a comment before the body
+{
+    y = 2
+}
+
+C = A clone
+c = C clone; d = 3
+{ 4 } value

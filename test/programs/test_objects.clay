@@ -107,4 +107,19 @@ Test eq(f1 val, 10)
 Test eq(f2 val, 20)
 Test eq(F val, 0)
 
+// The clone body's `{` may start the next line
+Allman = Object clone
+{
+    size = 3
+    twice()
+    {
+        size * 2
+    }
+}
+Test eq(Allman twice, 6)
+Plain = Allman clone
+afterPlain = { 7 } value
+Test eq(Plain size, 3)
+Test eq(afterPlain, 7)
+
 Test done()

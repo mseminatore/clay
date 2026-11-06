@@ -1,0 +1,64 @@
+import("clay-stdlib/clay-markdown")
+import("clay-stdlib/clay-args")
+import("clay-stdlib/clay-cli")
+import("clay-stdlib/clay-path")
+
+//
+// Create our converter object
+//
+Converter = Object clone {
+    render(input, output) 
+    {
+        (File exists(input)) ifTrue {
+            markdownText = File read(input)
+            // a complete UTF-8 page, titled by its first line ("# Title")
+            title = (markdownText split("\n")) at(0)
+            (title startsWith("# ")) ifTrue { title = title slice(2, title length) } ifFalse { title = Path stem(input) }
+            htmlText = Markdown renderPage(markdownText, title)
+            // links between the pages point at their .html versions
+            htmlText = htmlText replace(".md\"", ".html\"")
+            htmlText = htmlText replace(".md#", ".html#")
+            File write(output, htmlText)
+            Cli success("Successfully converted " + input + " to " + output) println
+        } ifFalse {
+            Cli error("Input file not found: " + input) println
+        }
+    }
+}
+
+// setup the arg parser
+parser = ArgParser new("docgen", "Generate html files from markdown documentation")
+parser option("input", "i", "Input file path", ".")
+parser option("output", "o", "Output file path", ".")
+
+// parse the cmd line args
+result = parser parse(System args)
+
+// get the input and output file paths
+inputPath = result get("input")
+//"Processing markdown files at: ${inputPath}" println
+
+outputPath = result get("output")
+//"Writing html files to: ${outputPath}" println
+
+// get the file paths
+files = File listDir(inputPath)
+
+// check that we found some files
+(files length == 0) ifTrue {
+    Cli error("No files found.") println
+    parser usage
+    System exit(1)
+}
+
+// process markdown files
+files each { |filePath| 
+    ext = Path extension(filePath)
+
+    (ext == ".md") ifTrue {
+        basename = Path stem(filePath)
+        outputFile = Path join([Path dirname(outputPath), basename + ".html"])
+        Converter render(filePath, outputFile)
+        // "Converting ${filePath} to ${outputFile}" println
+    }
+}

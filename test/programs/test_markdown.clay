@@ -1,0 +1,62 @@
+// Test clay-markdown brick: escaping, code spans and blocks, heading anchors, pages
+import("clay-stdlib/clay-markdown")
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    ok(v) {
+        (v == true) ifTrue { self _p = self _p + 1 }
+        (!(v == true)) ifTrue { self _f = self _f + 1; "FAIL: expected true" println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+md = { |s| Markdown render(s) }
+
+// headings get GitHub-style anchors
+Test eq(md value("# Implicit self in methods"), "<h1 id=\"implicit-self-in-methods\">Implicit self in methods</h1>")
+Test eq(md value("## `VM` and *you*"), "<h2 id=\"vm-and-you\"><code>VM</code> and <em>you</em></h2>")
+
+// text and code are escaped; code spans are literal
+Test eq(md value("a < b & c"), "<p>a &lt; b &amp; c\n</p>")
+Test eq(md value("run `bricks <command>`"), "<p>run <code>bricks &lt;command&gt;</code>\n</p>")
+Test eq(md value("`fn(Obj *self, int *n)` and *em*"),
+        "<p><code>fn(Obj *self, int *n)</code> and <em>em</em>\n</p>")
+Test eq(md value("`[a](b)` stays"), "<p><code>[a](b)</code> stays\n</p>")
+Test eq(md value("ticks: `` `x` ``"), "<p>ticks: <code>`x`</code>\n</p>")
+Test eq(md value("an — em dash"), "<p>an — em dash\n</p>")
+
+// fenced code: escaped, language class, no inline markup
+Test eq(md value("```clay norun\nif a < b { \"*x*\" }\n```"),
+        "<pre><code class=\"language-clay\">if a &lt; b { \"*x*\" }</code></pre>")
+Test eq(md value("```\nplain\n```"), "<pre><code>plain</code></pre>")
+// a longer fence only closes on a run at least as long
+Test eq(md value("````\n```\ninner\n````"), "<pre><code>```\ninner</code></pre>")
+
+// table cells: pipes inside code spans or escaped don't split
+table = md value("| a | b |\n|---|---|\n| `x|y` | \\| |")
+Test ok(table contains("<code>x|y</code></td>"))
+Test ok(table contains(">|</td>"))
+
+// an indented line continues the list item above it
+Test eq(md value("1. write and run a\n   first program\n2. next"),
+        "<ol>\n<li value=\"1\">write and run a first program</li>\n<li value=\"2\">next</li>\n</ol>")
+
+// a full page declares UTF-8
+page = Markdown renderPage("# T", "Title & more")
+Test ok(page contains("<meta charset=\"utf-8\">"))
+Test ok(page contains("<title>Title &amp; more</title>"))
+Test ok(page contains("<h1 id=\"t\">T</h1>"))
+
+Test done()

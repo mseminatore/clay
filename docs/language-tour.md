@@ -87,6 +87,26 @@ p moveTo(3, 4)
 p toString println   // (3, 4)
 ```
 
+Either brace style works: the `{` of a clone body or a method body may also
+start the next line.
+
+```clay
+Counter = Object clone
+{
+  count = 0
+
+  increment()
+  {
+    count = count + 1
+  }
+}
+Counter increment
+Counter count println   // 1
+```
+
+Because of that, a block literal can't start the line right after a bare
+`X clone`: it would be read as the clone's body.
+
 Inside methods, bare identifiers like `x` resolve to slots on `self` — both for reads and writes: if `self` has a slot `x`, then `x = val` writes to it (Io-style `updateSlot` semantics). Names that aren't slots create method-local variables. Use `self x = val` when a parameter shadows a slot name, as in the `init` pattern below. The exact rules are in [Implicit self](#implicit-self-in-methods).
 
 ## Super
