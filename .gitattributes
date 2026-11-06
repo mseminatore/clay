@@ -1,0 +1,3 @@
+# GitHub has no Clay grammar; Io's (strings, // comments, message(args) sends)
+# is the closest. Not counted as Io in the repo's language stats.
+*.clay linguist-language=Io linguist-detectable=false
