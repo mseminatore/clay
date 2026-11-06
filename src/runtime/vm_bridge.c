@@ -1422,17 +1422,6 @@ static int native_make_dict_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
-/* native_array_append(arr, val) — append to array, return array */
-static int native_array_append_fn(clayvm_vm_t *vm, int argc) {
-    (void)argc;
-    clayvm_value_t val = clayvm_vm_pop(vm);
-    clayvm_value_t arr_val = clayvm_vm_pop(vm);
-    ClayObject *arr = (ClayObject *)arr_val.as.obj;
-    clay_array_append(arr, vm_to_clay(val));
-    vm_release_val(val);
-    clayvm_vm_push(vm, arr_val); /* return array — transfer pop's ownership */
-    return 0;
-}
 
 /* native_set_method(obj, name_str, method_slot_index) */
 static int native_set_method_fn(clayvm_vm_t *vm, int argc) {

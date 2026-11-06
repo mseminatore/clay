@@ -43,18 +43,6 @@ __declspec(dllimport) DWORD __stdcall GetModuleFileNameA(void *, char *, DWORD);
 #endif
 #endif
 
-/* Portable case-insensitive compare (avoids strcasecmp portability issues) */
-static int ci_streq(const char *a, const char *b) {
-    while (*a && *b) {
-        char ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca += 32;
-        if (cb >= 'A' && cb <= 'Z') cb += 32;
-        if (ca != cb) return 0;
-        a++; b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
 #include "crossline.h"
 #include "lexer.h"
 #include "parser.h"
@@ -157,8 +145,9 @@ static char *last_sep(char *p) {
     return sep;
 }
 
-/* Resolve the Clay source tree root. The binary lives at build/clay or, with
- * multi-config generators, build/<Config>/clay — the root is build's parent. */
+/* Resolve the Clay source tree root: the nearest directory, starting at the
+ * binary's own, that holds src/runtime/clay.h. The binary is usually
+ * build/clay or build/<Config>/clay (CMake), or clay at the root (Makefile). */
 static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
     (void)argv0;
     snprintf(clay_dir, sz, ".");
@@ -167,15 +156,19 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
     snprintf(dir, sizeof(dir), "%s", g_exe_dir);
     size_t len = strlen(dir);
     if (len > 0) dir[len - 1] = '\0';                 /* drop trailing separator */
-    char *sep = last_sep(dir);
-    if (sep && (ci_streq(sep + 1, "Debug") || ci_streq(sep + 1, "Release") ||
-                ci_streq(sep + 1, "RelWithDebInfo") || ci_streq(sep + 1, "MinSizeRel"))) {
-        *sep = '\0';                                   /* build/<Config> → build */
+    for (int up = 0; up < 4; up++) {
+        char probe[1100];
+        snprintf(probe, sizeof(probe), "%s/src/runtime/clay.h", dir);
+        FILE *f = fopen(probe, "r");
+        if (f) {
+            fclose(f);
+            snprintf(clay_dir, sz, "%s", dir);
+            return;
+        }
+        char *sep = last_sep(dir);
+        if (!sep) return;
+        *sep = '\0';
     }
-    sep = last_sep(dir);
-    if (!sep) return;
-    *sep = '\0';                                       /* build → source root */
-    snprintf(clay_dir, sz, "%s", dir);
 }
 
 /* --- Native compile configuration (clay-native.cfg next to the binary) ---
@@ -228,7 +221,7 @@ static const char *const clay_native_sources[] = {
     "src/runtime/bootstrap.c","src/runtime/intern.c",   "src/runtime/graphics.c",
     "src/runtime/vec3.c",     "src/runtime/thread.c",   "src/runtime/plugin.c",
     "src/runtime/fiber.c",    "src/runtime/vm_bridge.c",
-    "src/vm/generated/vm.c",  "src/vm/generated/native.c",
+    "src/vm/generated/vm.c",  "src/vm/generated/native.c", "src/vm/generated/disasm.c",
     "deps/crossline/crossline.c",
     "src/runtime/fiber_ctx.c",
 #ifndef _WIN32

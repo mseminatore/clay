@@ -84,3 +84,6 @@ build_asan_ts/
 build_ts/
 *.db
 output.ppm
+
+# clangd index (editor language server)
+.cache/
