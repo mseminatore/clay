@@ -1,5 +1,7 @@
 # Project files
 clay
+clayc
+clayc.c
 test_*.txt
 docs/prerelease-review.md
 
