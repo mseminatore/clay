@@ -319,7 +319,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
             return 1;
     size_t len = strlen(cmd);
     snprintf(cmd + len, sizeof(cmd) - len,
-        "/Fe:\"%s\" winhttp.lib ws2_32.lib %s\"",
+        "/Fe:\"%s\" winhttp.lib ws2_32.lib user32.lib %s\"",
         output_name, quiet ? ">nul 2>&1" : "");
 #else
     snprintf(cmd, sizeof(cmd),
