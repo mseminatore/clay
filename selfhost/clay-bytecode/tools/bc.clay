@@ -1,0 +1,23 @@
+// bc.clay -- print a file's bytecode in the format of `clay --bytecode`
+//
+//   clay selfhost/clay-bytecode/tools/bc.clay <file.clay>
+import("../src/main.clay")
+
+args = System args
+(args size < 1) ifTrue {
+    "usage: clay bc.clay <file.clay>" println
+    System exit(2)
+}
+path = args at(0)
+p = Parser new(File read(path), path)
+program = p parseProgram
+p hadError ifTrue {
+    Console print("clay: compilation failed due to parse errors\n")
+    System exit(1)
+}
+bc = BcGen new(path)
+((bc compile(program)) == nil) ifTrue {
+    Console print("clay: bytecode compilation failed\n")
+    System exit(1)
+}
+Console print(bc dump)

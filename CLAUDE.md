@@ -75,7 +75,9 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 
 1. **Compiler frontend** (`src/compiler/`): `lexer.c`/`parser.c`/`ast.c` are shared by both backends.
    `codegen.c` emits human-readable C with `#line` directives for debuggability. `bc_compiler.c`
-   compiles the AST directly to bytecode for the VM. `bricks.c` implements the package manager.
+   compiles the AST directly to bytecode for the VM; the runtime side of the VM (native functions,
+   block/method trampolines, the `VM` prototype) is `src/runtime/vm_bridge.c`, part of the runtime
+   library so native programs can run bytecode too. `bricks.c` implements the package manager.
    `dap.c` implements the Debug Adapter Protocol server. `main.c` is the CLI driver (REPLs, flag
    parsing, plugin auto-load).
 
@@ -121,7 +123,7 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   values because runtime callers (`each`, `map`, `ifTrue`) release them. Debug with an ASan build
   configured with `-DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON` (SDL2 + ASan hangs on macOS).
 - **Fibers** live in `src/runtime/fiber.c` (C-stack switching); the VM swaps its own stacks via
-  `clay_fiber_hooks` registered in `bc_compiler.c`.
+  `clay_fiber_hooks` registered in `vm_bridge.c`.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.
@@ -143,6 +145,15 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   table, has its own detailed `deps/hash/.github/copilot-instructions.md`), `testy` (test framework),
   `crossline` (REPL line editing), `cjson` (DAP/JSON), `sqlite` (the `Db` prototype), `vmgen` (VM
   generator, only needed to regenerate `src/vm/generated/`).
+
+## Self-hosting (`selfhost/`)
+
+A second compiler written in Clay: `clay-lexer`, `clay-parser`, `clay-bytecode` and `clay-codegen`
+bricks plus the `clayc` driver. Each is a port of its C counterpart (`lexer.c`, `parser.c`,
+`bc_compiler.c`, `codegen.c`) and must produce identical output — tokens, AST, bytecode and C —
+checked by CTest (`ctest -L selfhost`: `clay_selfhost_<piece>[_native]`, `clay_selfhost_run`,
+`clay_selfhost_bootstrap`). A change to one of those C files usually needs the same change in its
+Clay port.
 
 ## Bricks (package manager)
 

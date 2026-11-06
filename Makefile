@@ -29,7 +29,7 @@ RUNTIME_SRCS = src/runtime/object.c src/runtime/memory.c src/runtime/dispatch.c 
                src/runtime/regex.c src/runtime/db.c \
                src/runtime/bootstrap.c src/runtime/intern.c \
                src/runtime/graphics.c src/runtime/vec3.c src/runtime/thread.c \
-               src/runtime/plugin.c src/runtime/fiber.c
+               src/runtime/plugin.c src/runtime/fiber.c src/runtime/vm_bridge.c
 RUNTIME_OBJS = $(RUNTIME_SRCS:.c=.o)
 
 VM_SRCS = src/vm/generated/vm.c src/vm/generated/native.c \
@@ -105,7 +105,8 @@ all: libclay.a libclayvm.a clay
 build: all
 
 # Runtime static library
-libclay.a: $(RUNTIME_OBJS) $(HASH_OBJ) $(SQLITE_OBJ) $(FIBER_OBJS) $(FIBER_ASM_OBJS)
+# (the VM bridge needs libclayvm.a after it; Console readLine uses crossline)
+libclay.a: $(RUNTIME_OBJS) $(HASH_OBJ) $(SQLITE_OBJ) $(CROSSLINE_OBJ) $(FIBER_OBJS) $(FIBER_ASM_OBJS)
 	$(AR) rcs $@ $^
 
 $(HASH_OBJ): $(HASH_SRC)
@@ -129,9 +130,9 @@ libclayvm.a: $(VM_OBJS)
 	$(AR) rcs $@ $^
 
 # Compiler binary
-clay: $(COMPILER_OBJS) libclay.a libclayvm.a $(CROSSLINE_OBJ) $(CJSON_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(COMPILER_OBJS) $(CROSSLINE_OBJ) $(CJSON_OBJ) \
-		-L. -lclayvm -lclay $(LDFLAGS) $(OPENSSL_LIBS)
+clay: $(COMPILER_OBJS) libclay.a libclayvm.a $(CJSON_OBJ)
+	$(CC) $(CFLAGS) -o $@ $(COMPILER_OBJS) $(CJSON_OBJ) \
+		-L. -lclay -lclayvm $(LDFLAGS) $(OPENSSL_LIBS)
 
 # Test binary
 test: test_runner
@@ -143,7 +144,7 @@ test-clay: clay
 	@echo "All Clay tests passed."
 
 test_runner: $(TEST_OBJS) libclay.a libclayvm.a $(CJSON_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) $(CJSON_OBJ) -L. -lclayvm -lclay $(LDFLAGS) $(STACK_FLAGS)
+	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) $(CJSON_OBJ) -L. -lclay -lclayvm $(LDFLAGS) $(STACK_FLAGS)
 
 # VM generated files — compile without -pedantic
 src/vm/generated/%.o: src/vm/generated/%.c

@@ -2,13 +2,15 @@
 # must agree exactly with the C implementation on every .clay file in the
 # repository and in their edge-case corpora.
 #
-#   cmake -DCLAY=<clay binary> -DROOT=<source dir> -DCHECK=lexer|parser|codegen
+#   cmake -DCLAY=<clay binary> -DROOT=<source dir> -DCHECK=lexer|parser|codegen|bytecode
 #         [-DNATIVE=<binary to build>] [-DWORK=<scratch dir>] -P selfhost_compare.cmake
 #
 #   lexer:   `clay --tokens f`  vs  selfhost/clay-lexer/tools/tokens.clay f
 #   parser:  `clay --ast f`     vs  selfhost/clay-parser/tools/ast.clay f
 #            (stdout and stderr together, and the exit status: syntax errors
 #            must match too)
+#   bytecode: `clay --bytecode f` vs selfhost/clay-bytecode/tools/bc.clay f
+#            (constants, code, chunks and methods, and the exit status)
 #   codegen: `clay -c -o a.c f` vs  selfhost/clay-codegen/tools/c.clay f b.c
 #            (the generated C byte for byte, and the exit status; WORK holds
 #            the C files)
@@ -28,6 +30,9 @@ if(CHECK STREQUAL "lexer")
 elseif(CHECK STREQUAL "parser")
     set(flag --ast)
     set(tool "${ROOT}/selfhost/clay-parser/tools/ast.clay")
+elseif(CHECK STREQUAL "bytecode")
+    set(flag --bytecode)
+    set(tool "${ROOT}/selfhost/clay-bytecode/tools/bc.clay")
 elseif(CHECK STREQUAL "codegen")
     set(tool "${ROOT}/selfhost/clay-codegen/tools/c.clay")
     if(NOT WORK)
@@ -35,7 +40,7 @@ elseif(CHECK STREQUAL "codegen")
     endif()
     file(MAKE_DIRECTORY "${WORK}")
 else()
-    message(FATAL_ERROR "selfhost_compare.cmake: CHECK must be lexer, parser or codegen")
+    message(FATAL_ERROR "selfhost_compare.cmake: CHECK must be lexer, parser, codegen or bytecode")
 endif()
 
 if(NATIVE)

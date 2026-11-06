@@ -192,7 +192,12 @@ static ClayValue array_find(ClayObject *self, int argc, ClayValue *argv) {
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
         ClayValue test = clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
-        if (CLAY_IS_TRUTHY(test)) return item;
+        int found = CLAY_IS_TRUTHY(test);
+        clay_release_val(test);
+        if (found) {
+            clay_retain_val(item);   /* an element: the caller gets its own reference */
+            return item;
+        }
     }
     return CLAY_NIL;
 }
@@ -398,7 +403,9 @@ static ClayValue array_min(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue v = self->as.array.items[i];
         ClayValue lt = clay_send_val(v, "<", 1, &best);
         if (lt == CLAY_TRUE) best = v;
+        clay_release_val(lt);
     }
+    clay_retain_val(best);   /* an element: the caller gets its own reference */
     return best;
 }
 
@@ -410,7 +417,9 @@ static ClayValue array_max(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue v = self->as.array.items[i];
         ClayValue gt = clay_send_val(v, ">", 1, &best);
         if (gt == CLAY_TRUE) best = v;
+        clay_release_val(gt);
     }
+    clay_retain_val(best);   /* an element: the caller gets its own reference */
     return best;
 }
 

@@ -1,0 +1,15 @@
+// every operator form: arithmetic, comparisons, short-circuit, ??, ranges, sends
+a = 7
+b = 2.5
+(a + 1 - 2 * 3 / 1 % 4) println
+(a == 7 && b < 3) println
+(a != 7 || b >= 2.5) println
+(nil ?? "default") println
+(1..4) toArray println
+#{ "k": a, "j": [b, "s\t\n\"q\\"] } println
+x = try { raise("boom") } catch { |e| e message } finally { 0 }
+y = try { 1 } catch { |e| 2 }
+[x, y, -a, a > 3, a <= 7] println
+[1, 2, 3, 4, 5] each { |i| (i > 3) ifTrue { break }
+    (i == 1) ifTrue { continue }
+    i println }

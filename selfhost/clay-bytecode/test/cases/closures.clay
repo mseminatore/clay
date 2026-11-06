@@ -1,0 +1,19 @@
+// captures, nested captures, cell boxing, default parameters (methods)
+counter = 0
+make = { |start|
+    n = start
+    inc = { |by| n = n + by
+        n }
+    [inc, { n }]
+}
+pair = make value(10)
+(pair at(0)) value(1)
+(pair at(0)) value(3)
+Defaults = Object clone {
+    f(a, b = 2, c = a + 10) { { a + b + c } value }
+}
+(Defaults f(1)) println
+(Defaults f(1, 5)) println
+(pair at(1)) value println
+outer = { |a| { |b| { |c| a + b + c } } }
+((outer value(1)) value(2)) value(3) println

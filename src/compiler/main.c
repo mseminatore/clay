@@ -7,6 +7,7 @@
  *   -c            Emit C code only (implies --compile)
  *   --ast         Print AST and exit
  *   --tokens      Print the lexer's tokens and exit
+ *   --bytecode    Print the compiled bytecode and exit
  *   --repl        Interactive REPL (C compilation)
  *   --vm-repl     Interactive REPL (bytecode VM, faster)
  *
@@ -226,7 +227,9 @@ static const char *const clay_native_sources[] = {
     "src/runtime/http.c",     "src/runtime/regex.c",    "src/runtime/db.c",
     "src/runtime/bootstrap.c","src/runtime/intern.c",   "src/runtime/graphics.c",
     "src/runtime/vec3.c",     "src/runtime/thread.c",   "src/runtime/plugin.c",
-    "src/runtime/fiber.c",
+    "src/runtime/fiber.c",    "src/runtime/vm_bridge.c",
+    "src/vm/generated/vm.c",  "src/vm/generated/native.c",
+    "deps/crossline/crossline.c",
     "src/runtime/fiber_ctx.c",
 #ifndef _WIN32
 #if defined(__x86_64__) || defined(_M_X64)
@@ -312,11 +315,12 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
         "cl /nologo %s /O2 /GF "
         "/I\"%s\\src\\runtime\" /I\"%s\\deps\\hash\" /I\"%s\\deps\\sqlite\" "
+        "/I\"%s\\src\\vm\\generated\" /I\"%s\\deps\\crossline\" "
         "/D_CRT_SECURE_NO_WARNINGS "
         "/Fo\"%%TEMP%%\\\\\" "
         "\"%s\" ",
         vs_path, quiet ? "/W0" : "/W3",
-        clay_dir, clay_dir, clay_dir, c_file);
+        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, c_file);
     for (int i = 0; clay_native_sources[i]; i++)
         if (append_source(cmd, sizeof(cmd), clay_dir, clay_native_sources[i]) != 0)
             return 1;
@@ -331,9 +335,10 @@ static int compile_c_file(const char *c_file, const char *output_name,
         "-D_DEFAULT_SOURCE "   /* POSIX + BSD declarations under -std=c99 */
 #endif
         "-I\"%s/src/runtime\" -I\"%s/deps/hash\" -I\"%s/deps/sqlite\" "
+        "-I\"%s/src/vm/generated\" -I\"%s/deps/crossline\" "
         "\"%s\" ",
         quiet ? "-w" : "-Wall",
-        clay_dir, clay_dir, clay_dir, c_file);
+        clay_dir, clay_dir, clay_dir, clay_dir, clay_dir, c_file);
     for (int i = 0; clay_native_sources[i]; i++)
         if (append_source(cmd, sizeof(cmd), clay_dir, clay_native_sources[i]) != 0)
             return 1;
@@ -901,6 +906,93 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     return 0;
 }
 
+/* --- --bytecode: what the bytecode compiler produced ---
+ * The constant pool, the top-level code, every chunk and method slot, with
+ * line numbers where they change. The Clay compiler (selfhost/clay-bytecode)
+ * prints the same format; CTest compares them. */
+static void dump_escaped(const char *s) {
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '\\') fputs("\\\\", stdout);
+        else if (c == '"') fputs("\\\"", stdout);
+        else if (c == '\n') fputs("\\n", stdout);
+        else if (c == '\r') fputs("\\r", stdout);
+        else if (c == '\t') fputs("\\t", stdout);
+        else if (c < 0x20 || c == 0x7f) printf("\\x%02x", c);
+        else putchar(c);
+    }
+}
+
+static void dump_code(const char *what, const uint8_t *code, size_t len, const int *lines) {
+    printf("%s %zu\n", what, len);
+    for (size_t i = 0; i < len; i++) {
+        printf("%s%d", (i % 16 == 0) ? "  " : " ", code[i]);
+        if (i % 16 == 15 || i == len - 1) putchar('\n');
+    }
+    printf("lines");
+    for (size_t i = 0; i < len; i++)
+        if (i == 0 || lines[i] != lines[i - 1]) printf(" %zu:%d", i, lines[i]);
+    printf("\n");
+}
+
+static int dump_bytecode(const char *filename) {
+    char *source = read_file(filename);
+    if (!source) { fprintf(stderr, "clay: cannot read %s\n", filename); return 1; }
+    clay_bootstrap();
+    clay_plugin_auto_load(g_exe_path);
+    static clayvm_vm_t vm;
+    static BcCompiler bc;
+    clayvm_vm_init(&vm);
+    bc_compiler_init(&bc, &vm);
+    bc.source_file = filename;
+    clay_source_file = filename;
+    Parser parser;
+    parser_init(&parser, source, filename);
+    AstNode *program = parser_parse(&parser);
+    if (!program || parser.had_error) {
+        fprintf(stderr, "clay: compilation failed due to parse errors\n");
+        return 1;
+    }
+    if (bc_compile(&bc, program) != 0) {
+        fprintf(stderr, "clay: bytecode compilation failed\n");
+        return 1;
+    }
+    printf("constants %d\n", vm.constants.count);
+    for (int i = 0; i < vm.constants.count; i++) {
+        clayvm_value_t v = vm.constants.values[i];
+        printf("  %d ", i);
+        if (v.type == CLAYVM_VAL_INT64) printf("int %lld\n", (long long)v.as.i64);
+        else if (v.type == CLAYVM_VAL_DOUBLE) {
+            char buf[64];
+            clay_format_float((float)v.as.f64, buf, sizeof(buf));
+            printf("float %s\n", buf);
+        } else if (v.type == CLAYVM_VAL_BOOL) printf("%s\n", v.as.boolean ? "true" : "false");
+        else if (v.type == CLAYVM_VAL_NIL) printf("nil\n");
+        else if (v.type == CLAYVM_VAL_OBJECT) {
+            printf("string \"");
+            dump_escaped(clay_string_data((ClayObject *)v.as.obj));
+            printf("\"\n");
+        } else printf("?\n");
+    }
+    dump_code("code", bc.code, bc.len, bc.line_map);
+    for (int c = 0; c < bc.chunk_count; c++) {
+        BcChunk *ch = bc.chunks[c];
+        printf("chunk %d locals %d blockReturn %d\n", c, ch->local_count, ch->has_block_return);
+        printf("params");
+        for (int i = 0; i < ch->param_count && i < 16; i++) printf(" %s", ch->param_names[i]);
+        printf("\ncaptures");
+        for (int i = 0; i < ch->capture_count; i++) printf(" %s@%d", ch->capture_names[i], ch->capture_slots[i]);
+        printf("\n");
+        dump_code("code", ch->code, ch->len, ch->line_map);
+    }
+    for (int m = 0; m < bc_method_slot_count(); m++) {
+        int chunk_id, params;
+        const char *name = bc_method_slot_info(m, &chunk_id, &params);
+        printf("method %d chunk %d params %d %s\n", m, chunk_id, params, name ? name : "");
+    }
+    return 0;
+}
+
 /* --- Run a .clay file through the bytecode VM --- */
 static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     char *source = read_file(filename);
@@ -1008,6 +1100,7 @@ int main(int argc, char *argv[]) {
     int c_only = 0;
     int compile_mode = 0;
     int print_ast = 0;
+    int print_bytecode = 0;
     int print_tokens = 0;
     int repl_mode = 0;
     int vm_repl_mode = 0;
@@ -1035,6 +1128,8 @@ int main(int argc, char *argv[]) {
             print_ast = 1;
         } else if (strcmp(argv[i], "--tokens") == 0) {
             print_tokens = 1;
+        } else if (strcmp(argv[i], "--bytecode") == 0) {
+            print_bytecode = 1;
         } else if (strcmp(argv[i], "--repl") == 0) {
             repl_mode = 1;
         } else if (strcmp(argv[i], "--vm-repl") == 0) {
@@ -1055,6 +1150,7 @@ int main(int argc, char *argv[]) {
             printf("  -c            Emit C code only, no compile (implies --compile)\n");
             printf("  --ast         Print AST and exit\n");
             printf("  --tokens      Print the lexer's tokens and exit\n");
+            printf("  --bytecode    Print the compiled bytecode and exit\n");
             printf("  --repl        Launch interactive REPL (compiles to C)\n");
             printf("  --vm-repl     Launch bytecode VM REPL (instant)\n");
             printf("  --trace       Bytecode tracing (VM REPL or file execution)\n");
@@ -1159,6 +1255,8 @@ int main(int argc, char *argv[]) {
         free(source);
         return 0;
     }
+
+    if (print_bytecode) return dump_bytecode(source_file);
 
     /* DAP debug adapter mode */
     if (dap_mode) {

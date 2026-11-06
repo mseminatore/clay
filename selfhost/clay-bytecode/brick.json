@@ -1,0 +1,6 @@
+{
+    "name": "clay-bytecode",
+    "version": "0.1.0",
+    "description": "The Clay-to-bytecode compiler, written in Clay",
+    "main": "src/main.clay"
+}

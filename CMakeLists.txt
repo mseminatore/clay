@@ -72,6 +72,7 @@ target_include_directories(testy PUBLIC deps/testy)
 # Runtime library
 set(RUNTIME_SOURCES
     src/runtime/object.c
+    src/runtime/vm_bridge.c
     src/runtime/memory.c
     src/runtime/dispatch.c
     src/runtime/tagged.c
@@ -125,8 +126,10 @@ if(NOT WIN32)
 endif()
 
 add_library(clay_runtime STATIC ${RUNTIME_SOURCES})
-target_include_directories(clay_runtime PUBLIC src/runtime deps/sqlite)
-target_link_libraries(clay_runtime PUBLIC ht sqlite3)
+target_include_directories(clay_runtime PUBLIC src/runtime deps/sqlite src/vm/generated)
+# The VM bridge (vm_bridge.c) runs bytecode in the VM; Console readLine edits
+# lines with crossline
+target_link_libraries(clay_runtime PUBLIC ht sqlite3 clayvm crossline)
 
 if(SDL2_FOUND)
     target_compile_definitions(clay_runtime PRIVATE CLAY_HAS_SDL2)
@@ -201,7 +204,7 @@ add_executable(clay_compiler
 )
 target_include_directories(clay_compiler PRIVATE src/compiler src/vm/generated src/runtime deps/crossline deps/cjson)
 target_compile_definitions(clay_compiler PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(clay_compiler clay_compiler_lib crossline)
+target_link_libraries(clay_compiler clay_compiler_lib)
 if(UNIX)
     target_compile_definitions(clay_compiler PRIVATE _POSIX_C_SOURCE=200809L)
 endif()
@@ -215,7 +218,7 @@ if(CLAY_THREAD_SAFE)
     set(CLAY_NATIVE_DEFS "-DCLAY_THREAD_SAFE")
 endif()
 set(CLAY_NATIVE_LIBS
-    "\"$<TARGET_FILE:clay_runtime>\" \"$<TARGET_FILE:ht>\" \"$<TARGET_FILE:sqlite3>\"")
+    "\"$<TARGET_FILE:clay_runtime>\" \"$<TARGET_FILE:clayvm>\" \"$<TARGET_FILE:crossline>\" \"$<TARGET_FILE:ht>\" \"$<TARGET_FILE:sqlite3>\"")
 if(SDL2_FOUND)
     string(APPEND CLAY_NATIVE_LIBS
         " \"$<TARGET_LINKER_FILE:$<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>>\"")
@@ -380,9 +383,9 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/native_tests)
 # Self-hosting: the compiler pieces written in Clay (selfhost/) must agree
 # exactly with the C implementation on every .clay file — the lexer with
 # `clay --tokens`, the parser with `clay --ast`, the code generator with
-# `clay -c` — in the VM and compiled natively. Run from the source root so
-# brick imports resolve.
-foreach(check lexer parser codegen)
+# `clay -c`, the bytecode compiler with `clay --bytecode` — in the VM and
+# compiled natively. Run from the source root so brick imports resolve.
+foreach(check lexer parser codegen bytecode)
     add_test(NAME clay_selfhost_${check}
              COMMAND ${CMAKE_COMMAND}
                  -DCLAY=$<TARGET_FILE:clay_compiler>
@@ -401,6 +404,15 @@ foreach(check lexer parser codegen)
     set_tests_properties(clay_selfhost_${check}_native PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
 endforeach()
+# clayc runs every test program on the VM exactly like clay does
+add_test(NAME clay_selfhost_run
+         COMMAND ${CMAKE_COMMAND}
+             -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+             -DCLAYC=${CMAKE_CURRENT_BINARY_DIR}/native_tests/clayc_run${CMAKE_EXECUTABLE_SUFFIX}
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_run.cmake)
+set_tests_properties(clay_selfhost_run PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
 # Bootstrap: clayc (selfhost/clayc.clay) compiles itself to a fixpoint. Needs
 # a cc-style clay-native.cfg (clayc doesn't drive MSVC yet).
 if(NOT MSVC)

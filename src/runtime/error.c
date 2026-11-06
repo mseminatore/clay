@@ -2,6 +2,7 @@
  * error.c - Error object and try/catch mechanism
  */
 #include "clay.h"
+#include <string.h>
 
 /* Global error stack */
 CLAY_THREAD_LOCAL ClayErrorStack clay_error_stack = { .head = NULL, .current_error = 0 };
@@ -100,7 +101,10 @@ void clay_try_save_state(ClayTryFrame *frame) {
     frame->trace_overflow = clay_call_trace.overflow;
     frame->return_id = 0;
     frame->unwind_depth = unwind_list()->count;
+    /* No VM yet: a frame left zeroed restores "no VM state" should one be
+     * created before it unwinds (the VM prototype starts one on demand) */
     if (clay_try_hooks) clay_try_hooks->save(frame->engine_state);
+    else memset(frame->engine_state, 0, sizeof(frame->engine_state));
 }
 
 static void clay_try_restore_state(ClayTryFrame *frame) {
@@ -118,7 +122,7 @@ void clay_raise(ClayValue error) {
         clay_error_stack.head = frame->prev;
         /* Undo everything the frames we are about to skip had changed */
         clay_try_restore_state(frame);
-        longjmp(frame->buf, 1);
+        CLAY_LONGJMP(frame->buf, 1);
     }
     /* No try frame — print and abort */
     if (CLAY_IS_PTR(error) && !CLAY_IS_NIL(error)) {
@@ -300,7 +304,11 @@ void clay_raise_return(ClayValue value, ClayValue id) {
                                          "RuntimeError");
         clay_raise(CLAY_VAL(err));
     }
-    ClayObject *sig = clay_error_new("non-local return", "ReturnSignal");
+    /* Only its method's frame sees the signal (catch handlers re-raise it):
+     * no stack trace or location to record */
+    ClayObject *sig = clay_clone(clay_Error);
+    clay_set_slot_take(sig, "_message", CLAY_VAL(clay_string_new("non-local return")));
+    clay_set_slot_take(sig, "_type", CLAY_VAL(clay_string_new("ReturnSignal")));
     clay_set_slot(sig, "_value", value);
     clay_release_val(value);          /* the signal now holds it */
     clay_set_slot(sig, "_id", id);

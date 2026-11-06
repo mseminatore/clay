@@ -118,7 +118,7 @@ static void register_plugin_global(const char *name, ClayObject *proto) {
 static ClayPluginObject api_register_type(const ClayPluginType *def) {
     ClayObject *proto = clay_object_new();
     proto->parent = clay_Object;
-    proto->refcount = 1000000; /* singleton */
+    proto->refcount = CLAY_REFCOUNT_IMMORTAL; /* singleton */
     clay_set_slot_take(proto, "_name", CLAY_VAL(clay_string_new(def->name)));
 
     /* Register methods */

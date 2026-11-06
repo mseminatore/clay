@@ -1,67 +1,97 @@
 // clayc -- the Clay compiler, written in Clay
 //
-//   clayc [-c] [-o <output>] [--cfg <clay-native.cfg>] [--plugin-exe <clay>] <file.clay>
+//   clayc                                   the REPL
+//   clayc <file.clay> [args...]             run a program in the VM
+//   clayc --compile [-o <output>] <file.clay>   build a native executable
+//   clayc -c [-o <output.c>] <file.clay>    write the C only
+//   clayc --bytecode <file.clay>            print the bytecode (like clay --bytecode)
 //
-// Like `clay --compile`: lexes, parses and generates C with the clay-lexer,
-// clay-parser and clay-codegen bricks, then compiles the C with the C
-// compiler and Clay runtime libraries named in clay-native.cfg (written by
-// the CMake build next to the clay binary).
+// Like `clay`: lexes and parses with the clay-lexer and clay-parser bricks,
+// then either compiles to bytecode with clay-bytecode and runs it on the VM,
+// or generates C with clay-codegen and compiles that with the C compiler and
+// Clay runtime libraries named in clay-native.cfg (written by the CMake
+// build next to the clay binary).
 //
-//   -c              write the C only (to <output>, or next to the source)
-//   -o <output>     the executable (default: the source name without .clay);
-//                   its C goes next to it (<output>.c)
+//   -o <output>     the executable (implies --compile; default: the source
+//                   name without .clay); its C goes next to it (<output>.c)
 //   --cfg <path>    clay-native.cfg (default: $CLAY_NATIVE_CFG, else the one
 //                   next to the running clay)
-//   --plugin-exe    the clay whose plugins/ the program loads at startup
+//   --plugin-exe    the clay whose plugins/ native programs load at startup
 //                   (default: the running clay; none when clayc is native)
 //
-// Run it in the VM (`clay selfhost/clayc.clay prog.clay`) or compile it with
-// itself: `clay --compile -o clayc selfhost/clayc.clay`, then
-// `./clayc -o clayc2 selfhost/clayc.clay` builds clayc again — with the
-// Clay compiler this time. (CTest clay_selfhost_bootstrap checks that the
-// second and third generations produce the same C.)
+// Running programs and the REPL need the VM, which native programs have:
+// build clayc with `clay --compile -o clayc selfhost/clayc.clay`. Building
+// native executables works in the VM too (`clay selfhost/clayc.clay -o ...`).
+// Compiled with itself, clayc reaches a fixpoint (CTest
+// clay_selfhost_bootstrap).
 import("clay-codegen/src/main.clay")
+import("clay-bytecode/src/main.clay")
 
 Clayc = Object clone {
     source = nil
     output = nil
-    cOnly = false
+    mode = "run"           // run | compile | c | bytecode | repl
     cfgPath = nil
     pluginExe = nil
+    progArgs = nil         // arguments after the source file (run mode)
 
     fail(msg) {
-        Console print("clayc: " + msg + "\n")
+        Console error("clayc: " + msg + "\n")
         System exit(1)
     }
 
     usage() {
-        Console print("usage: clayc [-c] [-o <output>] [--cfg <clay-native.cfg>] [--plugin-exe <clay>] <file.clay>\n")
+        Console error("usage: clayc [<file.clay> [args...]]\n" +
+                      "       clayc --compile [-o <output>] [--cfg <clay-native.cfg>] [--plugin-exe <clay>] <file.clay>\n" +
+                      "       clayc -c [-o <output.c>] <file.clay>\n" +
+                      "       clayc --bytecode <file.clay>\n")
         System exit(2)
     }
 
     parseArgs(args) {
         pluginExe = System executable
+        progArgs = []
         i = 0
-        { i < args size } whileTrue {
+        { i < args size && source == nil } whileTrue {
             a = args at(i)
             (a == "-c") ifTrue {
-                cOnly = true
+                mode = "c"
             } ifFalse {
-                (a == "-o" || a == "--cfg" || a == "--plugin-exe") ifTrue {
-                    (i + 1 >= args size) ifTrue { self usage }
-                    v = args at(i + 1)
-                    (a == "-o") ifTrue { output = v }
-                    (a == "--cfg") ifTrue { cfgPath = v }
-                    (a == "--plugin-exe") ifTrue { pluginExe = v }
-                    i = i + 1
+                (a == "--compile") ifTrue {
+                    (mode != "c") ifTrue { mode = "compile" }
                 } ifFalse {
-                    (a startsWith("-")) ifTrue { self fail("unknown option '" + a + "'") }
-                    source = a
+                    (a == "--bytecode") ifTrue {
+                        mode = "bytecode"
+                    } ifFalse {
+                        (a == "-o" || a == "--cfg" || a == "--plugin-exe") ifTrue {
+                            (i + 1 >= args size) ifTrue { self usage }
+                            v = args at(i + 1)
+                            (a == "-o") ifTrue {
+                                output = v
+                                (mode == "run") ifTrue { mode = "compile" }
+                            }
+                            (a == "--cfg") ifTrue { cfgPath = v }
+                            (a == "--plugin-exe") ifTrue { pluginExe = v }
+                            i = i + 1
+                        } ifFalse {
+                            (a == "-h" || a == "--help") ifTrue { self usage }
+                            (a startsWith("-")) ifTrue { self fail("unknown option '" + a + "'") }
+                            source = a
+                        }
+                    }
                 }
             }
             i = i + 1
         }
-        (source == nil) ifTrue { self usage }
+        // the rest belongs to the program (a leading `--` is dropped)
+        (i < args size && (args at(i)) == "--") ifTrue { i = i + 1 }
+        { i < args size } whileTrue {
+            progArgs push(args at(i))
+            i = i + 1
+        }
+        (source == nil) ifTrue {
+            (mode == "run") ifTrue { mode = "repl" } ifFalse { self usage }
+        }
     }
 
     lastSep(path) {
@@ -110,20 +140,41 @@ Clayc = Object clone {
         cfg
     }
 
-    run(args) {
-        self parseArgs(args)
+    parse() {
         (File exists(source)) ifFalse { self fail("cannot read '" + source + "'") }
         p = Parser new(File read(source), source)
         program = p parseProgram
         p hadError ifTrue { self fail("compilation failed due to parse errors") }
+        program
+    }
 
+    // `clay`'s report of an error that stops a program
+    report(e) {
+        where = ""
+        (e file != nil && e line != nil) ifTrue { where = e file + ":" + e line toString + ": " }
+        Console error(where + "Error: " + e message + "\n")
+    }
+
+    runProgram(program) {
+        unit = (BcGen new(source, true)) compile(program)
+        (unit == nil) ifTrue { self fail("bytecode compilation failed") }
+        ok = try { VM run(unit, progArgs)
+                   true } catch { |e|
+            self report(e)
+            false
+        }
+        ok ifFalse { System exit(1) }
+        0
+    }
+
+    buildNative(program) {
         exe = output ?? (self stripExt(source))
-        cFile = cOnly ifTrue { output ?? ((self stripExt(source)) + ".c") } ifFalse {
+        cFile = (mode == "c") ifTrue { output ?? ((self stripExt(source)) + ".c") } ifFalse {
             (self stripExt(exe)) + ".c"
         }
         File write(cFile, (CodeGen new(source, pluginExe)) generate(program))
         Console print("clayc: generated " + cFile + "\n")
-        cOnly ifTrue { return 0 }
+        (mode == "c") ifTrue { return 0 }
 
         cfg = self readCfg
         cmd = "\"" + (cfg get("cc")) + "\" " + ((cfg get("cflags")) ?? "") + " -Wall \"" + cFile + "\" " +
@@ -133,6 +184,101 @@ Clayc = Object clone {
         (rc != 0) ifTrue { self fail("C compilation failed") }
         Console print("clayc: built " + exe + "\n")
         0
+    }
+
+    run(args) {
+        self parseArgs(args)
+        (mode == "repl") ifTrue { return ClaycRepl run }
+        program = self parse
+        (mode == "run") ifTrue { return self runProgram(program) }
+        (mode == "bytecode") ifTrue {
+            bc = BcGen new(source)
+            ((bc compile(program)) == nil) ifTrue { self fail("bytecode compilation failed") }
+            Console print(bc dump)
+            return 0
+        }
+        self buildNative(program)
+    }
+}
+
+// The REPL: each input is compiled into the same VM, so its variables,
+// prototypes and methods stay defined for the next one
+ClaycRepl = Object clone {
+    // unclosed ( { [ outside strings: the input continues on the next line
+    openCount(s) {
+        depth = 0
+        inString = false
+        i = 0
+        { i < s length } whileTrue {
+            c = s byteAt(i)
+            inString ifTrue {
+                (c == 92) ifTrue { i = i + 1 } ifFalse {
+                    (c == 34) ifTrue { inString = false }
+                }
+            } ifFalse {
+                (c == 34) ifTrue { inString = true }
+                (c == 40 || c == 123 || c == 91) ifTrue { depth = depth + 1 }
+                (c == 41 || c == 125 || c == 93) ifTrue { depth = depth - 1 }
+            }
+            i = i + 1
+        }
+        depth
+    }
+
+    historyPath() {
+        home = (System env("HOME")) ?? (System env("USERPROFILE")) ?? "."
+        home + "/.clay_history"
+    }
+
+    show(v) {
+        (v != nil) ifTrue { Console print("=> " + v toString + "\n") }
+    }
+
+    run() {
+        Console print("Clay VM REPL (clayc, written in Clay) -- type 'quit' or 'exit' to leave\n")
+        history = self historyPath
+        Console loadHistory(history)
+        bc = BcGen new("<repl>", true)
+        input = ""
+        done = false
+        { done == false } whileTrue {
+            line = Console readLine((input == "") ifTrue { ">>> " } ifFalse { "... " })
+            (line == nil) ifTrue {
+                done = true
+            } ifFalse {
+                t = line trim
+                (t == "quit" || t == "exit") ifTrue {
+                    done = true
+                } ifFalse {
+                    input = input + line + "\n"
+                    ((self openCount(input)) <= 0) ifTrue {
+                        self eval(bc, input)
+                        Console saveHistory(history)
+                        input = ""
+                    }
+                }
+            }
+        }
+        Console print("Bye!\n")
+        0
+    }
+
+    eval(bc, text) {
+        p = Parser new(text, "<repl>")
+        program = p parseProgram
+        p hadError ifTrue {
+            Console error("clay: parse error\n")
+            return nil
+        }
+        unit = bc compile(program)
+        (unit == nil) ifTrue {
+            Console error("clay: compilation error\n")
+            return nil
+        }
+        try { self show(VM run(unit)) } catch { |e|
+            Console error("Error: " + e message + "\n")
+        }
+        nil
     }
 }
 

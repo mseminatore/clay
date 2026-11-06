@@ -1,0 +1,25 @@
+// methods, implicit slots, super, non-local return, clone naming
+Base = Object clone {
+    total = 0
+    add(x) { total = total + x
+        self }
+    describe() { "base" }
+    firstOver(list, limit) {
+        list each { |v| (v > limit) ifTrue { return v } }
+        nil
+    }
+}
+Derived = Base clone {
+    describe() { "derived of " + super describe }
+    local() {
+        tmp = 3
+        tmp = tmp * 2
+        tmp
+    }
+}
+d = Derived clone
+d add(4) add(5)
+d total println
+d describe println
+(d firstOver([1, 7, 9], 5)) println
+d local println

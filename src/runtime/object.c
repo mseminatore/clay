@@ -101,8 +101,11 @@ static void bloom_add(volatile unsigned char *b, const char *name) {
     pool_unlock();
 }
 
+static volatile unsigned char g_shadow_bloom[NAME_BLOOM_BITS / 8];   /* names in g_shadowed */
+
 int clay_selector_shadowed_slow(const char *selector) {
     if (g_shadow_overflow) return 1;
+    if (!bloom_has(g_shadow_bloom, selector)) return 0;
     long n = clay_shadow_count;
     for (long i = 0; i < n; i++)
         if (strcmp(g_shadowed[i], selector) == 0) return 1;
@@ -115,6 +118,10 @@ static void shadow_add(const char *name) {
     if (!clay_selector_shadowed_slow(name)) {
         if (clay_shadow_count < SHADOW_MAX) {
             g_shadowed[clay_shadow_count] = strdup(name);
+            unsigned h1, h2;
+            name_hashes(name, &h1, &h2);
+            g_shadow_bloom[h1 >> 3] |= (unsigned char)(1u << (h1 & 7));
+            g_shadow_bloom[h2 >> 3] |= (unsigned char)(1u << (h2 & 7));
             CLAY_ATOMIC_INC(&clay_shadow_count);
         } else {
             g_shadow_overflow = 1;

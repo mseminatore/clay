@@ -2,6 +2,7 @@
  * bootstrap.c - Initialize core prototype objects
  */
 #include "clay.h"
+#include "crossline.h"
 #include "ffi.h"
 #include <time.h>
 #ifndef _WIN32
@@ -37,6 +38,7 @@ ClayObject *clay_Range  = NULL;
 ClayObject *clay_Graphics = NULL;
 ClayObject *clay_Vec3 = NULL;
 ClayObject *clay_Thread = NULL;
+ClayObject *clay_VM = NULL;
 ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
 
@@ -296,8 +298,12 @@ static ClayValue object_neq(ClayObject *self, int argc, ClayValue *argv) {
  * ifFalse on a result where _matched==false evaluates the block.
  */
 
+/* The prototype of condition results: holds their ifTrue/ifFalse once
+ * (created in clay_bootstrap) */
+static ClayObject *clay_CondResult = NULL;
+
 static ClayObject *make_cond_result(ClayValue val, int matched) {
-    ClayObject *obj = clay_clone(clay_Object);
+    ClayObject *obj = clay_clone(clay_CondResult);
     clay_set_slot(obj, "_val", val);
     clay_set_slot(obj, "_matched", matched ? CLAY_TRUE : CLAY_FALSE);
     return obj;
@@ -325,8 +331,6 @@ static ClayValue cond_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
     ClayObject *cr = make_cond_result(result, 1);
     clay_release_val(result); /* make_cond_result took ownership via set_slot */
-    clay_set_method(cr, "ifFalse", cond_ifFalse);
-    clay_set_method(cr, "ifTrue", cond_ifTrue);
     return CLAY_VAL(cr);
 }
 
@@ -336,14 +340,10 @@ static ClayValue bool_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
         ClayObject *cr = make_cond_result(result, 1);
         clay_release_val(result); /* make_cond_result took ownership via set_slot */
-        clay_set_method(cr, "ifFalse", cond_ifFalse);
-        clay_set_method(cr, "ifTrue", cond_ifTrue);
         return CLAY_VAL(cr);
     }
     /* false: return a condition result with _matched=false */
     ClayObject *cr = make_cond_result(CLAY_NIL, 0);
-    clay_set_method(cr, "ifFalse", cond_ifFalse);
-    clay_set_method(cr, "ifTrue", cond_ifTrue);
     return CLAY_VAL(cr);
 }
 
@@ -353,14 +353,10 @@ static ClayValue bool_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
         ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
         ClayObject *cr = make_cond_result(result, 1);
         clay_release_val(result); /* make_cond_result took ownership via set_slot */
-        clay_set_method(cr, "ifTrue", cond_ifTrue);
-        clay_set_method(cr, "ifFalse", cond_ifFalse);
         return CLAY_VAL(cr);
     }
     /* true: return a condition result with _matched=false */
     ClayObject *cr = make_cond_result(CLAY_NIL, 0);
-    clay_set_method(cr, "ifTrue", cond_ifTrue);
-    clay_set_method(cr, "ifFalse", cond_ifFalse);
     return CLAY_VAL(cr);
 }
 
@@ -398,9 +394,18 @@ static ClayValue nil_neq(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 /* Console methods */
+/* Console readLine / readLine(prompt) — one line of input without its line
+ * end, nil at end of input. With a prompt, a terminal gets line editing and
+ * history (crossline). */
 static ClayValue console_readLine(ClayObject *self, int argc, ClayValue *argv) {
-    (void)self; (void)argc; (void)argv;
+    (void)self;
     char buf[4096];
+    if (argc > 0 && CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING)) {
+        fflush(stdout);
+        if (!crossline_readline(clay_string_data(CLAY_OBJ(argv[0])), buf, (int)sizeof(buf)))
+            return CLAY_NIL;
+        return CLAY_VAL(clay_string_new(buf));
+    }
     if (fgets(buf, sizeof(buf), stdin)) {
         size_t len = strlen(buf);
         if (len > 0 && buf[len - 1] == '\n') buf[--len] = '\0';
@@ -429,12 +434,41 @@ static ClayValue console_print(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(self);
 }
 
+/* Console error(args...) — like print, to stderr */
+static ClayValue console_error(ClayObject *self, int argc, ClayValue *argv) {
+    fflush(stdout);
+    for (int i = 0; i < argc; i++) {
+        if (i > 0) fputs(" ", stderr);
+        ClayValue s = clay_send_val(argv[i], "toString", 0, NULL);
+        if (CLAY_IS_TYPE(s, CLAY_TYPE_STRING)) fputs(clay_string_data(CLAY_OBJ(s)), stderr);
+        else fputs(CLAY_IS_NIL(argv[i]) ? "nil" : "?", stderr);
+        clay_release_val(s);
+    }
+    fflush(stderr);
+    return CLAY_VAL(self);
+}
+
 /* Console println(args...) — like print, followed by a newline */
 static ClayValue console_println(ClayObject *self, int argc, ClayValue *argv) {
     console_print(self, argc, argv);
     console_write("\n");
     fflush(stdout);
     return CLAY_VAL(self);
+}
+
+/* Console loadHistory(path) / saveHistory(path) — readLine's line history */
+static ClayValue console_loadHistory(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING))
+        clay_raise(CLAY_VAL(clay_error_new("Console loadHistory requires a path string", "ArgumentError")));
+    return CLAY_BOOL(crossline_history_load(clay_string_data(CLAY_OBJ(argv[0]))) == 0);
+}
+
+static ClayValue console_saveHistory(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING))
+        clay_raise(CLAY_VAL(clay_error_new("Console saveHistory requires a path string", "ArgumentError")));
+    return CLAY_BOOL(crossline_history_save(clay_string_data(CLAY_OBJ(argv[0]))) == 0);
 }
 
 static ClayValue console_prompt(ClayObject *self, int argc, ClayValue *argv) {
@@ -557,7 +591,7 @@ void clay_bootstrap(void) {
 #endif
     /* Create root Object prototype */
     clay_Object = clay_object_new();
-    clay_Object->refcount = 1000000; /* never freed */
+    clay_Object->refcount = CLAY_REFCOUNT_IMMORTAL; /* never freed */
 
     clay_set_method(clay_Object, "clone", object_clone);
     clay_set_method(clay_Object, "new", object_new);
@@ -580,36 +614,40 @@ void clay_bootstrap(void) {
     /* Number prototype */
     clay_Number = clay_object_new();
     clay_Number->parent = clay_Object;
-    clay_Number->refcount = 1000000;
+    clay_Number->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_number_init_methods(clay_Number);
 
     /* String prototype */
     clay_String = clay_object_new();
     clay_String->parent = clay_Object;
     clay_String->type = CLAY_TYPE_STRING;
-    clay_String->refcount = 1000000;
+    clay_String->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_string_init_methods(clay_String);
 
     /* Array prototype */
     clay_Array = clay_object_new();
     clay_Array->parent = clay_Object;
     clay_Array->type = CLAY_TYPE_ARRAY;
-    clay_Array->refcount = 1000000;
+    clay_Array->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_array_init_methods(clay_Array);
 
     /* Block prototype */
     clay_Block = clay_object_new();
     clay_Block->parent = clay_Object;
     clay_Block->type = CLAY_TYPE_BLOCK;
-    clay_Block->refcount = 1000000;
+    clay_Block->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_block_init_methods(clay_Block);
 
     /* Boolean prototype */
     clay_Boolean = clay_object_new();
     clay_Boolean->parent = clay_Object;
-    clay_Boolean->refcount = 1000000;
+    clay_Boolean->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_method(clay_Boolean, "ifTrue", bool_ifTrue);
     clay_set_method(clay_Boolean, "ifFalse", bool_ifFalse);
+    clay_CondResult = clay_clone(clay_Object);
+    clay_CondResult->refcount = CLAY_REFCOUNT_IMMORTAL;
+    clay_set_method(clay_CondResult, "ifTrue", cond_ifTrue);
+    clay_set_method(clay_CondResult, "ifFalse", cond_ifFalse);
     clay_set_method(clay_Boolean, "toString", bool_toString);
     clay_set_method(clay_Boolean, "not", bool_not);
 
@@ -625,7 +663,7 @@ void clay_bootstrap(void) {
     /* Nil prototype */
     clay_Nil = clay_object_new();
     clay_Nil->parent = clay_Object;
-    clay_Nil->refcount = 1000000;
+    clay_Nil->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_method(clay_Nil, "toString", nil_toString);
     clay_set_method(clay_Nil, "type", nil_type);
     clay_set_method(clay_Nil, "==", nil_eq);
@@ -634,18 +672,18 @@ void clay_bootstrap(void) {
     /* Error prototype */
     clay_Error = clay_object_new();
     clay_Error->parent = clay_Object;
-    clay_Error->refcount = 1000000;
+    clay_Error->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_error_init_methods(clay_Error);
 
     /* Loop control signal singletons (Error clones for break/continue) */
     clay_BreakSignal = clay_clone(clay_Error);
-    clay_BreakSignal->refcount = 1000000;
+    clay_BreakSignal->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_BreakSignal, "_message", CLAY_VAL(clay_string_new("break")));
     clay_set_slot_take(clay_BreakSignal, "_type", CLAY_VAL(clay_string_new("BreakSignal")));
     clay_set_slot_take(clay_BreakSignal, "_name", CLAY_VAL(clay_string_new("BreakSignal")));
 
     clay_ContinueSignal = clay_clone(clay_Error);
-    clay_ContinueSignal->refcount = 1000000;
+    clay_ContinueSignal->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("continue")));
     clay_set_slot_take(clay_ContinueSignal, "_type", CLAY_VAL(clay_string_new("ContinueSignal")));
     clay_set_slot_take(clay_ContinueSignal, "_name", CLAY_VAL(clay_string_new("ContinueSignal")));
@@ -654,41 +692,44 @@ void clay_bootstrap(void) {
     clay_Dict = clay_object_new();
     clay_Dict->parent = clay_Object;
     clay_Dict->type = CLAY_TYPE_DICT;
-    clay_Dict->refcount = 1000000;
+    clay_Dict->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_dict_init_methods(clay_Dict);
 
     /* Range prototype */
     clay_Range = clay_object_new();
     clay_Range->parent = clay_Object;
-    clay_Range->refcount = 1000000;
+    clay_Range->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Range, "_name", CLAY_VAL(clay_string_new("Range")));
     clay_range_init_methods(clay_Range);
 
     /* Math object */
     clay_Math = clay_object_new();
     clay_Math->parent = clay_Object;
-    clay_Math->refcount = 1000000;
+    clay_Math->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_math_init(clay_Math);
 
     /* Console object */
     clay_Console = clay_object_new();
     clay_Console->parent = clay_Object;
-    clay_Console->refcount = 1000000;
+    clay_Console->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_method(clay_Console, "readLine", console_readLine);
+    clay_set_method(clay_Console, "loadHistory", console_loadHistory);
+    clay_set_method(clay_Console, "saveHistory", console_saveHistory);
     clay_set_method(clay_Console, "prompt", console_prompt);
     clay_set_method(clay_Console, "print", console_print);
     clay_set_method(clay_Console, "println", console_println);
+    clay_set_method(clay_Console, "error", console_error);
 
     /* File object */
     clay_File = clay_object_new();
     clay_File->parent = clay_Object;
-    clay_File->refcount = 1000000;
+    clay_File->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_file_init(clay_File);
 
     /* System object — memory diagnostics */
     clay_System = clay_object_new();
     clay_System->parent = clay_Object;
-    clay_System->refcount = 1000000;
+    clay_System->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
@@ -706,42 +747,42 @@ void clay_bootstrap(void) {
     /* FFI object — foreign function interface */
     clay_FFI = clay_object_new();
     clay_FFI->parent = clay_Object;
-    clay_FFI->refcount = 1000000;
+    clay_FFI->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_FFI, "_name", CLAY_VAL(clay_string_new("FFI")));
     clay_ffi_init(clay_FFI);
 
     /* Date prototype */
     clay_Date = clay_object_new();
     clay_Date->parent = clay_Object;
-    clay_Date->refcount = 1000000;
+    clay_Date->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Date, "_name", CLAY_VAL(clay_string_new("Date")));
     clay_date_init_methods(clay_Date);
 
     /* Http prototype */
     clay_Http = clay_object_new();
     clay_Http->parent = clay_Object;
-    clay_Http->refcount = 1000000;
+    clay_Http->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Http, "_name", CLAY_VAL(clay_string_new("Http")));
     clay_http_init(clay_Http);
 
     /* Regex prototype */
     clay_Regex = clay_object_new();
     clay_Regex->parent = clay_Object;
-    clay_Regex->refcount = 1000000;
+    clay_Regex->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Regex, "_name", CLAY_VAL(clay_string_new("Regex")));
     clay_regex_init_methods(clay_Regex);
 
     /* Fiber prototype */
     clay_Fiber = clay_object_new();
     clay_Fiber->parent = clay_Object;
-    clay_Fiber->refcount = 1000000;
+    clay_Fiber->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
     clay_fiber_init_methods(clay_Fiber);
 
     /* Db prototype */
     clay_Db = clay_object_new();
     clay_Db->parent = clay_Object;
-    clay_Db->refcount = 1000000;
+    clay_Db->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Db, "_name", CLAY_VAL(clay_string_new("Db")));
     clay_db_init(clay_Db);
 
@@ -749,14 +790,14 @@ void clay_bootstrap(void) {
     clay_Vec3 = clay_object_new();
     clay_Vec3->parent = clay_Object;
     clay_Vec3->type = CLAY_TYPE_VEC3;
-    clay_Vec3->refcount = 1000000;
+    clay_Vec3->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Vec3, "_name", CLAY_VAL(clay_string_new("Vec3")));
     clay_vec3_init_methods(clay_Vec3);
 
     /* Thread prototype (requires -DCLAY_THREAD_SAFE for real threading) */
     clay_Thread = clay_object_new();
     clay_Thread->parent = clay_Object;
-    clay_Thread->refcount = 1000000;
+    clay_Thread->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Thread, "_name", CLAY_VAL(clay_string_new("Thread")));
     {
         extern void clay_thread_init(ClayObject *proto);
@@ -766,9 +807,19 @@ void clay_bootstrap(void) {
     /* Graphics prototype (SDL2 backend — may be stub if SDL2 not found) */
     clay_Graphics = clay_object_new();
     clay_Graphics->parent = clay_Object;
-    clay_Graphics->refcount = 1000000;
+    clay_Graphics->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Graphics, "_name", CLAY_VAL(clay_string_new("Graphics")));
     clay_graphics_init(clay_Graphics);
+
+    /* VM prototype: run bytecode compiled by Clay programs (vm_bridge.c) */
+    clay_VM = clay_object_new();
+    clay_VM->parent = clay_Object;
+    clay_VM->refcount = CLAY_REFCOUNT_IMMORTAL;
+    clay_set_slot_take(clay_VM, "_name", CLAY_VAL(clay_string_new("VM")));
+    {
+        extern void clay_vm_init_methods(ClayObject *proto);
+        clay_vm_init_methods(clay_VM);
+    }
 }
 
 void clay_shutdown(void) {

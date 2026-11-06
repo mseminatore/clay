@@ -8,7 +8,7 @@
 # 3. clayc2 builds clayc3
 # The C of generations 2 and 3 must be identical (the fixpoint), and equal to
 # what the C compiler generated for generation 1. Finally clayc3 compiles a
-# test program, which must run successfully.
+# test program, which must run successfully, and runs it in the VM.
 
 foreach(var CLAY ROOT WORK CFG)
     if(NOT ${var})
@@ -63,5 +63,12 @@ if(NOT rc EQUAL 0)
     message(FATAL_ERROR "test_return built by clayc3 failed (${rc}):\n${out}\n${err}")
 endif()
 
+# ... and runs one in the VM, with bytecode from the Clay compiler
+execute_process(COMMAND "${WORK}/clayc3${ext}" test_return.clay WORKING_DIRECTORY "${ROOT}/test/programs"
+                RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT rc EQUAL 0)
+    message(FATAL_ERROR "clayc3 running test_return.clay failed (${rc}):\n${out}\n${err}")
+endif()
+
 string(LENGTH "${c3}" size)
-message(STATUS "bootstrap: clayc2.c == clayc3.c == clayc1.c (${size} bytes); clayc3 builds working programs")
+message(STATUS "bootstrap: clayc2.c == clayc3.c == clayc1.c (${size} bytes); clayc3 builds and runs working programs")

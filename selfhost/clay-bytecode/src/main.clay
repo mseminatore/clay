@@ -1,0 +1,1107 @@
+// clay-bytecode -- the Clay-to-bytecode compiler, written in Clay
+//
+// Usage:
+//   import("../clay-bytecode/src/main.clay")
+//
+//   p = Parser new(source, "prog.clay")
+//   program = p parseProgram
+//   bc = BcGen new("prog.clay", true)   // true: compile for this process's VM
+//   unit = bc compile(program)           // nil after a compile error
+//   result = VM run(unit)                // run it (native programs only)
+//
+// A port of src/compiler/bc_compiler.c that produces the same bytecode, byte
+// for byte (CTest clay_selfhost_bytecode compares `BcGen dump` with
+// `clay --bytecode` on every .clay file in the repository). Like the C
+// compiler, a BcGen keeps its state from one compile to the next — the
+// constant pool, chunks, method slots and known globals — so a REPL compiles
+// one input after another into the same VM.
+//
+// The bytecode runs on the VM in C (src/vm/clay.yaml) through the runtime
+// bridge (src/runtime/vm_bridge.c): every Clay operation (send, clone,
+// blocks, ...) is a call to one of the bridge's native functions, numbered
+// in the order bc_compiler_init registers them.
+
+import("../../clay-parser/src/main.clay")
+
+// One local variable of the chunk being compiled
+BcLocal = Object clone {
+    lname = ""
+    slot = 0
+    depth = 0
+    captured = false
+
+    make(n, s, d) {
+        l = self clone
+        l lname = n
+        l slot = s
+        l depth = d
+        l
+    }
+}
+
+// Variables a block captures from its enclosing scope, in order
+BcCaptures = Object clone {
+    names = nil
+    slots = nil
+
+    new() {
+        c = self clone
+        c names = []
+        c slots = []
+        c
+    }
+
+    has(n) { names contains(n) }
+
+    add(n, s) {
+        (names contains(n)) ifFalse {
+            names push(n)
+            slots push(s)
+        }
+    }
+
+    size() { names size }
+}
+
+BcGen = Object clone {
+    // --- opcodes (src/vm/generated/opcodes.h) ---
+    PUSH_CONST = 0
+    POP = 1
+    DUP = 2
+    JUMP = 16
+    JUMP_IF_FALSE = 17
+    CALL_NATIVE = 19
+    HALT = 21
+    GET_LOCAL = 22
+    SET_LOCAL = 23
+    arithOps = #{ "+": 3, "-": 4, "*": 5, "/": 6, "%": 7 }
+    compareOps = #{ "==": 9, "!=": 10, "<": 11, ">": 12, "<=": 13, ">=": 14 }
+
+    // --- native functions, in registration order (bc_compiler_init) ---
+    N_SEND = 0
+    N_SUPER_SEND = 1
+    N_CLONE = 2
+    N_SET_SLOT = 3
+    N_SET_METHOD = 4
+    N_MAKE_BLOCK = 6
+    N_MAKE_ARRAY = 7
+    N_MAKE_DICT = 8
+    N_LOAD_GLOBAL = 9
+    N_LOAD_SELF = 10
+    N_STORE_GLOBAL = 11
+    N_CELL_NEW = 12
+    N_CELL_GET = 13
+    N_CELL_SET = 14
+    N_IS_TRUTHY = 15
+    N_TO_BOOL = 16
+    N_IS_NIL = 17
+    N_SELF_HAS_SLOT = 18
+    N_SET_SELF_SLOT = 19
+    N_CELL_SET_REV = 20
+    N_METHOD_RETURN_ID = 21
+    N_RAISE_RETURN = 22
+    N_STOP_VM = 23
+    N_TRY_CATCH = 24
+    N_RAISE = 25
+    N_MAKE_RANGE = 26
+
+    MAX_CODE = 65536
+    MAX_LOCALS = 256
+    MAX_CAPTURES = 64
+    MAX_PARAMS = 16
+
+    // Names every compiler treats as builtins (is_builtin_global), plus
+    // plugin prototypes
+    builtinNames = ["Object", "Number", "String", "Array", "Block", "Nil", "Boolean",
+                    "Error", "Dict", "Math", "Console", "File", "System", "FFI", "Date",
+                    "Http", "Regex", "Fiber", "Db", "Graphics", "BreakSignal",
+                    "ContinueSignal", "true", "false", "nil"]
+    // The globals a new VM starts with (bc_compiler_init)
+    vmStartGlobals = ["Object", "Number", "String", "Array", "Block", "Nil", "Boolean",
+                      "Error", "Dict", "Math", "Console", "File", "System", "FFI", "Date",
+                      "Http", "Regex", "Range", "Fiber", "Db", "Graphics", "Vec3", "Thread",
+                      "BreakSignal", "ContinueSignal", "VM", "true", "false", "nil"]
+
+    // --- state kept across compiles (the VM's, mirrored) ---
+    srcFile = "<input>"
+    liveVM = false         // ask this process's VM for its globals
+    pluginNames = nil
+    cpool = nil            // constants (Clay values: Int, Float, String, nil, true, false)
+    ckinds = nil           // "int", "float", "string" or "" for each constant
+    strIdx = nil           // string constant -> its first index
+    chunkList = nil        // compiled chunks (BcChunk-like arrays, see chunkRecord)
+    methodList = nil       // method slots: [chunkId, paramCount, name]
+    globalsKnown = nil     // top-level variable names seen so far
+    constBase = 0          // the VM's counts when this BcGen started
+    chunkBase = 0
+    methodBase = 0
+    constMark = 0          // what earlier units already handed to the VM
+    chunkMark = 0
+    methodMark = 0
+
+    // --- state of the code being compiled ---
+    failed = false
+    buf = nil              // bytes of the current chunk (or top-level code)
+    bufLines = nil         // source line of each byte
+    curLine = 0
+    locs = nil             // BcLocal of the current chunk
+    depth = 0
+    inMeth = false         // inside a method body (or a block within one)
+    isMethChunk = false    // compiling a method body itself
+    slotsKnown = nil       // slot names of the enclosing clone body
+
+    new(file = nil, live = false, plugins = nil) {
+        g = self clone
+        g srcFile = file ?? "<input>"
+        g liveVM = live
+        g pluginNames = plugins ?? (System pluginGlobals)
+        g cpool = []
+        g ckinds = []
+        g strIdx = #{}
+        g chunkList = []
+        g methodList = []
+        g globalsKnown = #{}
+        live ifTrue {
+            counts = VM counts
+            g constBase = counts at(0)
+            g chunkBase = counts at(1)
+            g methodBase = counts at(2)
+        }
+        g buf = []
+        g bufLines = []
+        g locs = []
+        g
+    }
+
+    // --- emission ---
+
+    emitByte(b) {
+        (buf size >= MAX_CODE) ifTrue {
+            failed = true
+            return nil
+        }
+        buf push(b)
+        bufLines push(curLine)
+    }
+
+    emitU16(v) {
+        self emitByte(v % 256)
+        self emitByte((v / 256) % 256)
+    }
+
+    emitOp(op) { self emitByte(op) }
+
+    emitOpU16(op, arg) {
+        self emitOp(op)
+        self emitU16(arg)
+    }
+
+    native(fn, argc) {
+        self emitOp(CALL_NATIVE)
+        self emitU16(fn)
+        self emitByte(argc % 256)
+    }
+
+    // a jump with a placeholder offset; returns where to patch it
+    emitJump(op) {
+        self emitOp(op)
+        at = buf size
+        self emitU16(0)
+        at
+    }
+
+    patchJump(at) {
+        off = buf size - (at + 2)
+        (at < buf size) ifTrue { buf setAt(at, off % 256) }
+        (at + 1 < buf size) ifTrue { buf setAt(at + 1, (off / 256) % 256) }
+    }
+
+    // --- constants ---
+
+    addConstant(v, kind) {
+        cpool push(v)
+        ckinds push(kind)
+        constBase + cpool size - 1
+    }
+
+    constInt(v) { self addConstant(v, "int") }
+    constNil() { self addConstant(nil, "") }
+
+    constString(s) {
+        i = strIdx get(s)
+        (i != nil) ifTrue { return i }
+        i = self addConstant(s, "string")
+        strIdx set(s, i)
+        i
+    }
+
+    pushConst(i) { self emitOpU16(PUSH_CONST, i) }
+    pushNil() { self pushConst(self constNil) }
+    pushString(s) { self pushConst(self constString(s)) }
+
+    // --- names ---
+
+    isBuiltin(n) { (builtinNames contains(n)) || (pluginNames contains(n)) }
+
+    // a top-level variable, or a global the VM has
+    isUserGlobal(n) {
+        (globalsKnown has(n)) ifTrue { return true }
+        liveVM ifTrue { return VM hasGlobal(n) }
+        (vmStartGlobals contains(n)) || (pluginNames contains(n))
+    }
+
+    registerGlobal(n) { globalsKnown set(n, true) }
+
+    resolveLocal(n) {
+        i = locs size - 1
+        { i >= 0 } whileTrue {
+            l = locs at(i)
+            (l lname == n) ifTrue { return l slot }
+            i = i - 1
+        }
+        -1
+    }
+
+    isCaptured(s) {
+        found = locs find { |l| l slot == s }
+        (found == nil) ifTrue { return false }
+        found captured
+    }
+
+    addLocal(n) {
+        (locs size >= MAX_LOCALS) ifTrue { return -1 }
+        s = locs size
+        locs push(BcLocal make(n, s, depth))
+        s
+    }
+
+    markCaptured(s) {
+        (s >= 0 && s < locs size) ifTrue { (locs at(s)) captured = true }
+    }
+
+    // implicit-slot fallback: the hidden flag local "?x" of local x
+    flagLocal(n) { self resolveLocal("?" + n) }
+
+    isKnownSlot(n) { slotsKnown != nil && (slotsKnown contains(n)) }
+
+    // push local s, unwrapping its cell if captured
+    getLocalValue(s) {
+        self emitOpU16(GET_LOCAL, s)
+        (self isCaptured(s)) ifTrue { self native(N_CELL_GET, 1) }
+    }
+
+    // flag ? (self n) : local
+    flaggedRead(n, s, flag) {
+        self getLocalValue(flag)
+        toLocal = self emitJump(JUMP_IF_FALSE)
+        self native(N_LOAD_SELF, 0)
+        self pushString(n)
+        self native(N_SEND, 2)
+        toEnd = self emitJump(JUMP)
+        self patchJump(toLocal)
+        self getLocalValue(s)
+        self patchJump(toEnd)
+    }
+
+    // value on the stack -> flag ? self.n = v : local = v (value stays)
+    flaggedWrite(n, s, flag) {
+        self getLocalValue(flag)
+        toLocal = self emitJump(JUMP_IF_FALSE)
+        self pushString(n)
+        self native(N_SET_SELF_SLOT, 2)
+        toEnd = self emitJump(JUMP)
+        self patchJump(toLocal)
+        (self isCaptured(s)) ifTrue {
+            self emitOpU16(GET_LOCAL, s)
+            self native(N_CELL_SET_REV, 2)
+        } ifFalse {
+            self emitOpU16(SET_LOCAL, s)
+        }
+        self patchJump(toEnd)
+    }
+
+    // --- capture analysis ---
+
+    paramNamesOf(list) { list map { |p| p name } }
+
+    // capture n and, if it has one, its flag local "?n"
+    captureWithFlag(caps, n, s) {
+        caps add(n, s)
+        fs = self resolveLocal("?" + n)
+        (fs >= 0) ifTrue { caps add("?" + n, fs) }
+    }
+
+    scanList(list, params, caps) {
+        list each { |n| self scan(n, params, caps) }
+    }
+
+    // free variables of a block body that are locals of the enclosing scope
+    scan(n, params, caps) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Ident") ifTrue {
+            nm = n name
+            (self isBuiltin(nm)) ifTrue { return nil }
+            (params contains(nm)) ifTrue { return nil }
+            (caps has(nm)) ifTrue { return nil }
+            s = self resolveLocal(nm)
+            (s >= 0) ifTrue { self captureWithFlag(caps, nm, s) }
+            return nil
+        }
+        (k == "Block") ifTrue {
+            combined = params slice(0, params size)
+            n params each { |p| combined push(p name) }
+            self scanList(n body, combined, caps)
+            return nil
+        }
+        (k == "Send") ifTrue {
+            self scan(n recv, params, caps)
+            self scanList(n items, params, caps)
+            return nil
+        }
+        (k == "Binary") ifTrue {
+            self scan(n left, params, caps)
+            self scan(n right, params, caps)
+            return nil
+        }
+        (k == "Assign") ifTrue {
+            nm = n name
+            ((self isBuiltin(nm)) == false && (params contains(nm)) == false &&
+             (caps has(nm)) == false) ifTrue {
+                s = self resolveLocal(nm)
+                (s >= 0) ifTrue { self captureWithFlag(caps, nm, s) }
+            }
+            self scan(n value, params, caps)
+            return nil
+        }
+        (k == "Clone") ifTrue {
+            self scan(n recv, params, caps)
+            self scanList(n items, params, caps)
+            return nil
+        }
+        (k == "MethodDef") ifTrue {
+            self scanList(n body, params, caps)
+            return nil
+        }
+        (k == "SlotDef") ifTrue {
+            self scan(n value, params, caps)
+            return nil
+        }
+        (k == "Array") ifTrue {
+            self scanList(n items, params, caps)
+            return nil
+        }
+        (k == "TryCatch") ifTrue {
+            self scan(n tryBlock, params, caps)
+            self scan(n catchBlock, params, caps)
+            self scan(n finallyBlock, params, caps)
+            return nil
+        }
+        (k == "Raise") ifTrue {
+            self scan(n expr, params, caps)
+            return nil
+        }
+        (k == "SlotAssign") ifTrue {
+            self scan(n recv, params, caps)
+            self scan(n value, params, caps)
+            return nil
+        }
+        (k == "Return") ifTrue {
+            rs = self resolveLocal("?ret")
+            (rs >= 0) ifTrue { caps add("?ret", rs) }
+            self scan(n expr, params, caps)
+            return nil
+        }
+        (k == "DictLit") ifTrue {
+            self scanList(n vals, params, caps)
+            return nil
+        }
+        nil
+    }
+
+    // mark the locals nested blocks capture, so they are boxed in cells
+    prescanList(list) { list each { |n| self prescan(n) } }
+
+    prescan(n) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Block") ifTrue {
+            caps = BcCaptures new
+            self scanList(n body, self paramNamesOf(n params), caps)
+            caps names each { |nm|
+                s = self resolveLocal(nm)
+                (s >= 0) ifTrue { self markCaptured(s) }
+            }
+            return nil
+        }
+        (k == "Assign") ifTrue { return self prescan(n value) }
+        (k == "Send") ifTrue {
+            self prescan(n recv)
+            return self prescanList(n items)
+        }
+        (k == "Binary") ifTrue {
+            self prescan(n left)
+            return self prescan(n right)
+        }
+        (k == "TryCatch") ifTrue {
+            self prescan(n tryBlock)
+            self prescan(n catchBlock)
+            return self prescan(n finallyBlock)
+        }
+        (k == "SlotAssign") ifTrue {
+            self prescan(n recv)
+            return self prescan(n value)
+        }
+        (k == "Return") ifTrue { return self prescan(n expr) }
+        (k == "DictLit") ifTrue { return self prescanList(n vals) }
+        nil
+    }
+
+    // locals created by bare assignments in a method body (or a block): not
+    // builtins, slots of the enclosing clone body or (outside methods) globals
+    preregisterName(nm) {
+        ((self isBuiltin(nm)) == false && (inMeth || (self isUserGlobal(nm)) == false) &&
+         (self isKnownSlot(nm)) == false && (self resolveLocal(nm)) < 0) ifTrue {
+            self addLocal(nm)
+        }
+    }
+
+    preregister(body) {
+        body each { |st|
+            (st != nil && st kind == "Assign") ifTrue { self preregisterName(st name) }
+            (st != nil && st kind == "Destructure") ifTrue {
+                st items each { |t| self preregisterName(t name) }
+            }
+        }
+    }
+
+    // --- non-local return analysis (ast_has_block_return) ---
+
+    returnWalkList(list, inBlock, wantInBlock) {
+        (list == nil) ifTrue { return false }
+        (list find { |n| self returnWalk(n, inBlock, wantInBlock) }) != nil
+    }
+
+    returnWalk(n, inBlock, wantInBlock) {
+        (n == nil) ifTrue { return false }
+        k = n kind
+        (k == "Return") ifTrue {
+            (wantInBlock == false || inBlock) ifTrue { return true }
+            return self returnWalk(n expr, inBlock, wantInBlock)
+        }
+        (k == "Block") ifTrue { return self returnWalkList(n body, true, wantInBlock) }
+        (k == "Assign") ifTrue { return self returnWalk(n value, inBlock, wantInBlock) }
+        (k == "Send") ifTrue {
+            return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                   (self returnWalkList(n items, inBlock, wantInBlock))
+        }
+        (k == "Binary") ifTrue {
+            return (self returnWalk(n left, inBlock, wantInBlock)) ||
+                   (self returnWalk(n right, inBlock, wantInBlock))
+        }
+        (k == "Array") ifTrue { return self returnWalkList(n items, inBlock, wantInBlock) }
+        (k == "DictLit") ifTrue { return self returnWalkList(n vals, inBlock, wantInBlock) }
+        (k == "TryCatch") ifTrue {
+            return (self returnWalk(n tryBlock, inBlock, wantInBlock)) ||
+                   (self returnWalk(n catchBlock, inBlock, wantInBlock)) ||
+                   (self returnWalk(n finallyBlock, inBlock, wantInBlock))
+        }
+        (k == "Raise") ifTrue { return self returnWalk(n expr, inBlock, wantInBlock) }
+        (k == "SlotAssign") ifTrue {
+            return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                   (self returnWalk(n value, inBlock, wantInBlock))
+        }
+        (k == "Destructure") ifTrue { return self returnWalk(n value, inBlock, wantInBlock) }
+        (k == "Clone") ifTrue { return self returnWalk(n recv, inBlock, wantInBlock) }
+        false
+    }
+
+    hasBlockReturn(body) { self returnWalkList(body, false, true) }
+
+    // --- chunks ---
+
+    // Compile a block or method body into a new chunk (bc_compile_chunk);
+    // captures (BcCaptures or nil) become locals after the parameters.
+    // Returns the chunk id.
+    compileChunk(body, params, caps, isMethod) {
+        id = chunkBase + chunkList size
+        rec = [nil, nil, [], [], [], 0, false]
+        chunkList push(rec)
+        pnames = rec at(2)
+        params each { |p| pnames push(p name) }
+
+        outerBuf = buf
+        outerLines = bufLines
+        outerLine = curLine
+        outerLocs = locs
+        outerDepth = depth
+        outerInMeth = inMeth
+        outerIsMeth = isMethChunk
+
+        buf = []
+        bufLines = []
+        locs = []
+        depth = 0
+        isMethod ifTrue { inMeth = true }
+        isMethChunk = isMethod
+
+        i = 0
+        { i < pnames size && i < MAX_PARAMS } whileTrue {
+            self addLocal(pnames at(i))
+            i = i + 1
+        }
+        ncaps = 0
+        (caps != nil) ifTrue {
+            i = 0
+            { i < caps size && i < MAX_CAPTURES } whileTrue {
+                self markCaptured(self addLocal(caps names at(i)))
+                i = i + 1
+            }
+            ncaps = caps size
+        }
+
+        retSlot = -1
+        (isMethod && (self hasBlockReturn(body))) ifTrue {
+            rec setAt(6, true)
+            retSlot = self addLocal("?ret")
+        }
+
+        preStart = locs size
+        self preregister(body)
+        preEnd = locs size
+
+        flagStart = locs size
+        inMeth ifTrue {
+            i = preStart
+            { i < preEnd } whileTrue {
+                self addLocal("?" + (locs at(i)) lname)
+                i = i + 1
+            }
+        }
+        flagEnd = locs size
+
+        self prescanList(body)
+
+        (retSlot >= 0) ifTrue {
+            self native(N_METHOD_RETURN_ID, 0)
+            self emitOpU16(SET_LOCAL, retSlot)
+            self emitOp(POP)
+        }
+
+        i = flagStart
+        { i < flagEnd } whileTrue {
+            self pushString((locs at(preStart + (i - flagStart))) lname)
+            self native(N_SELF_HAS_SLOT, 1)
+            self emitOpU16(SET_LOCAL, i)
+            self emitOp(POP)
+            i = i + 1
+        }
+
+        // box captured locals (except the captures, already cells)
+        capStart = pnames size
+        capEnd = pnames size + ncaps
+        i = 0
+        { i < locs size } whileTrue {
+            ((locs at(i)) captured && (i < capStart || i >= capEnd)) ifTrue {
+                self emitOpU16(GET_LOCAL, i)
+                self native(N_CELL_NEW, 1)
+                self emitOpU16(SET_LOCAL, i)
+                self emitOp(POP)
+            }
+            i = i + 1
+        }
+
+        // default parameter values
+        i = 0
+        { i < params size && i < MAX_PARAMS } whileTrue {
+            p = params at(i)
+            (p kind == "Assign") ifTrue {
+                self emitOpU16(GET_LOCAL, i)
+                (self isCaptured(i)) ifTrue { self native(N_CELL_GET, 1) }
+                self native(N_IS_NIL, 1)
+                skip = self emitJump(JUMP_IF_FALSE)
+                (self isCaptured(i)) ifTrue {
+                    self emitOpU16(GET_LOCAL, i)
+                    self expr(p value)
+                    self native(N_CELL_SET, 2)
+                    self emitOp(POP)
+                } ifFalse {
+                    self expr(p value)
+                    self emitOpU16(SET_LOCAL, i)
+                    self emitOp(POP)
+                }
+                self patchJump(skip)
+            }
+            i = i + 1
+        }
+
+        // body: the last expression stays on the stack
+        i = 0
+        { i < body size } whileTrue {
+            st = body at(i)
+            ((i == body size - 1) && st kind != "Return" && st kind != "Break" &&
+             st kind != "Continue") ifTrue {
+                self expr(st)
+            } ifFalse {
+                self stmt(st)
+            }
+            i = i + 1
+        }
+        (body size == 0) ifTrue { self pushNil }
+
+        rec setAt(5, locs size)
+        self emitOp(HALT)
+        rec setAt(0, buf)
+        rec setAt(1, bufLines)
+
+        buf = outerBuf
+        bufLines = outerLines
+        curLine = outerLine
+        locs = outerLocs
+        depth = outerDepth
+        inMeth = outerInMeth
+        isMethChunk = outerIsMeth
+        id
+    }
+
+    // --- expressions ---
+
+    expr(n) {
+        (n == nil || failed) ifTrue { return nil }
+        curLine = n line
+        k = n kind
+        (k == "Int") ifTrue { return self pushConst(self constInt(n value)) }
+        (k == "Float") ifTrue { return self pushConst(self addConstant(n value, "float")) }
+        (k == "String") ifTrue { return self pushString(n value) }
+        (k == "Ident") ifTrue { return self identExpr(n name) }
+        (k == "Self") ifTrue { return self native(N_LOAD_SELF, 0) }
+        (k == "Assign") ifTrue { return self assignExpr(n) }
+        (k == "Destructure") ifTrue { return nil }
+        (k == "Send") ifTrue {
+            self expr(n recv)
+            self pushString(n name)
+            n items each { |a| self expr(a) }
+            return self native(n isSuper ifTrue { N_SUPER_SEND } ifFalse { N_SEND }, 2 + n items size)
+        }
+        (k == "Binary") ifTrue { return self binaryExpr(n) }
+        (k == "Block") ifTrue { return self blockExpr(n) }
+        (k == "Array") ifTrue {
+            self native(N_MAKE_ARRAY, 0)
+            ai = self constString("append")
+            n items each { |e|
+                self emitOp(DUP)
+                self pushConst(ai)
+                self expr(e)
+                self native(N_SEND, 3)
+                self emitOp(POP)
+            }
+            return nil
+        }
+        (k == "DictLit") ifTrue {
+            self native(N_MAKE_DICT, 0)
+            si = self constString("set")
+            i = 0
+            { i < n keys size } whileTrue {
+                self emitOp(DUP)
+                self pushConst(si)
+                self pushString((n keys at(i)) value)
+                self expr(n vals at(i))
+                self native(N_SEND, 4)
+                self emitOp(POP)
+                i = i + 1
+            }
+            return nil
+        }
+        (k == "Clone") ifTrue { return self cloneExpr(n) }
+        (k == "TryCatch") ifTrue {
+            self expr(n tryBlock)
+            (n catchBlock != nil) ifTrue { self expr(n catchBlock) } ifFalse { self pushNil }
+            (n finallyBlock != nil) ifTrue { self expr(n finallyBlock) } ifFalse { self pushNil }
+            return self native(N_TRY_CATCH, 3)
+        }
+        (k == "Raise") ifTrue {
+            self expr(n expr)
+            return self native(N_RAISE, 1)
+        }
+        (k == "SlotAssign") ifTrue {
+            self expr(n recv)
+            self pushString(n name)
+            self expr(n value)
+            return self native(N_SET_SLOT, 3)
+        }
+        self pushNil
+    }
+
+    identExpr(nm) {
+        s = self resolveLocal(nm)
+        flag = (s >= 0) ifTrue { self flagLocal(nm) } ifFalse { -1 }
+        (flag >= 0) ifTrue { return self flaggedRead(nm, s, flag) }
+        (s >= 0) ifTrue {
+            self emitOpU16(GET_LOCAL, s)
+            (self isCaptured(s)) ifTrue { self native(N_CELL_GET, 1) }
+            return nil
+        }
+        (inMeth && (self isBuiltin(nm)) == false && (self isUserGlobal(nm)) == false) ifTrue {
+            // implicit self: a slot or method of self
+            self native(N_LOAD_SELF, 0)
+            self pushString(nm)
+            return self native(N_SEND, 2)
+        }
+        self pushString(nm)
+        self native(N_LOAD_GLOBAL, 1)
+    }
+
+    assignExpr(n) {
+        nm = n name
+        s = self resolveLocal(nm)
+        flag = (s >= 0) ifTrue { self flagLocal(nm) } ifFalse { -1 }
+        (flag >= 0) ifTrue {
+            self expr(n value)
+            return self flaggedWrite(nm, s, flag)
+        }
+        (s >= 0) ifTrue {
+            (self isCaptured(s)) ifTrue {
+                self emitOpU16(GET_LOCAL, s)
+                self expr(n value)
+                self native(N_CELL_SET, 2)
+            } ifFalse {
+                self expr(n value)
+                self emitOpU16(SET_LOCAL, s)
+            }
+            return nil
+        }
+        (inMeth && (self isBuiltin(nm)) == false) ifTrue {
+            // in a method: a slot of self, never a global
+            self native(N_LOAD_SELF, 0)
+            self pushString(nm)
+            self expr(n value)
+            return self native(N_SET_SLOT, 3)
+        }
+        self pushString(nm)
+        self expr(n value)
+        self native(N_STORE_GLOBAL, 2)
+    }
+
+    binaryExpr(n) {
+        op = n name
+        (op == "&&") ifTrue {
+            self expr(n left)
+            self native(N_IS_TRUTHY, 1)
+            toFalse = self emitJump(JUMP_IF_FALSE)
+            self expr(n right)
+            self native(N_TO_BOOL, 1)
+            toEnd = self emitJump(JUMP)
+            self patchJump(toFalse)
+            self pushConst(self addConstant(false, ""))
+            return self patchJump(toEnd)
+        }
+        (op == "||") ifTrue {
+            self expr(n left)
+            self native(N_IS_TRUTHY, 1)
+            toRight = self emitJump(JUMP_IF_FALSE)
+            self pushConst(self addConstant(true, ""))
+            toEnd = self emitJump(JUMP)
+            self patchJump(toRight)
+            self expr(n right)
+            self native(N_TO_BOOL, 1)
+            return self patchJump(toEnd)
+        }
+        (op == "??") ifTrue {
+            self expr(n left)
+            self emitOp(DUP)
+            self native(N_IS_NIL, 1)
+            notNil = self emitJump(JUMP_IF_FALSE)
+            self emitOp(POP)
+            self expr(n right)
+            toEnd = self emitJump(JUMP)
+            self patchJump(notNil)
+            return self patchJump(toEnd)
+        }
+        (op == "..") ifTrue {
+            self expr(n left)
+            self expr(n right)
+            return self native(N_MAKE_RANGE, 2)
+        }
+        vmOp = arithOps get(op)
+        cmpOp = compareOps get(op)
+        (vmOp != nil || cmpOp != nil) ifTrue {
+            self expr(n left)
+            self expr(n right)
+            self emitOp(vmOp ?? cmpOp)
+            (cmpOp != nil) ifTrue { self native(N_TO_BOOL, 1) }
+            return nil
+        }
+        // other operators: a message send
+        self expr(n left)
+        self pushString(op)
+        self expr(n right)
+        self native(N_SEND, 3)
+    }
+
+    blockExpr(n) {
+        caps = BcCaptures new
+        bparams = self paramNamesOf(n params)
+        n body each { |st| self scan(st, bparams, caps) }
+        (caps size > MAX_CAPTURES) ifTrue {
+            Console print(srcFile + ":" + n line toString + ": error: block captures too many variables (" +
+                          caps size toString + ", max " + MAX_CAPTURES toString + ")\n")
+            failed = true
+        }
+        id = self compileChunk(n body, n params, caps, false)
+        rec = chunkList at(id - chunkBase)
+        ncap = (caps size < MAX_CAPTURES) ifTrue { caps size } ifFalse { MAX_CAPTURES }
+        i = 0
+        { i < ncap } whileTrue {
+            (rec at(3)) push(caps names at(i))
+            (rec at(4)) push(caps slots at(i))
+            i = i + 1
+        }
+        self pushConst(self constInt(id))
+        self pushConst(self constInt(n params size))
+        i = 0
+        { i < ncap } whileTrue {
+            self emitOpU16(GET_LOCAL, caps slots at(i))
+            i = i + 1
+        }
+        self pushConst(self constInt(ncap))
+        self native(N_MAKE_BLOCK, 3 + ncap)
+    }
+
+    cloneExpr(n) {
+        self expr(n recv)
+        self native(N_CLONE, 1)
+        outerSlots = slotsKnown
+        slotsKnown = (n items filter { |m| m kind == "SlotDef" }) map { |m| m name }
+        n items each { |m|
+            (m kind == "SlotDef") ifTrue {
+                self emitOp(DUP)
+                self pushString(m name)
+                self expr(m value)
+                self native(N_SET_SLOT, 3)
+                self emitOp(POP)
+            }
+            (m kind == "MethodDef") ifTrue {
+                cid = self compileChunk(m body, m params, nil, true)
+                slotIdx = methodBase + methodList size
+                methodList push([cid, m params size, m name])
+                self emitOp(DUP)
+                self pushString(m name)
+                self pushConst(self constInt(slotIdx))
+                self native(N_SET_METHOD, 3)
+                self emitOp(POP)
+            }
+        }
+        slotsKnown = outerSlots
+        nil
+    }
+
+    // --- statements ---
+
+    isCloneExpr(n) {
+        (n == nil) ifTrue { return false }
+        (n kind == "Clone") || (n kind == "Send" && n name == "clone")
+    }
+
+    stmt(n) {
+        (n == nil || failed) ifTrue { return nil }
+        curLine = n line
+        k = n kind
+        (k == "Assign") ifTrue { return self assignStmt(n) }
+        (k == "SlotAssign") ifTrue {
+            self expr(n recv)
+            self pushString(n name)
+            self expr(n value)
+            self native(N_SET_SLOT, 3)
+            return self emitOp(POP)
+        }
+        (k == "Return") ifTrue {
+            (n expr != nil) ifTrue { self expr(n expr) } ifFalse { self pushNil }
+            retId = isMethChunk ifTrue { -1 } ifFalse { self resolveLocal("?ret") }
+            (retId >= 0) ifTrue {
+                // `return` in a block: return from the enclosing method
+                self getLocalValue(retId)
+                return self native(N_RAISE_RETURN, 2)
+            }
+            return self native(N_STOP_VM, 0)
+        }
+        (k == "Break") ifTrue {
+            self pushString("BreakSignal")
+            self native(N_LOAD_GLOBAL, 1)
+            return self native(N_RAISE, 1)
+        }
+        (k == "Continue") ifTrue {
+            self pushString("ContinueSignal")
+            self native(N_LOAD_GLOBAL, 1)
+            return self native(N_RAISE, 1)
+        }
+        self expr(n)
+        self emitOp(POP)
+    }
+
+    assignStmt(n) {
+        nm = n name
+        s = self resolveLocal(nm)
+        (s >= 0 && (self flagLocal(nm)) >= 0) ifTrue {
+            self expr(n)
+            return self emitOp(POP)
+        }
+        (s >= 0) ifTrue {
+            (self isCaptured(s)) ifTrue {
+                self emitOpU16(GET_LOCAL, s)
+                self expr(n value)
+                self native(N_CELL_SET, 2)
+            } ifFalse {
+                self expr(n value)
+                self emitOpU16(SET_LOCAL, s)
+            }
+            return self emitOp(POP)
+        }
+        (inMeth && (self isBuiltin(nm)) == false) ifTrue {
+            self expr(n)
+            return self emitOp(POP)
+        }
+        self registerGlobal(nm)
+        self pushString(nm)
+        self expr(n value)
+        self native(N_STORE_GLOBAL, 2)
+        self emitOp(POP)
+        // Cat = Object clone -> Cat's _name is "Cat"
+        (self isCloneExpr(n value)) ifTrue {
+            self pushString(nm)
+            self native(N_LOAD_GLOBAL, 1)
+            self pushString("_name")
+            self pushString(nm)
+            self native(N_SET_SLOT, 3)
+            self emitOp(POP)
+        }
+        nil
+    }
+
+    // --- programs ---
+
+    // Compile a Program node (bc_compile). Returns the unit for `VM run`:
+    //   [constBase, constants, chunkBase, chunks, methodBase, methods, code, lines, file]
+    // holding what this compile added, or nil after a compile error.
+    compile(program) {
+        failed = false
+        buf = []
+        bufLines = []
+        stmts = program items
+        stmts each { |st|
+            (st kind == "Assign" && (self isBuiltin(st name)) == false) ifTrue {
+                self registerGlobal(st name)
+            }
+        }
+        i = 0
+        { i < stmts size } whileTrue {
+            st = stmts at(i)
+            ((i == stmts size - 1) && st kind != "Assign" && st kind != "SlotAssign") ifTrue {
+                self expr(st)
+            } ifFalse {
+                self stmt(st)
+            }
+            i = i + 1
+        }
+        self emitOp(HALT)
+        failed ifTrue { return nil }
+        unit = [constBase + constMark, cpool slice(constMark, cpool size),
+                chunkBase + chunkMark, chunkList slice(chunkMark, chunkList size),
+                methodBase + methodMark, methodList slice(methodMark, methodList size),
+                buf, bufLines, srcFile]
+        constMark = cpool size
+        chunkMark = chunkList size
+        methodMark = methodList size
+        unit
+    }
+
+    // --- the format of `clay --bytecode` ---
+
+    hex = "0123456789abcdef"
+
+    escape(s) {
+        parts = []
+        i = 0
+        { i < s length } whileTrue {
+            c = s byteAt(i)
+            esc = nil
+            (c == 92) ifTrue { esc = "\\\\" }
+            (c == 34) ifTrue { esc = "\\\"" }
+            (c == 10) ifTrue { esc = "\\n" }
+            (c == 13) ifTrue { esc = "\\r" }
+            (c == 9) ifTrue { esc = "\\t" }
+            (esc == nil && (c < 32 || c == 127)) ifTrue {
+                esc = "\\x" + (hex at(c / 16)) + (hex at(c % 16))
+            }
+            parts push(esc ?? (s slice(i, i + 1)))
+            i = i + 1
+        }
+        parts join("")
+    }
+
+    dumpConst(v, kind) {
+        (kind == "string") ifTrue { return "string \"" + (self escape(v)) + "\"" }
+        (kind == "") ifTrue { return v toString }
+        kind + " " + v toString
+    }
+
+    dumpCode(out, code, lines) {
+        out push("code " + code size toString)
+        i = 0
+        { i < code size } whileTrue {
+            stop = (i + 16 < code size) ifTrue { i + 16 } ifFalse { code size }
+            row = (code slice(i, stop)) map { |b| b toString }
+            out push("  " + (row join(" ")))
+            i = i + 16
+        }
+        marks = ["lines"]
+        i = 0
+        { i < lines size } whileTrue {
+            (i == 0 || (lines at(i)) != (lines at(i - 1))) ifTrue {
+                marks push(i toString + ":" + (lines at(i)) toString)
+            }
+            i = i + 1
+        }
+        out push(marks join(" "))
+    }
+
+    // Everything compiled so far, as `clay --bytecode` prints it (the last
+    // unit's top-level code)
+    dump() {
+        out = ["constants " + cpool size toString]
+        i = 0
+        { i < cpool size } whileTrue {
+            out push("  " + i toString + " " + (self dumpConst(cpool at(i), ckinds at(i))))
+            i = i + 1
+        }
+        self dumpCode(out, buf, bufLines)
+        i = 0
+        { i < chunkList size } whileTrue {
+            rec = chunkList at(i)
+            out push("chunk " + i toString + " locals " + (rec at(5)) toString + " blockReturn " +
+                     ((rec at(6)) ifTrue { "1" } ifFalse { "0" }))
+            ps = rec at(2)
+            (ps size > MAX_PARAMS) ifTrue { ps = ps slice(0, MAX_PARAMS) }
+            pl = ["params"]
+            ps each { |p| pl push(p) }
+            out push(pl join(" "))
+            cs = ["captures"]
+            j = 0
+            { j < (rec at(3)) size } whileTrue {
+                cs push(((rec at(3)) at(j)) + "@" + ((rec at(4)) at(j)) toString)
+                j = j + 1
+            }
+            out push(cs join(" "))
+            self dumpCode(out, rec at(0), rec at(1))
+            i = i + 1
+        }
+        i = 0
+        { i < methodList size } whileTrue {
+            m = methodList at(i)
+            out push("method " + i toString + " chunk " + (m at(0)) toString + " params " +
+                     (m at(1)) toString + " " + (m at(2)))
+            i = i + 1
+        }
+        out push("")
+        out join("\n")
+    }
+}

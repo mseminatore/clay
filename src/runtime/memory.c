@@ -10,37 +10,13 @@ volatile long clay_alloc_count = 0;
 volatile long clay_dealloc_count = 0;
 
 /* Boolean singletons - statically allocated, never freed */
-ClayObject clay_true_obj  = { NULL, NULL, NULL, 1000000, CLAY_TYPE_OBJECT, {{0}} };
-ClayObject clay_false_obj = { NULL, NULL, NULL, 1000000, CLAY_TYPE_OBJECT, {{0}} };
+ClayObject clay_true_obj  = { NULL, NULL, NULL, CLAY_REFCOUNT_IMMORTAL, CLAY_TYPE_OBJECT, {{0}} };
+ClayObject clay_false_obj = { NULL, NULL, NULL, CLAY_REFCOUNT_IMMORTAL, CLAY_TYPE_OBJECT, {{0}} };
 
+/* Prototypes, true and false live for the whole run: retain/release leave
+ * them alone (their count is never reached by real references) */
 static int clay_is_singleton(ClayObject *obj) {
-    return obj == &clay_true_obj ||
-           obj == &clay_false_obj ||
-           obj == clay_Object ||
-           obj == clay_Number ||
-           obj == clay_String ||
-           obj == clay_Array ||
-           obj == clay_Block ||
-           obj == clay_Nil ||
-           obj == clay_Boolean ||
-           obj == clay_Dict ||
-           obj == clay_Error ||
-           obj == clay_Math ||
-           obj == clay_Console ||
-           obj == clay_File ||
-           obj == clay_System ||
-           obj == clay_FFI ||
-           obj == clay_Date ||
-           obj == clay_Http ||
-           obj == clay_Regex ||
-           obj == clay_Range ||
-           obj == clay_Fiber ||
-           obj == clay_Db ||
-           obj == clay_Graphics ||
-           obj == clay_Vec3 ||
-           obj == clay_Thread ||
-           obj == clay_BreakSignal ||
-           obj == clay_ContinueSignal;
+    return obj->refcount >= CLAY_REFCOUNT_IMMORTAL;
 }
 
 ClayObject *clay_retain(ClayObject *obj) {

@@ -83,6 +83,10 @@ intptr_t  clay_to_int(ClayValue v);
 int       clay_is_int(ClayValue v);
 
 /* Forward declaration */
+/* Objects alive for the whole program (the core prototypes, true, false):
+ * retain/release ignore them */
+#define CLAY_REFCOUNT_IMMORTAL 0x40000000
+
 typedef struct ClayObject ClayObject;
 
 /* Float helpers (CLAY_IS_FLOAT macro defined after struct ClayObject) */
@@ -326,6 +330,7 @@ extern ClayObject *clay_Graphics;
 extern ClayObject *clay_Vec3;
 
 extern ClayObject *clay_Thread;
+extern ClayObject *clay_VM;
 
 /* Thread VM initialization callback (set by compiler) */
 void clay_thread_set_vm_init(void (*fn)(void));
@@ -384,6 +389,17 @@ void        clay_inspect(ClayObject *obj);
 
 /* --- Error handling (setjmp/longjmp) --- */
 #include <setjmp.h>
+#if defined(__APPLE__)
+/* setjmp/longjmp there save and restore the signal mask: two system calls
+ * per try frame. Clay doesn't change signal masks, so skip that. */
+int  _setjmp(jmp_buf env);
+void _longjmp(jmp_buf env, int val) __attribute__((noreturn));
+#define CLAY_SETJMP(env)       _setjmp(env)
+#define CLAY_LONGJMP(env, val) _longjmp(env, val)
+#else
+#define CLAY_SETJMP(env)       setjmp(env)
+#define CLAY_LONGJMP(env, val) longjmp(env, val)
+#endif
 
 /* Try/catch frames — linked list on the C stack (no fixed limit) */
 /* Execution-engine state saved with each try frame (see ClayTryHooks) */
@@ -439,7 +455,7 @@ extern CLAY_THREAD_LOCAL ClayErrorStack clay_error_stack;
     ((frame)->prev = clay_error_stack.head, \
      clay_error_stack.head = (frame), \
      clay_try_save_state(frame), \
-     setjmp((frame)->buf))
+     CLAY_SETJMP((frame)->buf))
 #define clay_try_pop() \
     (clay_error_stack.head = clay_error_stack.head->prev)
 
