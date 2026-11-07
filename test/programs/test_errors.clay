@@ -121,4 +121,21 @@ nothing = nil
 Test eq(try { nothing x = 1 } catch { |e| e type() }, "NilError")
 Test eq(try { 5 x = 1 } catch { |e| e type() }, "TypeError")
 
+// finally always runs, and an error it didn't handle keeps going
+log = []
+r = try { try { raise("boom") } finally { log push("f1") } } catch { |e| e message() }
+Test eq(r, "boom")                         // try + finally re-raises
+Test eq(log, ["f1"])
+log = []
+r = try { try { raise("a") } catch { |e| raise("b") } finally { log push("f2") } } catch { |e| e message() }
+Test eq(r, "b")                            // an error in catch still runs finally
+Test eq(log, ["f2"])
+r = try { try { File read("/no/such/file") } finally { 0 } } catch { |e| e type() }
+Test eq(r, "FileError")                    // the error keeps its type
+r = try { try { raise("inner") } finally { raise("outer") } } catch { |e| e message() }
+Test eq(r, "outer")                        // an error in finally replaces it
+log = []
+Test eq(try { 7 } finally { log push("f3") }, 7)
+Test eq(log, ["f3"])
+
 Test done()

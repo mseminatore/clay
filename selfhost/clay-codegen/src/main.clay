@@ -896,12 +896,37 @@ CodeGen = Object clone {
             " clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));"
         }
         self line("if (clay_is_control_signal(" + errTmp + ")) {" + fin + " clay_raise(" + errTmp + "); }")
-        (catchBlock != nil) ifTrue {
-            self line(t + " = clay_send_val(" + catchBlock + ", \"value\", 1, (ClayValue[]){ " + errTmp + " });")
+        (catchBlock == nil) ifTrue {
+            // no catch: the error isn't handled — run finally, then re-raise
+            (finallyBlock != nil) ifTrue {
+                self line("clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));")
+            } ifFalse {
+                self line(t + " = CLAY_NIL;")
+            }
+            self line("clay_raise(" + errTmp + ");")
         } ifFalse {
-            self line(t + " = CLAY_NIL;")
+            (finallyBlock != nil) ifTrue {
+                // finally must also run if the catch block raises
+                self line("ClayTryFrame _catch_" + t + ";")
+                self line("if (clay_try_push(&_catch_" + t + ") == 0) {")
+                indent = indent + 1
+                self line(t + " = clay_send_val(" + catchBlock + ", \"value\", 1, (ClayValue[]){ " + errTmp + " });")
+                self line("clay_try_pop();")
+                indent = indent - 1
+                self line("} else {")
+                indent = indent + 1
+                self line("ClayValue " + t + "_raised = clay_error_stack.current_error;")
+                self line("clay_release_val(" + errTmp + ");")
+                self line("clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));")
+                self line("clay_raise(" + t + "_raised);")
+                indent = indent - 1
+                self line("}")
+                self line("clay_release_val(" + errTmp + ");")
+            } ifFalse {
+                self line(t + " = clay_send_val(" + catchBlock + ", \"value\", 1, (ClayValue[]){ " + errTmp + " });")
+                self line("clay_release_val(" + errTmp + ");")
+            }
         }
-        self line("clay_release_val(" + errTmp + ");")
         indent = indent - 1
         self line("}")
         (finallyBlock != nil) ifTrue {

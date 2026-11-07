@@ -1383,16 +1383,53 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
         fprintf(cg->out, " clay_release_val(clay_send_val(%s, \"value\", 0, NULL));", finally_block);
     fprintf(cg->out, " clay_raise(%s); }\n", err_tmp);
 
-    if (catch_block) {
+    if (!catch_block) {
+        /* no catch: the error isn't handled — run finally, then re-raise */
+        emit_indent(cg);
+        if (finally_block)
+            fprintf(cg->out, "clay_release_val(clay_send_val(%s, \"value\", 0, NULL));\n",
+                    finally_block);
+        else
+            fprintf(cg->out, "%s = CLAY_NIL;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_raise(%s);\n", err_tmp);
+    } else if (finally_block) {
+        /* finally must also run if the catch block raises */
+        emit_indent(cg);
+        fprintf(cg->out, "ClayTryFrame _catch_%s;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "if (clay_try_push(&_catch_%s) == 0) {\n", t);
+        cg->indent++;
         emit_indent(cg);
         fprintf(cg->out, "%s = clay_send_val(%s, \"value\", 1, (ClayValue[]){ %s });\n",
                 t, catch_block, err_tmp);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_try_pop();\n");
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "} else {\n");
+        cg->indent++;
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s_raised = clay_error_stack.current_error;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(clay_send_val(%s, \"value\", 0, NULL));\n",
+                finally_block);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_raise(%s_raised);\n", t);
+        cg->indent--;
+        emit_indent(cg);
+        fprintf(cg->out, "}\n");
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
     } else {
         emit_indent(cg);
-        fprintf(cg->out, "%s = CLAY_NIL;\n", t);
+        fprintf(cg->out, "%s = clay_send_val(%s, \"value\", 1, (ClayValue[]){ %s });\n",
+                t, catch_block, err_tmp);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
     }
-    emit_indent(cg);
-    fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
 
     cg->indent--;
     emit_indent(cg);

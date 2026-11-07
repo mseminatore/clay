@@ -1298,7 +1298,36 @@ static int native_stop_vm_fn(clayvm_vm_t *vm, int argc) {
     return 1; /* non-zero also breaks the dispatch loop */
 }
 
-/* native_try_catch(try_block, catch_block) — setjmp-based exception handling */
+/* VM registers saved around a try: a longjmp from raise() bypasses the
+ * trampolines' own restore */
+typedef struct {
+    const uint8_t *code;
+    size_t code_len, ip, sp;
+    int running, frame_count;
+} VmTryRegs;
+
+static void vm_regs_save(clayvm_vm_t *vm, VmTryRegs *st) {
+    st->code = vm->code;
+    st->code_len = vm->code_len;
+    st->ip = vm->ip;
+    st->sp = vm->sp;
+    st->running = vm->running;
+    st->frame_count = vm->frame_count;
+}
+
+static void vm_regs_restore(clayvm_vm_t *vm, const VmTryRegs *st) {
+    vm->code = st->code;
+    vm->code_len = st->code_len;
+    vm->ip = st->ip;
+    vm->sp = st->sp;
+    vm->running = st->running;
+    vm->frame_count = st->frame_count;
+}
+
+/* native_try_catch(try_block, catch_block, finally_block) — either of the
+ * last two may be nil. finally always runs: after the try block, after the
+ * catch block, and before an error leaves (an error with no catch, an error
+ * raised by the catch block, or break / continue / non-local return). */
 static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     clayvm_value_t finally_vm = clayvm_vm_pop(vm);
@@ -1308,67 +1337,47 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     ClayValue catch_block = vm_to_clay(catch_vm);
     ClayValue finally_block = vm_to_clay(finally_vm);
 
-    /* Save VM state — longjmp from raise() bypasses trampoline restore */
-    const uint8_t *saved_code = vm->code;
-    size_t saved_code_len = vm->code_len;
-    size_t saved_ip = vm->ip;
-    size_t saved_sp = vm->sp;
-    int saved_running = vm->running;
-    int saved_frame_count = vm->frame_count;
+    VmTryRegs st;
+    vm_regs_save(vm, &st);
 
+    ClayValue result = CLAY_NIL;
+    ClayValue escaping = CLAY_NIL;   /* an error to re-raise after finally (owned) */
     ClayTryFrame _tf;
     if (clay_try_push(&_tf) == 0) {
-        ClayValue result = clay_send_val(try_block, "value", 0, NULL);
+        result = clay_send_val(try_block, "value", 0, NULL);
         clay_try_pop();
-        vm->code = saved_code;
-        vm->code_len = saved_code_len;
-        vm->ip = saved_ip;
-        vm->sp = saved_sp;
-        vm->running = saved_running;
-        vm->frame_count = saved_frame_count;
-        if (!CLAY_IS_NIL(finally_block)) {
-            clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
-        }
-        vm_release_val(try_vm);
-        vm_release_val(catch_vm);
-        vm_release_val(finally_vm);
-        clayvm_vm_push(vm, clay_to_vm(result));
+        vm_regs_restore(vm, &st);
     } else {
-        /* Error path — trampoline's restore was skipped by longjmp */
-        vm->code = saved_code;
-        vm->code_len = saved_code_len;
-        vm->ip = saved_ip;
-        vm->sp = saved_sp;
-        vm->running = saved_running;
-        vm->frame_count = saved_frame_count;
-
+        vm_regs_restore(vm, &st);
         ClayValue error = clay_error_stack.current_error;   /* we own it */
-        if (clay_is_control_signal(error)) {
-            /* break / continue / non-local return are not errors: run finally,
-             * then let the signal continue to its loop or method */
-            if (!CLAY_IS_NIL(finally_block)) {
-                clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
-            }
-            vm_release_val(try_vm);
-            vm_release_val(catch_vm);
-            vm_release_val(finally_vm);
-            clay_raise(error);
-        }
-        ClayValue result;
-        if (!CLAY_IS_NIL(catch_block)) {
-            result = clay_send_val(catch_block, "value", 1, &error);
+        if (clay_is_control_signal(error) || CLAY_IS_NIL(catch_block)) {
+            /* not ours to handle: run finally, then pass it on */
+            escaping = error;
         } else {
-            result = CLAY_NIL;
+            ClayTryFrame _cf;
+            if (clay_try_push(&_cf) == 0) {
+                result = clay_send_val(catch_block, "value", 1, &error);
+                clay_try_pop();
+                vm_regs_restore(vm, &st);
+            } else {
+                vm_regs_restore(vm, &st);
+                escaping = clay_error_stack.current_error;   /* the catch block raised */
+            }
+            clay_release_val(error);   /* handled (or replaced) */
         }
-        clay_release_val(error);   /* handled */
-        if (!CLAY_IS_NIL(finally_block)) {
-            clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
-        }
-        vm_release_val(try_vm);
-        vm_release_val(catch_vm);
-        vm_release_val(finally_vm);
-        clayvm_vm_push(vm, clay_to_vm(result));
     }
+
+    if (!CLAY_IS_NIL(finally_block)) {
+        clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
+    }
+    vm_release_val(try_vm);
+    vm_release_val(catch_vm);
+    vm_release_val(finally_vm);
+    if (!CLAY_IS_NIL(escaping)) {
+        clay_release_val(result);
+        clay_raise(escaping);
+    }
+    clayvm_vm_push(vm, clay_to_vm(result));
     return 0;
 }
 
