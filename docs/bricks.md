@@ -139,6 +139,7 @@ import("web")          // http-server, router and orm
 | **env** | `Env` environment management: `load` `.env` files, `get` with defaults, `require`, `has` |
 | **event** | `Emitter` pub/sub pattern: `on`, `off`, `emit`, `once`, `removeAll`, `listenerCount` |
 | **format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
+| **fs** | `Fs` file system helpers: `walk`, `glob` (`*`, `?`, `[a-z]`, `**`), `mkdirs`, `copyTree`, `move`, `removeTree`, `withTempDir` |
 | **functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
 | **iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
 | **json** | `Json` parse/stringify: recursive-descent parser for JSON strings, `stringify`/`prettyPrint` for serialization |

@@ -16,13 +16,14 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `clamp(n, lo, hi)`, `lerp(a, b, t)`, `sign(n)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
 | Console | `print(args...)`, `println(args...)`, `error(args...)` (to stderr), `readLine()`, `readLine(prompt)` (on a terminal: shows the prompt, with line editing and history), `loadHistory(path)`, `saveHistory(path)`, `prompt(msg)` |
-| File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` |
-| System | `exit(code)`, `run(command)` (shell command → exit status), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
+| File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` (sorted), `copy(from, to)`, `modified(path)`, `cwd()`, `chdir(path)`, `tempDir()` — binary-safe; `delete` also removes empty directories. Recursive helpers are in `stdlib/fs` |
+| System | `exit(code)`, `run(command)` (shell command → exit status; use `Process` to capture output), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Crypto | `sha256(str)`, `sha1(str)`, `md5(str)`, `hmacSha256(key, data)` (hex digests), `randomBytes(n)` (hex, from the OS), `constantTimeEquals(a, b)` |
+| Process | `run(cmd, options)` → `stdout`, `stderr`, `exitCode`, `ok`; `stream(cmd, options) { \|line\| ... }` → exit code. `cmd` is an argv array, or a string with `#{"shell": true}`; options `shell`, `cwd`, `input` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
 | Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `escape(str)`, `lastInsertId()` |
 | Range | `each(block)`, `map(block)`, `filter(block)`, `contains(val)`, `toArray()`, `size()`, `step(n)`, `reverse()`, `start()`, `end()`, `toString()` |
@@ -47,6 +48,55 @@ System allocCount           // total objects allocated
 System deallocCount         // total objects freed
 ```
 
+## Running programs
+
+`Process run` runs a program, waits for it, and returns its output and exit code:
+
+```clay norun
+r = Process run(["git", "log", "--oneline", "-5"])
+r ok          // true if it exited with 0
+r exitCode    // 0
+r stdout      // the program's output, as one string
+r stderr      // its error output
+```
+
+Pass the command as an **array**: the first element is the program (found on
+`PATH`) and each other element is one argument, passed exactly as written. No
+shell is involved, so spaces, quotes, `$` and `*` in arguments need no escaping
+and can't be misread as shell syntax — the safe way to pass user input or file
+names.
+
+To use shell features such as pipes, redirection or wildcards, pass a string
+and ask for the shell (`/bin/sh -c`, or `cmd.exe /c` on Windows):
+
+```clay
+r = Process run("echo hello | tr a-z A-Z", #{"shell": true})
+r stdout trim    // "HELLO" (on Unix)
+```
+
+Options, all optional: `shell` (run a string command through the shell), `cwd`
+(the directory to run in) and `input` (a string written to the program's
+stdin; otherwise the program shares Clay's stdin).
+
+```clay norun
+Process run(["sort"], #{"input": "pear\napple\n"}) stdout   // "apple\npear\n"
+Process run(["make"], #{"cwd": "build"})
+```
+
+`Process stream` is for long-running programs: it calls the block with each
+line of output as it arrives (without the line ending), leaves error output on
+the terminal, and returns the exit code. `break` in the block stops the
+program early (and `stream` returns `nil`); an error raised in the block stops
+it and propagates.
+
+```clay norun
+Process stream(["ping", "-c", "3", "example.com"]) { |line| ("> " + line) println }
+```
+
+A program that can't be started (not found, not executable, or a bad `cwd`)
+raises `RuntimeError`. A program killed by a signal reports an exit code of
+128 + the signal number, as shells do.
+
 ## File operations
 
 ```clay
@@ -64,8 +114,30 @@ File isFile("notes.txt")             // true
 // Directories, rename, delete
 (File isDir("output")) ifFalse { File mkdir("output") }
 File rename("notes.txt", "output/notes.txt")
-File listDir("output") println       // [notes.txt]
+File listDir("output") println       // [notes.txt] (always sorted)
+File copy("output/notes.txt", "output/backup.txt")
 File delete("output/notes.txt")
+File delete("output/backup.txt")
+File delete("output")                // a directory, once it is empty
+
+// Times, working directory, scratch space
+File write("stamp.txt", "x")
+File modified("stamp.txt")           // seconds since 1970 (Date fromTimestamp(...))
+File delete("stamp.txt")
+File cwd                             // the current directory
+tmp = File tempDir                   // a new empty directory under the system temp dir
+File delete(tmp)
+```
+
+Files are read and written as raw bytes, so binary data (images, archives)
+round-trips exactly, and text is written with the line endings it contains.
+For recursive work — walking a tree, globbing, copying or removing whole
+directories — use [`stdlib/fs`](bricks.md#bundled-bricks):
+
+```clay norun
+import("stdlib/fs")
+Fs glob("src/**/*.clay") each { |path| path println }
+Fs removeTree("build")
 ```
 
 ## Date and time

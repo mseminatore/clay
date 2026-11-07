@@ -696,6 +696,7 @@ static int is_builtin_global(const char *name) {
            strcmp(name, "Thread") == 0 ||
            strcmp(name, "VM") == 0 ||
            strcmp(name, "Crypto") == 0 ||
+           strcmp(name, "Process") == 0 ||
            strcmp(name, "true") == 0 ||
            strcmp(name, "false") == 0 ||
            strcmp(name, "nil") == 0;
@@ -727,6 +728,7 @@ static const char *builtin_c_expr(const char *name) {
     if (strcmp(name, "Thread") == 0)  return "CLAY_VAL(clay_Thread)";
     if (strcmp(name, "VM") == 0)      return "CLAY_VAL(clay_VM)";
     if (strcmp(name, "Crypto") == 0)  return "CLAY_VAL(clay_Crypto)";
+    if (strcmp(name, "Process") == 0) return "CLAY_VAL(clay_Process)";
     if (strcmp(name, "true") == 0)return "CLAY_TRUE";
     if (strcmp(name, "false") == 0)   return "CLAY_FALSE";
     if (strcmp(name, "nil") == 0)     return "CLAY_NIL";

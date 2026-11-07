@@ -241,7 +241,8 @@ static const char *const clay_native_sources[] = {
     "src/runtime/clay_dict.c","src/runtime/range.c",    "src/runtime/math.c",
     "src/runtime/file.c",     "src/runtime/ffi.c",      "src/runtime/date.c",
     "src/runtime/http.c",     "src/runtime/regex.c",    "src/runtime/db.c",
-    "src/runtime/crypto.c",   "src/runtime/bootstrap.c","src/runtime/intern.c",
+    "src/runtime/crypto.c",   "src/runtime/process.c",  "src/runtime/bootstrap.c",
+    "src/runtime/intern.c",
     "src/runtime/graphics.c",
     "src/runtime/vec3.c",     "src/runtime/thread.c",   "src/runtime/plugin.c",
     "src/runtime/fiber.c",    "src/runtime/vm_bridge.c",
@@ -378,7 +379,7 @@ static int compile_c_file(const char *c_file, const char *output_name,
 static void clay_completion(const char *buf, crossline_completions_t *pComp) {
     static const char *builtins[] = {
         "Object", "Number", "String", "Array", "Dict", "File",
-        "System", "Date", "Http", "Regex", "Crypto", "Fiber", "Db", "FFI", "Math",
+        "System", "Date", "Http", "Regex", "Crypto", "Process", "Fiber", "Db", "FFI", "Math",
         "true", "false", "nil", "self", "super",
         "import", "clone", "println", "print",
         NULL

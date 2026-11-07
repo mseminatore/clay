@@ -1,0 +1,73 @@
+// test_process.clay — Process run / stream (portable: sh on Unix, cmd on Windows)
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+win = System platform == "windows"
+sh = #{"shell": true}
+// output lines without Windows' \r
+lines = { |s| (s replace("\r", "")) trim split("\n") }
+
+// A string runs through the shell; stdout, stderr and the exit code come back
+cmd = win ifTrue { "echo out& echo err 1>&2& exit 3" } ifFalse { "echo out; echo err 1>&2; exit 3" }
+r = Process run(cmd, sh)
+T eq(r stdout trim, "out", "stdout")
+T eq(r stderr trim, "err", "stderr")
+T eq(r exitCode, 3, "exit code")
+T eq(r ok, false, "ok is false on failure")
+T eq((Process run("exit 0", sh)) ok, true, "ok on success")
+
+// An argv array runs the program directly; input goes to its stdin
+r = Process run(["sort"], #{"input": "pear\napple\nfig\n"})
+T eq(lines value(r stdout), ["apple", "fig", "pear"], "argv + input")
+
+win ifFalse {
+    r = Process run(["echo", "two words", "$HOME", "*"])
+    T eq(r stdout, "two words $HOME *\n", "argv needs no quoting, no expansion")
+    big = Process run(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' x; head -c 200000 /dev/zero | tr '\\0' y 1>&2"])
+    T eq([big stdout length, big stderr length], [200000, 200000], "large stdout and stderr together")
+    r = Process run(["head", "-c", "2"], #{"input": "z" repeat(500000)})
+    T eq(r stdout, "zz", "program exits before reading all input")
+}
+
+// cwd
+pwd = win ifTrue { "cd" } ifFalse { "pwd" }
+here = (Process run(pwd, sh)) stdout trim
+up = (Process run(pwd, #{"shell": true, "cwd": ".."})) stdout trim
+T eq(here startsWith(up), true, "cwd runs in the given directory")
+T eq(here length > up length, true, "cwd is the parent")
+
+// stream: one call per stdout line, then the exit code
+cmd = win ifTrue { "echo a& echo b& echo c" } ifFalse { "echo a; echo b; echo c" }
+got = []
+code = Process stream(cmd, sh) { |line| got push(line trim) }
+T eq(got, ["a", "b", "c"], "stream lines")
+T eq(code, 0, "stream exit code")
+n = 0
+res = Process stream(cmd, sh) { |line| n = n + 1; break }
+T eq(n, 1, "break stops the stream")
+T eq(res, nil, "a stream ended by break returns nil")
+e = try { Process stream(cmd, sh) { |line| raise("boom") } } catch { |e| e message }
+T eq(e, "boom", "an error in the block propagates")
+
+// errors
+T eq(try { Process run(["no-such-program-xyz-42"]) } catch { |e| e type }, "RuntimeError", "missing program")
+T eq(try { Process run("echo hi") } catch { |e| e type }, "ArgumentError", "a string needs shell: true")
+T eq(try { Process run(["echo"], #{"shell": true}) } catch { |e| e type }, "ArgumentError", "shell takes a string")
+T eq(try { Process run([]) } catch { |e| e type }, "ArgumentError", "empty command")
+T eq(try { Process stream(["echo"]) } catch { |e| e type }, "ArgumentError", "stream needs a block")
+
+T done

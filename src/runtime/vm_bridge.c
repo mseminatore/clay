@@ -1685,6 +1685,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Http", clay_Http},
         {"Regex", clay_Regex},
         {"Crypto", clay_Crypto},
+        {"Process", clay_Process},
         {"Range", clay_Range},
         {"Fiber", clay_Fiber},
         {"Db", clay_Db},

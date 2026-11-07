@@ -1,0 +1,110 @@
+// test_fs.clay — stdlib/fs and the File methods it builds on
+import("stdlib/fs")
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+// --- File: binary-safe I/O, copy, listDir, delete, cwd/chdir, tempDir ---
+tmp = File tempDir
+T eq(File isDir(tmp), true, "tempDir creates a directory")
+T eq(File listDir(tmp), [], "tempDir is empty")
+T eq(tmp == File tempDir, false, "tempDir is unique")
+
+bin = "a" + (String chr(0)) + "b" + (String chr(255)) + "\r\n"
+File write(tmp + "/bin.dat", bin)
+T eq(File size(tmp + "/bin.dat"), 6, "write keeps NUL bytes and CRLF")
+T eq(File read(tmp + "/bin.dat") == bin, true, "read returns the same bytes")
+File copy(tmp + "/bin.dat", tmp + "/copy.dat")
+T eq(File read(tmp + "/copy.dat") == bin, true, "copy")
+File append(tmp + "/copy.dat", "+")
+T eq(File size(tmp + "/copy.dat"), 7, "append")
+
+File write(tmp + "/lines.txt", "one\r\ntwo\n" + "x" repeat(6000) + "\nlast")
+ls = File readLines(tmp + "/lines.txt")
+T eq([ls size, ls at(0), (ls at(2)) length, ls at(3)], [4, "one", 6000, "last"], "readLines: CRLF, long lines")
+
+T eq(File listDir(tmp), ["bin.dat", "copy.dat", "lines.txt"], "listDir is sorted")
+T eq(File exists(tmp), true, "exists is true for a directory")
+T eq(File modified(tmp + "/bin.dat") > 1700000000, true, "modified is a timestamp")
+
+File mkdir(tmp + "/d")
+File write(tmp + "/d/x", "x")
+T eq(try { File delete(tmp + "/d") } catch { |e| e type }, "FileError", "delete refuses a non-empty directory")
+File delete(tmp + "/d/x")
+File delete(tmp + "/d")
+T eq(File exists(tmp + "/d"), false, "delete removes an empty directory")
+
+home = File cwd
+File chdir(tmp)
+T eq(File listDir("."), ["bin.dat", "copy.dat", "lines.txt"], "chdir")
+File chdir(home)
+T eq(File cwd, home, "chdir back")
+
+// --- Fs match ---
+T eq([Fs match("*.clay", "main.clay"), Fs match("*.clay", "main.c"), Fs match("m?in.*", "main.c")],
+     [true, false, true], "match * ?")
+T eq([Fs match("[abc]x", "bx"), Fs match("[a-c]x", "dx"), Fs match("[!a-c]x", "dx"), Fs match("*", "")],
+     [true, false, true, true], "match classes")
+
+// --- a tree to work on ---
+root = tmp + "/tree"
+Fs mkdirs(root + "/src/lib/deep")
+Fs mkdirs(root + "/src/lib/deep")       // already there: fine
+File write(root + "/README.md", "r")
+File write(root + "/src/main.clay", "m")
+File write(root + "/src/util.clay", "u")
+File write(root + "/src/notes.txt", "n")
+File write(root + "/src/lib/a.clay", "a")
+File write(root + "/src/lib/deep/b.clay", "b")
+File write(root + "/src/.hidden.clay", "h")
+
+T eq(Fs walk(root + "/src") size, 6, "walk finds every file")
+T eq((Fs walk(root + "/src")) at(0), root + "/src/.hidden.clay", "walk is sorted, paths keep the root")
+n = 0
+r = Fs walk(root) { |p| n = n + 1 }
+T eq([n, r], [7, nil], "walk with a block")
+
+// --- Fs glob (relative to the current directory) ---
+File chdir(root)
+T eq(Fs glob("src/*.clay"), ["src/main.clay", "src/util.clay"], "glob one level, skips dot files")
+T eq(Fs glob("src/**/*.clay"), ["src/lib/a.clay", "src/lib/deep/b.clay", "src/main.clay", "src/util.clay"], "glob **")
+T eq(Fs glob("**/b.clay"), ["src/lib/deep/b.clay"], "glob leading **")
+T eq(Fs glob("src/.*"), ["src/.hidden.clay"], "dot pattern matches dot files")
+T eq(Fs glob("README.md"), ["README.md"], "glob a plain path")
+T eq(Fs glob("nope/*.clay"), [], "glob no matches")
+T eq(Fs glob(root + "/src/lib/*.clay"), [root + "/src/lib/a.clay"], "absolute glob")
+File chdir(home)
+
+// --- copyTree, move, removeTree ---
+Fs copyTree(root + "/src", tmp + "/copy/of/src")
+T eq(Fs walk(tmp + "/copy/of/src") size, 6, "copyTree copies everything")
+T eq(File read(tmp + "/copy/of/src/lib/deep/b.clay"), "b", "copyTree contents")
+Fs move(tmp + "/copy", tmp + "/moved")
+T eq([File exists(tmp + "/copy"), File exists(tmp + "/moved/of/src/main.clay")], [false, true], "move")
+T eq(Fs removeTree(tmp + "/moved"), true, "removeTree")
+T eq(File exists(tmp + "/moved"), false, "removeTree removed it")
+T eq(Fs removeTree(tmp + "/never-there"), false, "removeTree of a missing path")
+
+// --- withTempDir ---
+seen = nil
+v = Fs withTempDir { |d| seen = d; File write(d + "/f", "x"); 42 }
+T eq([v, File exists(seen)], [42, false], "withTempDir returns and cleans up")
+e = try { Fs withTempDir { |d| seen = d; raise("boom") } } catch { |e| e message }
+T eq([e, File exists(seen)], ["boom", false], "withTempDir cleans up on error")
+
+Fs removeTree(tmp)
+T eq(File exists(tmp), false, "cleanup")
+T done

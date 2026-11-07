@@ -123,18 +123,24 @@ static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+/* Same bytes, embedded NULs included */
+static int string_same(ClayObject *a, ClayObject *b) {
+    return a->as.string.length == b->as.string.length &&
+           memcmp(a->as.string.data, b->as.string.data, a->as.string.length) == 0;
+}
+
 static ClayValue string_equals(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_STRING) return CLAY_FALSE;
-    return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) == 0);
+    return CLAY_BOOL(string_same(self, other));
 }
 
 static ClayValue string_neq(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_TRUE;
     ClayObject *other = CLAY_OBJ(argv[0]);
     if (other->type != CLAY_TYPE_STRING) return CLAY_TRUE;
-    return CLAY_BOOL(strcmp(self->as.string.data, other->as.string.data) != 0);
+    return CLAY_BOOL(!string_same(self, other));
 }
 
 static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
@@ -450,7 +456,7 @@ static ClayValue string_chr(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t code = clay_to_int(argv[0]);
     if (code < 0 || code > 255) return CLAY_NIL;   /* one byte */
     char buf[2] = { (char)code, '\0' };
-    return CLAY_VAL(clay_string_new(buf));
+    return CLAY_VAL(clay_string_new_len(buf, 1));   /* chr(0) is a real NUL */
 }
 
 void clay_string_init_methods(ClayObject *proto) {

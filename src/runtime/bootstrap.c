@@ -33,6 +33,7 @@ ClayObject *clay_Date    = NULL;
 ClayObject *clay_Http    = NULL;
 ClayObject *clay_Regex   = NULL;
 ClayObject *clay_Crypto  = NULL;
+ClayObject *clay_Process = NULL;
 ClayObject *clay_Fiber   = NULL;
 ClayObject *clay_Db     = NULL;
 ClayObject *clay_Range  = NULL;
@@ -781,6 +782,16 @@ void clay_bootstrap(void) {
     {
         extern void clay_crypto_init_methods(ClayObject *proto);
         clay_crypto_init_methods(clay_Crypto);
+    }
+
+    /* Process prototype: run programs, capture or stream output (process.c) */
+    clay_Process = clay_object_new();
+    clay_Process->parent = clay_Object;
+    clay_Process->refcount = CLAY_REFCOUNT_IMMORTAL;
+    clay_set_slot_take(clay_Process, "_name", CLAY_VAL(clay_string_new("Process")));
+    {
+        extern void clay_process_init_methods(ClayObject *proto);
+        clay_process_init_methods(clay_Process);
     }
 
     /* Fiber prototype */
