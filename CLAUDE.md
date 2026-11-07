@@ -159,9 +159,12 @@ Clay port.
 
 Clay has a built-in package manager: packages ("bricks") are plain Git repos with a `brick.json`
 manifest, resolved via the `bricks/` directory (gitignored, recreated by `clay bricks install`).
-Monorepo bricks (e.g. the standard library, installed as `stdlib`) are imported with slash paths
-like `import("stdlib/collections")`; a dependency's name in `brick.json` is its import path and its
-directory under `bricks/`. See `docs/bricks.md` for the full
+Monorepo bricks are imported with slash paths like `import("stdlib/collections")`; a dependency's
+name in `brick.json` is its import path and its directory under `bricks/`. The standard library
+(`lib/stdlib`, repo clay-stdlib) and the web bricks (`lib/web`, repo clay-web: http-server, router,
+orm) are git submodules bundled with Clay: brick imports fall back to `lib/` (or `$CLAY_LIB`) after
+every `bricks/` directory — `parser_set_lib_dir` in `parser.c`, set by `resolve_lib_dir` in
+`main.c`, mirrored by `libDir` in `selfhost/clay-parser`. See `docs/bricks.md` for the full
 manifest format and CLI (`clay bricks init|add|install|update|list|remove`).
 
 ## Editor integration

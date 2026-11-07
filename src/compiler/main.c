@@ -148,10 +148,12 @@ static char *last_sep(char *p) {
 /* Resolve the Clay source tree root: the nearest directory, starting at the
  * binary's own, that holds src/runtime/clay.h. The binary is usually
  * build/clay or build/<Config>/clay (CMake), or clay at the root (Makefile). */
-static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
-    (void)argv0;
+/* The Clay checkout holding this executable: the nearest of its directory and
+ * up to three parents that contains src/runtime/clay.h, or "." (returning 0)
+ * if there is none. */
+static int find_clay_dir(char *clay_dir, size_t sz) {
     snprintf(clay_dir, sz, ".");
-    if (!g_exe_dir[0]) return;
+    if (!g_exe_dir[0]) return 0;
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s", g_exe_dir);
     size_t len = strlen(dir);
@@ -163,11 +165,32 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
         if (f) {
             fclose(f);
             snprintf(clay_dir, sz, "%s", dir);
-            return;
+            return 1;
         }
         char *sep = last_sep(dir);
-        if (!sep) return;
+        if (!sep) return 0;
         *sep = '\0';
+    }
+    return 0;
+}
+
+static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
+    (void)argv0;
+    find_clay_dir(clay_dir, sz);
+}
+
+/* Where the bundled bricks live: $CLAY_LIB, else <clay checkout>/lib.
+ * selfhost/clay-parser's libDir mirrors this. */
+static void resolve_lib_dir(void) {
+    const char *env = getenv("CLAY_LIB");
+    if (env && env[0]) {
+        parser_set_lib_dir(env);
+        return;
+    }
+    char clay_dir[1024], lib[1100];
+    if (find_clay_dir(clay_dir, sizeof(clay_dir))) {
+        snprintf(lib, sizeof(lib), "%s/lib", clay_dir);
+        parser_set_lib_dir(lib);
     }
 }
 
@@ -1088,6 +1111,7 @@ int main(int argc, char *argv[]) {
     resolve_exe_path(argv[0]);
     g_exe_path = g_exe_path_buf[0] ? g_exe_path_buf : argv[0];
     clay_executable_path = g_exe_path_buf;   /* System executable */
+    resolve_lib_dir();
     clay_set_args(argc, argv);
     const char *source_file = NULL;
     const char *output_name = NULL;

@@ -45,6 +45,12 @@ import("utils.clay")  // regular file import (unchanged)
 
 Brick resolution: reads `bricks/<name>/brick.json` to find the `main` entry point. Falls back to `bricks/<name>/src/main.clay` if no manifest exists.
 
+`bricks/` is searched in the current directory and up to two parents, then beside the importing
+file and up to two of its parents. Last come the bricks bundled with Clay (`stdlib` and `web`, in
+the `lib/` directory of the Clay checkout, or in `$CLAY_LIB` if set). A project's own `bricks/` wins,
+so `clay bricks add github.com/mseminatore/clay-stdlib@v1.0.0 stdlib` pins one project to a different
+standard library without affecting the rest.
+
 ## Monorepo bricks
 
 A single Git repository can contain multiple bricks (a "monorepo"). Import sub-bricks using slash-separated paths:
@@ -99,15 +105,26 @@ matching lock file, `clay bricks install` checks out those commits, so everyone
 (and CI) builds against the same code even when a dependency's branch moves on.
 `clay bricks update` fetches newer commits and rewrites the lock file.
 
-## Available bricks
+## Bundled bricks
 
-The standard library is available at:
+Two monorepos ship with Clay as git submodules under `lib/` (clone Clay with
+`--recurse-submodules`), so they need no `clay bricks install`:
 
-| Brick | Description | Repo |
-|-------|-------------|------|
-| **[stdlib](https://github.com/mseminatore/clay-stdlib)** | Standard library monorepo with `Assert`, `Time`, `MathUtil`, and all bricks below | `github.com/mseminatore/clay-stdlib` |
+| Brick | Contents | Repo |
+|-------|----------|------|
+| **stdlib** | The standard library: the sub-bricks below | [github.com/mseminatore/clay-stdlib](https://github.com/mseminatore/clay-stdlib) |
+| **web** | `web/http-server`, `web/router`, `web/orm` | [github.com/mseminatore/clay-web](https://github.com/mseminatore/clay-web) |
 
-**stdlib** contains these sub-bricks:
+Import one sub-brick, or a whole monorepo:
+
+```clay norun
+import("stdlib/json")
+import("stdlib")       // every stdlib sub-brick
+import("web/router")
+import("web")          // http-server, router and orm
+```
+
+**stdlib** contains:
 
 | Sub-brick | Description |
 |-----------|-------------|
@@ -123,40 +140,29 @@ The standard library is available at:
 | **event** | `Emitter` pub/sub pattern: `on`, `off`, `emit`, `once`, `removeAll`, `listenerCount` |
 | **format** | `Fmt` string utilities: `padLeft`, `padRight`, `center`, `repeat`, `capitalize`, `titleCase`, `truncate`, `wrap`, `replaceAll` |
 | **functional** | `Fn` utilities: `map`, `filter`, `reduce`, `compose`, `pipe`, `any`, `all`, `find`, `zip`, `flatten`, `sum`, `product` |
-| **http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes with `:param` patterns, `text`/`html`/`json`/`redirect` response helpers |
 | **iter** | `Iter` lazy pipelines: `from`/`range` sources, `map`/`filter`/`take`/`skip` transforms, `toArray`/`reduce`/`first`/`count`/`each` consumers |
 | **json** | `Json` parse/stringify: recursive-descent parser for JSON strings, `stringify`/`prettyPrint` for serialization |
 | **log** | `Log` structured logging: `debug`/`info`/`warn`/`error` levels with timestamps, prefixes, and level filtering |
 | **markdown** | `Markdown` converter: headings, code blocks, tables, lists, blockquotes to HTML |
 | **match** | `Match` pattern matching: chainable `when`/`whenType`/`otherwise` with value and predicate matching |
-| **orm** | `Model` ActiveRecord-style ORM: `define`/`create`/`find`/`all`/`where`/`count`/`update`/`delete` over SQLite |
 | **path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
 | **queue** | `JobQueue` SQLite-backed persistent job queue with status tracking |
-| **router** | `Router` URL pattern matching: `add`/`match` with `:param` capture, multi-segment patterns |
 | **template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
 | **test** | Testing framework: `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
 | **url** | `Url` parse/build URLs, `encodeComponent`/`decodeComponent`, `parseQuery` for query strings |
 | **uuid** | `Uuid` v4 generation per RFC 4122 |
 | **validate** | Schema validation for Dicts with field rules (required, optional, min, max) |
 
-Install the standard library (includes all sub-bricks):
+**web** contains:
 
-```sh
-clay bricks add github.com/mseminatore/clay-stdlib stdlib
-```
+| Sub-brick | Description |
+|-----------|-------------|
+| **http-server** | `HttpServer` routing: `get`/`post`/`put`/`delete` routes with `:param` patterns, `text`/`html`/`json`/`redirect` response helpers |
+| **orm** | `Model` ActiveRecord-style ORM: `define`/`create`/`find`/`all`/`where`/`count`/`update`/`delete` over SQLite |
+| **router** | `Router` URL pattern matching: `add`/`match` with `:param` capture, multi-segment patterns |
 
-Then import individual sub-bricks:
-
-```clay norun
-import("stdlib/collections")
-import("stdlib/json")
-```
-
-Or import everything (all of the sub-bricks above):
-
-```clay norun
-import("stdlib")
-```
+These three were part of stdlib until they moved to clay-web: `import("stdlib/router")` is now
+`import("web/router")`.
 
 ---
 

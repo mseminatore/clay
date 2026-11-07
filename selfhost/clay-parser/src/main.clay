@@ -1007,6 +1007,39 @@ Parser = Object clone {
         main
     }
 
+    // The bundled bricks directory, as main.c's resolve_lib_dir: $CLAY_LIB,
+    // else the lib/ of the Clay checkout holding the running clay (its
+    // directory or up to three parents, the first with src/runtime/clay.h).
+    // A native program doesn't know its executable, so it looks up from the
+    // current directory instead. nil if there is none.
+    libDir() {
+        env = System env("CLAY_LIB")
+        (env != nil && env != "") ifTrue { return env }
+        exe = System executable
+        (exe != nil && exe != "") ifTrue {
+            sep = self lastSep(exe)
+            (sep < 0) ifTrue { return nil }
+            dir = exe slice(0, sep)
+            up = 0
+            { up < 4 } whileTrue {
+                (File exists(dir + "/src/runtime/clay.h")) ifTrue { return dir + "/lib" }
+                sep = self lastSep(dir)
+                (sep < 0) ifTrue { return nil }
+                dir = dir slice(0, sep)
+                up = up + 1
+            }
+            return nil
+        }
+        rel = "."
+        up = 0
+        { up < 4 } whileTrue {
+            (File exists(rel + "/src/runtime/clay.h")) ifTrue { return rel + "/lib" }
+            rel = (up == 0) ifTrue { ".." } ifFalse { rel + "/.." }
+            up = up + 1
+        }
+        nil
+    }
+
     resolveImport(path) {
         isBrick = (path contains(".clay")) == false && (path contains("\\")) == false &&
                   (path byteAt(0)) != 46
@@ -1025,6 +1058,9 @@ Parser = Object clone {
                     up = up + 1
                 }
             }
+            // last, the bricks bundled with Clay: a project's own bricks/ wins
+            lib = self libDir
+            (lib != nil) ifTrue { dirs push(lib) }
             dirs each { |d|
                 main = self brickMain(d + "/" + path + "/brick.json")
                 (main != nil) ifTrue {

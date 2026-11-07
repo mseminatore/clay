@@ -14,7 +14,7 @@ native executables.
    `File`, `Date`, `Http`, `Regex`, `Fiber`, `Vec3`, `Thread`, `Graphics`,
    `Db`, and a reference table of every built-in method.
 4. **[Bricks](bricks.md)** — the package manager: `brick.json`, installing and
-   publishing bricks, and the standard library (`stdlib`).
+   publishing bricks, and the bundled standard library (`stdlib`) and web bricks (`web`).
 5. **[Native compilation, FFI and plugins](native-and-plugins.md)** —
    `clay --compile`, the generated C, the architecture, calling C through FFI,
    and writing plugins.

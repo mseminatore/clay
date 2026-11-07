@@ -7,3 +7,9 @@
 [submodule "deps/vmgen"]
 	path = deps/vmgen
 	url = https://github.com/mseminatore/vmgen.git
+[submodule "lib/stdlib"]
+	path = lib/stdlib
+	url = https://github.com/mseminatore/clay-stdlib.git
+[submodule "lib/web"]
+	path = lib/web
+	url = https://github.com/mseminatore/clay-web.git

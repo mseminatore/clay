@@ -1099,6 +1099,13 @@ void parser_init(Parser *p, const char *source, const char *filename) {
     parser_advance(p); /* prime the parser */
 }
 
+/* Bundled bricks directory (see parser_set_lib_dir) */
+static char g_lib_dir[BRICK_MAX_PATH] = "";
+
+void parser_set_lib_dir(const char *dir) {
+    snprintf(g_lib_dir, sizeof(g_lib_dir), "%s", dir ? dir : "");
+}
+
 /* Parse an imported file and return its statements */
 static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     char *resolved = NULL;
@@ -1113,7 +1120,7 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     if (is_brick) {
         /* Try bricks/<path>/brick.json relative to CWD first, then walk
          * up parent directories to find a project root with bricks/. */
-        char try_dirs[8][BRICK_MAX_PATH];
+        char try_dirs[9][BRICK_MAX_PATH];
         int ndirs = 0;
 
         /* CWD-relative: bricks, ../bricks, ../../bricks, ... */
@@ -1142,6 +1149,10 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
                 }
             }
         }
+
+        /* Last, the bricks bundled with Clay: a project's own bricks/ wins */
+        if (g_lib_dir[0])
+            snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "%s", g_lib_dir);
 
         for (int d = 0; d < ndirs && !resolved; d++) {
             char manifest_path[BRICK_MAX_PATH * 2];

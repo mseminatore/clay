@@ -2,7 +2,5 @@
   "name": "clay",
   "version": "0.1.0",
   "description": "Clay programming language",
-  "deps": {
-    "stdlib": "github.com/mseminatore/clay-stdlib"
-  }
+  "deps": {}
 }

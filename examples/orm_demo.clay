@@ -1,5 +1,5 @@
 // Demo: clay-orm brick -- ActiveRecord-style ORM
-import("stdlib/orm")
+import("web/orm")
 
 "=== setup ===" println
 db = Db open(":memory:")

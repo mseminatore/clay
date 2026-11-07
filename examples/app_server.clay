@@ -1,6 +1,6 @@
-import("stdlib/http-server")
+import("web/http-server")
 import("stdlib/template")
-import("stdlib/orm")
+import("web/orm")
 
 // -- A simple todo list web app built with Clay, demonstrating URL routing, template rendering,
 // SQLite persistence, and the POST-Redirect-GET pattern. --

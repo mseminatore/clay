@@ -23,4 +23,8 @@ void    parser_init(Parser *parser, const char *source, const char *filename);
 AstNode *parser_parse(Parser *parser);
 void    parser_free_imports(Parser *parser);
 
+/* The directory of bundled bricks (lib/stdlib, lib/web, ...) that brick
+ * imports fall back to after every bricks/ directory; NULL or "" for none. */
+void    parser_set_lib_dir(const char *dir);
+
 #endif /* CLAY_PARSER_H */
