@@ -57,6 +57,7 @@ clay hello.clay                  # run a program (bytecode VM)
 clay --compile hello.clay        # build a native executable ./hello
 clay                             # interactive REPL
 clay bricks install              # install dependencies from brick.json
+clay --version                   # the Clay version
 clay --help                      # all options
 ```
 
@@ -75,6 +76,11 @@ The examples in `examples/` range from small demos to a Scheme interpreter
 (`examples/scheme.clay`) and a parallel ray tracer (`examples/raytrace_parallel.clay`).
 
 ## Dependencies
+
+Bundled under `lib/` (git submodules; imported with no install step):
+
+- [mseminatore/clay-stdlib](https://github.com/mseminatore/clay-stdlib) — the standard library, `import("stdlib")` or `import("stdlib/json")`
+- [mseminatore/clay-web](https://github.com/mseminatore/clay-web) — HTTP server, router and ORM, `import("web")` or `import("web/router")`
 
 Included under `deps/`:
 

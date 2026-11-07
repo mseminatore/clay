@@ -15,9 +15,9 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Error | `message()`, `type()`, `line()`, `file()`, `stackTrace()`, `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `clamp(n, lo, hi)`, `lerp(a, b, t)`, `sign(n)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
-| Console | `print(args...)`, `println(args...)`, `error(args...)` (to stderr), `readLine()`, `readLine(prompt)` (on a terminal: shows the prompt, with line editing and history), `loadHistory(path)`, `saveHistory(path)`, `prompt(msg)` |
+| Console | `print(args...)`, `println(args...)`, `error(args...)` (to stderr), `isTerminal()` (output is a terminal, so colour codes are safe), `readLine()`, `readLine(prompt)` (on a terminal: shows the prompt, with line editing and history), `loadHistory(path)`, `saveHistory(path)`, `prompt(msg)` |
 | File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` (sorted), `copy(from, to)`, `modified(path)`, `cwd()`, `chdir(path)`, `tempDir()` — binary-safe; `delete` also removes empty directories. Recursive helpers are in `stdlib/fs` |
-| System | `exit(code)`, `run(command)` (shell command → exit status; use `Process` to capture output), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `clock()`, `allocCount()`, `deallocCount()` |
+| System | `exit(code)`, `run(command)` (shell command → exit status; use `Process` to capture output), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `version()` (the Clay version, e.g. `"0.1.0"`), `clock()`, `allocCount()`, `deallocCount()` |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |

@@ -46,6 +46,7 @@ __declspec(dllimport) DWORD __stdcall GetModuleFileNameA(void *, char *, DWORD);
 #include "crossline.h"
 #include "lexer.h"
 #include "parser.h"
+#include "version.h"
 #include "codegen.h"
 #include "bc_compiler.h"
 #include "bricks.h"
@@ -442,7 +443,7 @@ static int run_repl(const char *argv0) {
     char clay_dir[1024];
     resolve_clay_dir(argv0, clay_dir, sizeof(clay_dir));
 
-    printf("Clay REPL (type 'quit' or Ctrl+Z to exit)\n\n");
+    printf("Clay REPL v%s (type 'quit' or Ctrl+Z to exit)\n\n", CLAY_VERSION);
 
     clay_repl_init();
 
@@ -777,8 +778,8 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         clayvm_vm_set_step_callback(&vm, step_callback);
     }
 
-    printf("%s%sClay VM REPL%s v0.1 (type 'quit' or 'exit' to leave)\n",
-           C(C_BOLD), C(C_CYAN), C(C_RESET));
+    printf("%s%sClay VM REPL%s v%s (type 'quit' or 'exit' to leave)\n",
+           C(C_BOLD), C(C_CYAN), C(C_RESET), CLAY_VERSION);
 
     clay_repl_init();
 
@@ -1161,9 +1162,13 @@ int main(int argc, char *argv[]) {
             mem_stats = 1;
         } else if (strcmp(argv[i], "--dap") == 0) {
             dap_mode = 1;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            printf("clay %s\n", CLAY_VERSION);
+            return 0;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
+            printf("  --version     Print the Clay version and exit\n");
             printf("  --compile     Compile to native binary via C (instead of running in VM)\n");
             printf("  -o <output>   Output binary name (implies --compile)\n");
             printf("  -c            Emit C code only, no compile (implies --compile)\n");

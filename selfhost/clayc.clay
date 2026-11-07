@@ -204,6 +204,13 @@ Clayc = Object clone {
 // The REPL: each input is compiled into the same VM, so its variables,
 // prototypes and methods stay defined for the next one
 ClaycRepl = Object clone {
+    _color = false     // ANSI colours, only on a terminal (as clay's REPL)
+
+    // an ANSI escape: 1 bold, 31 red, 32 green, 36 cyan, 0 reset
+    _c(code) {
+        (self _color) ifTrue { (String chr(27)) + "[" + code + "m" } ifFalse { "" }
+    }
+
     // unclosed ( { [ outside strings: the input continues on the next line
     openCount(s) {
         depth = 0
@@ -231,11 +238,17 @@ ClaycRepl = Object clone {
     }
 
     show(v) {
-        (v != nil) ifTrue { Console print("=> " + v toString + "\n") }
+        (v != nil) ifTrue { Console print((self _c("32")) + "=>" + (self _c("0")) + " " + v toString + "\n") }
+    }
+
+    _error(msg) {
+        Console error((self _c("1")) + (self _c("31")) + msg + (self _c("0")) + "\n")
     }
 
     run() {
-        Console print("Clay VM REPL (clayc, written in Clay) -- type 'quit' or 'exit' to leave\n")
+        self _color = Console isTerminal
+        Console print((self _c("1")) + (self _c("36")) + "Clay VM REPL" + (self _c("0")) + " v" + System version +
+                      " (clayc, written in Clay; type 'quit' or 'exit' to leave)\n")
         history = self historyPath
         Console loadHistory(history)
         bc = BcGen new("<repl>", true)
@@ -267,16 +280,16 @@ ClaycRepl = Object clone {
         p = Parser new(text, "<repl>")
         program = p parseProgram
         p hadError ifTrue {
-            Console error("clay: parse error\n")
+            self _error("clay: parse error")
             return nil
         }
         unit = bc compile(program)
         (unit == nil) ifTrue {
-            Console error("clay: compilation error\n")
+            self _error("clay: compilation error")
             return nil
         }
         try { self show(VM run(unit)) } catch { |e|
-            Console error("Error: " + e message + "\n")
+            self _error("Error: " + e message)
         }
         nil
     }

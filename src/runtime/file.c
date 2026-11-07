@@ -443,6 +443,19 @@ static ClayValue file_tempDir(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_NIL;
 }
 
+/* Is stdout an interactive terminal (so colour codes are safe)? On Windows
+ * this also turns on the console's ANSI escape-sequence processing. */
+int clay_stdout_is_terminal(void) {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (!GetConsoleMode(h, &mode)) return 0;
+    return SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+#else
+    return isatty(fileno(stdout));
+#endif
+}
+
 void clay_file_init(ClayObject *proto) {
     clay_set_method(proto, "read", file_read);
     clay_set_method(proto, "readLines", file_readLines);

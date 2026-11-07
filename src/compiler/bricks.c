@@ -15,8 +15,16 @@
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
 #include <unistd.h>
+#include <dirent.h>
 #endif
 #ifdef _MSC_VER
 #define strdup _strdup
@@ -444,6 +452,58 @@ static int bricks_lock_matches(const BrickManifest *m, const BrickLock *lock) {
 
 /* --- Subcommands --- */
 
+/* The entries of bricks/, to undo a failed `bricks add` */
+#define BRICK_SNAP_MAX 512
+typedef struct {
+    char names[BRICK_SNAP_MAX][BRICK_MAX_NAME];
+    int  count;
+} BrickDirSnap;
+
+static void brick_snap(BrickDirSnap *s) {
+    s->count = 0;
+#ifdef _WIN32
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA("bricks\\*", &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (strcmp(fd.cFileName, ".") && strcmp(fd.cFileName, "..") && s->count < BRICK_SNAP_MAX)
+            snprintf(s->names[s->count++], BRICK_MAX_NAME, "%s", fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+#else
+    DIR *d = opendir("bricks");
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL)
+        if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..") && s->count < BRICK_SNAP_MAX)
+            snprintf(s->names[s->count++], BRICK_MAX_NAME, "%s", e->d_name);
+    closedir(d);
+#endif
+}
+
+static int brick_snap_has(const BrickDirSnap *s, const char *name) {
+    for (int i = 0; i < s->count; i++)
+        if (strcmp(s->names[i], name) == 0) return 1;
+    return 0;
+}
+
+/* Remove what a failed install added to bricks/ (anything not in `before`) */
+static void brick_undo_install(const BrickDirSnap *before) {
+    static BrickDirSnap after;
+    brick_snap(&after);
+    for (int i = 0; i < after.count; i++) {
+        const char *name = after.names[i];
+        if (brick_snap_has(before, name) || !brick_safe_path(name, 0)) continue;
+        char cmd[BRICK_MAX_PATH * 2];
+#ifdef _WIN32
+        snprintf(cmd, sizeof(cmd), "rmdir /s /q \"bricks\\%s\" 2>nul", name);
+#else
+        snprintf(cmd, sizeof(cmd), "rm -rf \"bricks/%s\"", name);
+#endif
+        if (system(cmd) == 0) fprintf(stderr, "  removed the partial install bricks/%s\n", name);
+    }
+}
+
 static void make_dir(const char *path) {
 #ifdef _WIN32
     _mkdir(path);
@@ -786,7 +846,9 @@ static int install_dep(const char *url, const char *name) {
     if (stat(dest, &st) == 0) {
         if (check_repo_origin(dest, clone_url, name) != 0) return -1;
         printf("  %s: already installed\n", name);
-        return 0;
+        /* still check its dependencies: an interrupted install can leave the
+         * checkout without them */
+        return install_subdeps(dest, name);
     }
 
     char cmd[2048];
@@ -943,10 +1005,16 @@ static int cmd_add(const char *url, const char *as) {
         return 1;
     }
 
-    /* Install it */
+    /* Install it; on failure, take away whatever it left in bricks/ */
     make_dir("bricks");
+    static BrickDirSnap before;
+    brick_snap(&before);
     g_visited_count = 0;
-    if (install_dep(url, name) != 0) return 1;
+    if (install_dep(url, name) != 0) {
+        brick_undo_install(&before);
+        fprintf(stderr, "'%s' was not added\n", name);
+        return 1;
+    }
 
     /* Add to manifest */
     BrickDep *dep = &m.deps[m.dep_count++];
@@ -1109,6 +1177,9 @@ static int cmd_update(void) {
 }
 
 int brick_command(int argc, char **argv) {
+    /* unbuffered, so progress and errors (stderr) interleave in order even
+     * when piped; these commands print little */
+    setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 1) {
         fprintf(stderr, "Usage: clay bricks <command>\n\n");
         fprintf(stderr, "Commands:\n");

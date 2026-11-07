@@ -4,6 +4,7 @@
 #include "clay.h"
 #include "crossline.h"
 #include "ffi.h"
+#include "version.h"
 #include <time.h>
 #ifndef _WIN32
 #include <sys/wait.h>   /* WEXITSTATUS (System run) */
@@ -550,6 +551,20 @@ static ClayValue system_args(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(arr);
 }
 
+/* System version - the Clay version, e.g. "0.1.0" (version.h) */
+static ClayValue system_version(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new(CLAY_VERSION));
+}
+
+/* Console isTerminal - true if output goes to an interactive terminal, so
+ * colour (ANSI escape codes) can be used; false when piped or redirected */
+static ClayValue console_isTerminal(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    extern int clay_stdout_is_terminal(void);
+    return CLAY_BOOL(clay_stdout_is_terminal());
+}
+
 static ClayValue system_platform(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
 #if defined(_WIN32)
@@ -721,6 +736,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Console, "print", console_print);
     clay_set_method(clay_Console, "println", console_println);
     clay_set_method(clay_Console, "error", console_error);
+    clay_set_method(clay_Console, "isTerminal", console_isTerminal);
 
     /* File object */
     clay_File = clay_object_new();
@@ -740,6 +756,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_System, "env", system_env);
     clay_set_method(clay_System, "args", system_args);
     clay_set_method(clay_System, "platform", system_platform);
+    clay_set_method(clay_System, "version", system_version);
     clay_set_method(clay_System, "clock", system_clock);
 
     /* Register plugin system on System prototype */
