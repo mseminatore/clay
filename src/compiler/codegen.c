@@ -1803,12 +1803,15 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
     /* Emit the prototype expression */
     char *proto = emit_expr(cg, node->as.clone.proto);
     if (!proto) return;
+    /* the variable's C name (`_Foo` is reserved in C, so it becomes
+     * `_cv__Foo`); copied because c_safe_name's buffers rotate */
+    char *cvar = strdup(c_safe_name(var_name));
 
     emit_line(cg, node->line);
     emit_indent(cg);
     fprintf(cg->out, "/* %s = ... clone({ ... }) */\n", var_name);
     emit_indent(cg);
-    fprintf(cg->out, "%s = CLAY_VAL(clay_clone(CLAY_OBJ(%s)));\n", var_name, proto);
+    fprintf(cg->out, "%s = CLAY_VAL(clay_clone(CLAY_OBJ(%s)));\n", cvar, proto);
     free(proto);
 
     /* Collect slot names for Io-style assignment in methods */
@@ -1836,7 +1839,7 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
             if (!val) continue;
             emit_indent(cg);
             fprintf(cg->out, "clay_set_slot(CLAY_OBJ(%s), \"%s\", %s);\n",
-                    var_name, member->as.slot_def.name, val);
+                    cvar, member->as.slot_def.name, val);
             free(val);
         } else if (member->type == NODE_METHOD_DEF) {
             const char *fname = lookup_name(member);
@@ -1844,13 +1847,13 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
                 fprintf(stderr, "codegen: method has no pre-assigned name\n");
                 continue;
             }
-            collect_method(fname, var_name, member);
+            collect_method(fname, cvar, member);
             /* Attach clone slot names to the just-collected method */
             collected_methods->clone_slots = slot_names;
             collected_methods->clone_slot_count = slot_name_count;
             emit_indent(cg);
             fprintf(cg->out, "clay_set_method(CLAY_OBJ(%s), \"%s\", %s);\n",
-                    var_name, member->as.method_def.name, fname);
+                    cvar, member->as.method_def.name, fname);
         }
     }
 
@@ -1859,9 +1862,10 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
     /* Auto-set _name slot to variable name */
     emit_indent(cg);
     fprintf(cg->out, "clay_set_slot_take(CLAY_OBJ(%s), \"_name\", CLAY_VAL(clay_string_new(\"%s\")));\n",
-            var_name, var_name);
+            cvar, var_name);
     /* Clean up any owned temps from slot value expressions */
     emit_temp_cleanup(cg, NULL);
+    free(cvar);
 }
 
 /* --- Emit method/block function bodies --- */

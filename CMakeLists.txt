@@ -325,6 +325,8 @@ add_test(NAME clay_test_date COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/t
 add_test(NAME clay_test_http COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_http.clay)
 add_test(NAME clay_test_regex COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_regex.clay)
 add_test(NAME clay_test_crypto COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_crypto.clay)
+add_test(NAME clay_test_toml COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_toml.clay)
+add_test(NAME clay_test_semver_diff COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_semver_diff.clay)
 add_test(NAME clay_test_fs COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fs.clay)
 add_test(NAME clay_test_process COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_process.clay)
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)

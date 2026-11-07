@@ -1157,30 +1157,32 @@ CodeGen = Object clone {
     topClone(n, varName) {
         proto = self expr(n recv)
         (proto == nil) ifTrue { return nil }
+        // the variable's C name (_Foo is reserved in C: _cv__Foo)
+        cv = CNames safe(varName)
         self emitLine(n line)
         self line("/* " + varName + " = ... clone({ ... }) */")
-        self line(varName + " = CLAY_VAL(clay_clone(CLAY_OBJ(" + proto + ")));")
+        self line(cv + " = CLAY_VAL(clay_clone(CLAY_OBJ(" + proto + ")));")
         slotNames = []
         n items each { |m| (m kind == "SlotDef") ifTrue { slotNames push(m name) } }
         n items each { |m|
             (m kind == "SlotDef") ifTrue {
                 v = self expr(m value)
                 (v != nil) ifTrue {
-                    self line("clay_set_slot(CLAY_OBJ(" + varName + "), \"" + m name + "\", " + v + ");")
+                    self line("clay_set_slot(CLAY_OBJ(" + cv + "), \"" + m name + "\", " + v + ");")
                 }
             }
             (m kind == "MethodDef") ifTrue {
                 (m fnName == nil) ifTrue {
                     Console print("codegen: method has no pre-assigned name\n")
                 } ifFalse {
-                    md = FnDef make(m fnName, varName, m, [], true)
+                    md = FnDef make(m fnName, cv, m, [], true)
                     md cloneSlots = (slotNames size > 0) ifTrue { slotNames } ifFalse { nil }
                     collected push(md)
-                    self line("clay_set_method(CLAY_OBJ(" + varName + "), \"" + m name + "\", " + m fnName + ");")
+                    self line("clay_set_method(CLAY_OBJ(" + cv + "), \"" + m name + "\", " + m fnName + ");")
                 }
             }
         }
-        self line("clay_set_slot_take(CLAY_OBJ(" + varName + "), \"_name\", CLAY_VAL(clay_string_new(\"" + varName + "\")));")
+        self line("clay_set_slot_take(CLAY_OBJ(" + cv + "), \"_name\", CLAY_VAL(clay_string_new(\"" + varName + "\")));")
         self tempCleanup(nil)
     }
 

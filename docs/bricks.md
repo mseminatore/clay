@@ -135,6 +135,7 @@ import("web")          // http-server, router and orm
 | **collections** | Set, Stack, Queue data structures |
 | **config** | `Config` INI-style parser: `parse`/`parseFile` into Dict of Dicts, `get` with defaults, `merge` |
 | **csv** | `Csv` parse/stringify: `parse` (array of arrays), `parseWithHeader` (array of dicts), `stringify` for CSV generation |
+| **diff** | `Diff` line diffs: `lines` (Myers, minimal), `unified` (`diff -u` format), `stats` |
 | **enum** | `Enum` named constants with integer value mapping |
 | **env** | `Env` environment management: `load` `.env` files, `get` with defaults, `require`, `has` |
 | **event** | `Emitter` pub/sub pattern: `on`, `off`, `emit`, `once`, `removeAll`, `listenerCount` |
@@ -148,8 +149,10 @@ import("web")          // http-server, router and orm
 | **match** | `Match` pattern matching: chainable `when`/`whenType`/`otherwise` with value and predicate matching |
 | **path** | `Path` manipulation: `join`, `dirname`, `basename`, `extension`, `stem` |
 | **queue** | `JobQueue` SQLite-backed persistent job queue with status tracking |
+| **semver** | `Semver` versions: `parse`, `compare`, `sort`, `max`, `inc`, `satisfies`/`maxSatisfying` with npm ranges (`^1.2`, `~1.2.3`, `>=1 <2`, `\|\|`) |
 | **template** | `Template` engine: `render` with `{{key}}` placeholders, `renderEach` for lists |
 | **test** | Testing framework: `describe`/`it` blocks, colored output, assertions (`assertEqual`, `assertTrue`, `assertFalse`, `assertRaises`) |
+| **toml** | `Toml` TOML 1.0: `parse`, `parseFile` (into Dicts/Arrays), `stringify` |
 | **url** | `Url` parse/build URLs, `encodeComponent`/`decodeComponent`, `parseQuery` for query strings |
 | **uuid** | `Uuid` v4 generation per RFC 4122 |
 | **validate** | Schema validation for Dicts with field rules (required, optional, min, max) |

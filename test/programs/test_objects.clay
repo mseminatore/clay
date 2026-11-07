@@ -122,4 +122,17 @@ afterPlain = { 7 } value
 Test eq(Plain size, 3)
 Test eq(afterPlain, 7)
 
+
+// A top-level name that is reserved in C (_ + capital) still works natively
+_Base = Object clone {
+    n = 2
+    twice() { n * 2 }
+}
+_Kid = _Base clone {
+    twice() { super twice + 1 }
+}
+Test eq(_Base twice, 4)
+Test eq(_Kid twice, 5)
+Test eq(_Kid getSlot("_name"), "_Kid")
+
 Test done()

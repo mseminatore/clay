@@ -1,0 +1,87 @@
+// test_semver_diff.clay — stdlib/semver and stdlib/diff
+import("stdlib/semver")
+import("stdlib/diff")
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+// --- semver: parsing ---
+v = Semver parse("v1.4.2-beta.1+build.5")
+T eq([v major, v minor, v patch, v prerelease, v build], [1, 4, 2, "beta.1", "build.5"], "parse")
+T eq(v toString, "1.4.2-beta.1+build.5", "toString")
+T eq([Semver valid("1.2.3"), Semver valid("1.2"), Semver valid("01.2.3"), Semver valid("1.2.3-"), Semver valid("a.b.c")],
+     [true, false, false, false, false], "valid")
+T eq(try { Semver parse("1.2") } catch { |e| e message }, "Semver: invalid version '1.2'", "parse error")
+
+// --- semver: precedence (the spec's own example) ---
+order = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
+T eq(Semver sort(["1.0.0", "1.0.0-rc.1", "1.0.0-beta.11", "1.0.0-alpha.beta", "1.0.0-beta.2", "1.0.0-alpha", "1.0.0-beta", "1.0.0-alpha.1"]),
+     order, "sort by precedence")
+T eq([Semver compare("1.2.3", "1.10.0"), Semver compare("2.0.0", "1.99.99"), Semver compare("1.0.0+a", "1.0.0+b")], [-1, 1, 0], "compare")
+T eq([Semver lt("1.0.0-rc.1", "1.0.0"), Semver gt("1.0.1", "1.0.0"), Semver eq("1.0.0", "v1.0.0")], [true, true, true], "lt gt eq")
+T eq(Semver max(["1.2.0", "1.10.0", "1.9.0"]), "1.10.0", "max")
+
+// --- semver: ranges ---
+cases = [["1.4.2", "^1.2", true], ["2.0.0", "^1.2", false], ["0.2.5", "^0.2.3", true], ["0.3.0", "^0.2.3", false],
+         ["0.0.3", "^0.0.3", true], ["0.0.4", "^0.0.3", false], ["1.2.9", "~1.2.3", true], ["1.3.0", "~1.2.3", false],
+         ["1.9.9", "1.x", true], ["2.0.0", "1.x", false], ["2.0.0-beta", "^1.0.0", false],
+         ["1.2.3-beta.3", "^1.2.3-beta.2", true], ["1.2.4-beta", "^1.2.3-beta.2", false],
+         ["1.5.0", ">=1.0.0 <2.0.0", true], ["2.0.0", ">=1.0.0 <2.0.0", false], ["3.1.0", "1.2 || >=3", true],
+         ["2.5.0", "1.2 || >=3", false], ["2.3.9", "1.0.0 - 2.3", true], ["2.4.0", "1.0.0 - 2.3", false],
+         ["0.0.1", "*", true], ["1.3.0", ">1.2", true], ["1.2.9", ">1.2", false], ["1.2.5", "<=1.2", true],
+         ["1.3.0", "<=1.2", false], ["1.2.3", "= 1.2.3", true], ["1.2.3", ">= 1.2.0", true], ["1.2.3", "~>1.2", true]]
+bad = (cases filter { |c| (Semver satisfies(c at(0), c at(1))) != (c at(2)) }) map { |c| c at(0) + " " + (c at(1)) }
+T eq(bad, [], "satisfies")
+T eq(Semver maxSatisfying(["1.2.0", "1.9.1", "1.9.0", "2.0.0"], "~1.9"), "1.9.1", "maxSatisfying")
+T eq(Semver maxSatisfying(["1.2.0"], "^2"), nil, "maxSatisfying with no match")
+T eq([Semver inc("1.4.2", "major"), Semver inc("1.4.2", "minor"), Semver inc("1.4.2", "patch"), Semver inc("1.4.2-rc.1", "patch")],
+     ["2.0.0", "1.5.0", "1.4.3", "1.4.2"], "inc")
+
+// --- diff ---
+nl = "\n"
+T eq(Diff lines("a\nb\nc\n", "a\nc\nd\n"), [["=", "a"], ["-", "b"], ["=", "c"], ["+", "d"]], "lines")
+T eq(Diff lines(["x"], ["x"]), [["=", "x"]], "arrays of lines")
+T eq(Diff lines("", "p\n"), [["+", "p"]], "from empty")
+T eq(Diff stats("a\nb\nc\n", "a\nx\nc\nd\n"), #{"added": 2, "removed": 1}, "stats")
+T eq(Diff unified("same\n", "same\n"), "", "unified of equal inputs")
+T eq(Diff unified("a\nb\nc\n", "a\nc\nd\n", "old", "new"),
+     "--- old" + nl + "+++ new" + nl + "@@ -1,3 +1,3 @@" + nl + " a" + nl + "-b" + nl + " c" + nl + "+d" + nl, "unified")
+T eq(Diff unified("", "x\ny\n"), "--- a" + nl + "+++ b" + nl + "@@ -0,0 +1,2 @@" + nl + "+x" + nl + "+y" + nl, "unified from empty")
+// two changes far apart make two hunks; close ones merge into one
+base = []
+i = 0
+{ i < 40 } whileTrue { base push("line" + i toString); i = i + 1 }
+far = base map { |l| l }
+far setAt(5, "five")
+far setAt(30, "thirty")
+u = Diff unified(base, far)
+T eq((u split("@@ -")) size - 1, 2, "far changes: two hunks")
+T eq(u contains("@@ -3,7 +3,7 @@") && (u contains("@@ -28,7 +28,7 @@")), true, "hunk ranges")
+near = base map { |l| l }
+near setAt(10, "ten")
+near setAt(16, "sixteen")
+T eq((Diff unified(base, near) split("@@ -")) size - 1, 1, "near changes: one hunk")
+T eq((Diff unified(base, near, "a", "b", 0) split("@@ -")) size - 1, 2, "context 0 splits them")
+
+// the edit script always rebuilds both sides
+a = "the\nquick\nbrown\nfox\njumps\nover\nthe\nlazy\ndog\n"
+b = "a\nquick\nred\nfox\nleaps\nover\nthe\ndog\nsleeps\n"
+ops = Diff lines(a, b)
+T eq((ops filter { |o| (o at(0)) != "+" }) map { |o| o at(1) }, a split("\n") filter { |l| l != "" }, "ops rebuild a")
+T eq((ops filter { |o| (o at(0)) != "-" }) map { |o| o at(1) }, b split("\n") filter { |l| l != "" }, "ops rebuild b")
+T eq((ops filter { |o| (o at(0)) == "=" }) size, 5, "longest common subsequence")
+
+T done

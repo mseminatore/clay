@@ -1,0 +1,95 @@
+// test_toml.clay — stdlib/toml
+import("stdlib/toml")
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+nl = "\n"
+err = { |src| try { Toml parse(src); "no error" } catch { |e| e message } }
+
+// --- scalars ---
+d = Toml parse("a = 1\nb = -17\nc = +3\nd = 1_000\ne = 0xDEAD_beef\nf = 0o755\ng = 0b1101\n")
+T eq([d get("a"), d get("b"), d get("c"), d get("d")], [1, -17, 3, 1000], "decimal integers")
+T eq([d get("e"), d get("f"), d get("g")], [3735928559, 493, 13], "hex, octal, binary")
+d = Toml parse("a = 3.5\nb = -0.25\nc = 5e+2\nd = 1_0.5\nt = true\nf = false\n")
+T eq([d get("a"), d get("b"), d get("c"), d get("d"), d get("t"), d get("f")], [3.5, -0.25, 500, 10.5, true, false], "floats, booleans")
+d = Toml parse("odt = 1979-05-27T07:32:00Z\nldt = 1979-05-27 07:32:00.999\nld = 1979-05-27\nlt = 07:32:00\n")
+T eq([d get("odt"), d get("ldt"), d get("ld"), d get("lt")],
+     ["1979-05-27T07:32:00Z", "1979-05-27 07:32:00.999", "1979-05-27", "07:32:00"], "dates and times stay text")
+
+// --- strings ---
+d = Toml parse("s = \"tab\\there \\\"q\\\" \\\\ \\u00e9 \\U0001F600\"\nl = 'C:\\Users\\me'\n")
+T eq(d get("s"), "tab\there \"q\" \\ " + (String chr(195)) + (String chr(169)) + " " +
+     (String chr(240)) + (String chr(159)) + (String chr(152)) + (String chr(128)), "basic string escapes and UTF-8")
+T eq(d get("l"), "C:\\Users\\me", "literal string")
+d = Toml parse("m = \"\"\"\nRoses\nViolets\"\"\"\nj = \"\"\"one \\\n    two\"\"\"\nr = '''\n raw \\n '''\nq = \"\"\"a \"quoted\" b\"\"\"\"\n")
+T eq(d get("m"), "Roses\nViolets", "multi-line basic drops the first newline")
+T eq(d get("j"), "one two", "line-ending backslash")
+T eq(d get("r"), " raw \\n ", "multi-line literal")
+T eq(d get("q"), "a \"quoted\" b\"", "quotes before the closing delimiter")
+
+// --- keys and tables ---
+d = Toml parse("name = \"x\"\nsite.\"google.com\" = true\n\"a b\" = 1\n[server]\nhost = \"h\"\n[server.tls]\non = true\n")
+T eq((d get("site")) get("google.com"), true, "dotted and quoted keys")
+T eq(d get("a b"), 1, "quoted key")
+T eq([(d get("server")) get("host"), ((d get("server")) get("tls")) get("on")], ["h", true], "tables and sub-tables")
+d = Toml parse("[[fruit]]\nname = \"apple\"\n[fruit.physical]\ncolor = \"red\"\n[[fruit.variety]]\nname = \"fuji\"\n[[fruit]]\nname = \"banana\"\n")
+fruit = d get("fruit")
+T eq([fruit size, (fruit at(0)) get("name"), (fruit at(1)) get("name")], [2, "apple", "banana"], "array of tables")
+T eq(((fruit at(0)) get("physical")) get("color"), "red", "sub-table of the latest array element")
+T eq((((fruit at(0)) get("variety")) at(0)) get("name"), "fuji", "nested array of tables")
+
+// --- arrays and inline tables ---
+d = Toml parse("a = [ 1, 2,\n  3, # comment\n]\nb = [[1, 2], [\"x\"]]\np = { x = 1, y.z = 2 }\ne = []\n")
+T eq(d get("a"), [1, 2, 3], "multi-line array with trailing comma and comment")
+T eq(d get("b"), [[1, 2], ["x"]], "nested arrays")
+T eq([(d get("p")) get("x"), ((d get("p")) get("y")) get("z")], [1, 2], "inline table with a dotted key")
+T eq(d get("e"), [], "empty array")
+
+// --- comments and blank lines ---
+d = Toml parse("# top\n\n  key = \"v\" # trailing\r\n\n[t] # header comment\n")
+T eq([d get("key"), d has("t")], ["v", true], "comments, CRLF, indentation")
+
+// --- errors ---
+T eq(err value("a = 1\na = 2\n"), "Toml: line 2: key 'a' is defined twice", "duplicate key")
+T eq(err value("[t]\n[t]\n"), "Toml: line 2: table [t] is defined twice", "duplicate table")
+T eq(err value("a = 1\n[a]\n"), "Toml: line 2: 'a' is already defined and is not a table", "table over a value")
+T eq(err value("a = \"open\n"), "Toml: line 1: unterminated string", "unterminated string")
+T eq(err value("a = 1 b = 2\n"), "Toml: line 1: expected the end of the line, found 'b'", "two values on a line")
+T eq(err value("a = 007\n"), "Toml: line 1: leading zeros in '007'", "leading zeros")
+T eq(err value("a = [1 2]\n"), "Toml: line 1: expected ',' or ']' in an array", "array without commas")
+T eq(err value("a = \"\\q\"\n"), "Toml: line 1: unknown escape '\\q'", "bad escape")
+T eq(err value("x = inf\n"), "Toml: line 1: inf and nan are not supported", "inf")
+
+// --- stringify round trip ---
+src = "title = \"T\"\nnums = [1, 2]\n[owner]\nname = \"Tom \\\"T\\\"\"\n[[items]]\nid = 1\n[[items]]\nid = 2\ntags = { a = true }\n[a.b]\nc = \"deep\"\n"
+d = Toml parse(src)
+out = Toml stringify(d)
+T eq(Toml parse(out) get("owner") get("name"), "Tom \"T\"", "stringify escapes strings")
+again = Toml parse(out)
+T eq([(again get("items")) size, ((again get("items")) at(1)) get("tags") get("a"), ((again get("a")) get("b")) get("c")],
+     [2, true, "deep"], "stringify round trip")
+T eq(Toml stringify(#{"b": 1, "a": #{"x": "y"}, "c": [1]}), "b = 1" + nl + "c = [1]" + nl + nl + "[a]" + nl + "x = \"y\"" + nl, "stringify layout")
+T eq(Toml stringify(#{"odd key": 1}), "\"odd key\" = 1" + nl, "stringify quotes keys")
+
+// --- files ---
+tmp = File tempDir
+File write(tmp + "/c.toml", "[db]\nport = 5432\n")
+T eq((Toml parseFile(tmp + "/c.toml") get("db")) get("port"), 5432, "parseFile")
+File delete(tmp + "/c.toml")
+File delete(tmp)
+
+T done
