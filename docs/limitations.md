@@ -1,0 +1,72 @@
+# Known limitations
+
+Clay is young. These are the rough edges we know about, what they look like
+when you hit them, and how to work around them. Each is tracked for a future
+release.
+
+## Language
+
+**A top-level variable hides a slot of the same name inside methods.** A bare
+name in a method looks up globals before `self`'s slots, so a script-level
+variable shadows the slot:
+
+```clay norun
+Config = Object clone {
+    path = "/etc/app.conf"
+    show() { path }            // reads the global below, not the slot
+}
+path = "./local.conf"
+Config show println            // ./local.conf
+```
+
+Write `self path` to read the slot explicitly, or avoid giving top-level
+variables the same names as slots. This bites most often when a script uses a
+brick whose objects have common slot names (`path`, `name`, `data`, ...).
+
+**A method takes at most 16 parameters.** A 17th parameter isn't bound: using
+it fails with `object does not understand 'a16'`. Pass a Dict or an object
+instead of a long parameter list.
+
+**Most built-in methods ignore extra arguments.** Methods written in Clay raise
+`ArgumentError` when called with too many arguments, but those implemented in C
+(other than `print` and `println`) silently drop them: `Math sqrt(4, 9)` is `2`.
+
+**String literals and interpolation:**
+
+- A string literal ends at an embedded NUL: `"ab\x00cd"` is the two-character
+  string `"ab"`.
+- Inside `"${...}"`, a double quote ends the whole string, so
+  `"v=${d get("k")}"` is a parse error. Compute the value first:
+  `k = d get("k")`, then `"v=${k}"`.
+
+## Native compilation
+
+**Native programs leak a little memory on non-local exits.** When an exception
+or a block's `return` unwinds through compiled C frames, the temporaries and
+locals of the frames it skips are not released (about one block object per
+non-local return), and top-level globals are never freed at exit. This doesn't
+affect results, only memory use in long-running programs that use non-local
+returns heavily.
+
+**`clay --compile` runs from a build tree.** `clay-native.cfg`, written next to
+the `clay` binary by CMake, records paths inside the build directory, and there
+is no `cmake --install` yet. Build Clay from source and run it from there.
+
+## REPL
+
+**A very long REPL session can run out of constants.** Every number and `nil`
+literal typed into the VM REPL adds a constant, and a session has 65,536
+constant slots; past that, values silently go wrong. Restart the REPL if a
+session runs for a very long time.
+
+## Self-hosting
+
+**`clayc` running inside `clay`'s VM can only build native executables.** Only
+one VM runs per process, so `clay selfhost/clayc.clay program.clay` cannot run
+the program. Build a native `clayc` first
+(`clay --compile -o clayc selfhost/clayc.clay`) to compile and run programs.
+`clayc` also doesn't yet support MSVC; on Windows, use `clay --compile`.
+
+---
+
+[← Guide index](README.md)

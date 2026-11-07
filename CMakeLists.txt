@@ -436,7 +436,7 @@ endif()
 add_executable(doc_test tools/doc_test.c)
 target_compile_definitions(doc_test PRIVATE _CRT_SECURE_NO_WARNINGS)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc_tests)
-foreach(doc getting-started language-tour core-objects native-and-plugins bricks debugging)
+foreach(doc getting-started language-tour core-objects native-and-plugins bricks debugging limitations)
     add_test(NAME clay_docs_${doc}
              COMMAND doc_test $<TARGET_FILE:clay_compiler>
                      ${CMAKE_CURRENT_SOURCE_DIR}/docs/${doc}.md ${CMAKE_CURRENT_BINARY_DIR}/doc_tests)

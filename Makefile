@@ -44,6 +44,8 @@ COMPILER_SRCS = src/compiler/main.c src/compiler/lexer.c src/compiler/parser.c \
                 src/compiler/bc_compiler.c src/compiler/bricks.c \
                 src/compiler/dap.c
 COMPILER_OBJS = $(COMPILER_SRCS:.c=.o)
+# Everything but main.o: what the unit tests link against (CMake's clay_compiler_lib)
+COMPILER_LIB_OBJS = $(filter-out src/compiler/main.o,$(COMPILER_OBJS))
 
 # Fiber context switching (assembly, Unix only)
 FIBER_SRCS = src/runtime/fiber_ctx.c
@@ -143,8 +145,9 @@ test-clay: clay
 	@for f in $(CLAY_TESTS); do echo "=== $$f ==="; ./clay $$f || exit 1; done
 	@echo "All Clay tests passed."
 
-test_runner: $(TEST_OBJS) libclay.a libclayvm.a $(CJSON_OBJ)
-	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) $(CJSON_OBJ) -L. -lclay -lclayvm $(LDFLAGS) $(STACK_FLAGS)
+test_runner: $(TEST_OBJS) $(COMPILER_LIB_OBJS) libclay.a libclayvm.a $(CJSON_OBJ)
+	$(CC) $(CFLAGS) -o $@ $(TEST_OBJS) $(COMPILER_LIB_OBJS) $(CJSON_OBJ) \
+	    -L. -lclay -lclayvm $(OPENSSL_LIBS) $(LDFLAGS) $(STACK_FLAGS)
 
 # VM generated files — compile without -pedantic
 src/vm/generated/%.o: src/vm/generated/%.c

@@ -20,6 +20,8 @@ native executables.
    and writing plugins.
 6. **[Debugging and editor support](debugging.md)** — tracing, the stepper,
    VS Code debugging, and the VS Code extension.
+7. **[Known limitations](limitations.md)** — rough edges in this release and
+   how to work around them.
 
 Every runnable code sample in this guide is executed by the test suite
 (`ctest -L docs`), so the examples stay correct as the language evolves.

@@ -4,6 +4,7 @@
 clay
 clayc
 clayc.c
+test_runner
 test_*.txt
 docs/prerelease-review.md
 
