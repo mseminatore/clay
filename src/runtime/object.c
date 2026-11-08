@@ -215,23 +215,8 @@ ClayObject *clay_clone(ClayObject *proto) {
 
     /* Type-specific init for clones */
     if (proto && proto->type == CLAY_TYPE_DICT) {
-        obj->as.dict.map = ht_create();
-        ht_set_hash_func(obj->as.dict.map, HT_HASH_STRING);
-        extern int dict_str_compare(ht_key_t a, ht_key_t b);
-        ht_set_compare_func(obj->as.dict.map, dict_str_compare);
-        /* Copy entries from prototype dict */
-        if (proto->as.dict.map) {
-            size_t pos = 0;
-            ht_key_t key;
-            ht_value_t val;
-            while (ht_next(proto->as.dict.map, &pos, &key, &val)) {
-                char *key_copy = strdup((const char *)key);
-                ClayValue cv = (ClayValue)(uintptr_t)val;
-                if (CLAY_IS_PTR(cv) && !CLAY_IS_NIL(cv) && cv != CLAY_TRUE && cv != CLAY_FALSE)
-                    clay_retain(CLAY_OBJ(cv));
-                ht_insert(obj->as.dict.map, key_copy, val);
-            }
-        }
+        /* copy the prototype's entries, in the same order */
+        clay_dict_copy_into(obj, proto);
     } else if (proto && proto->type == CLAY_TYPE_ARRAY) {
         int cap = proto->as.array.capacity > 8 ? proto->as.array.capacity : 8;
         obj->as.array.items = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)cap);

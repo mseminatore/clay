@@ -1252,6 +1252,9 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
                     (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
             }
+            /* the call takes the try's line (not the catch/finally block's
+             * just compiled), for the try block's stack-trace frame */
+            bc->current_line = node->line;
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
             emit_u16(bc, (uint16_t)bc->native_try_catch);
             emit_byte(bc, 3);

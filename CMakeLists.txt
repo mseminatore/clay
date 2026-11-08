@@ -189,6 +189,7 @@ set(COMPILER_LIB_SOURCES
     src/compiler/codegen.c
     src/compiler/bc_compiler.c
     src/compiler/bricks.c
+    src/compiler/check.c
     src/compiler/dap.c
 )
 
@@ -327,6 +328,7 @@ add_test(NAME clay_test_regex COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/
 add_test(NAME clay_test_crypto COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_crypto.clay)
 add_test(NAME clay_test_toml COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_toml.clay)
 add_test(NAME clay_test_semver_diff COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_semver_diff.clay)
+add_test(NAME clay_test_dict_order COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_dict_order.clay)
 add_test(NAME clay_test_fs COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fs.clay)
 add_test(NAME clay_test_process COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_process.clay)
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)
@@ -480,6 +482,25 @@ foreach(smoke ${CLAY_GOLDEN_TESTS})
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/programs
         LABELS "smoke")
 endforeach()
+# Compile errors: each test/errors/<name>.clay must fail with exactly
+# test/errors/<name>.out, in the VM and with --compile (clayc is checked
+# against clay in cmake/selfhost_run.cmake)
+foreach(err undefined_variable undefined_in_import)
+    add_test(NAME clay_error_${err}
+             COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+                 -DSRC=test/errors/${err}.clay -DEXPECT_FAIL=1
+                 -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/errors/${err}.out
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_output.cmake)
+    add_test(NAME clay_error_${err}_native
+             COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+                 -DSRC=test/errors/${err}.clay -DEXPECT_FAIL=1
+                 "-DFLAGS=--compile;-o;${CMAKE_CURRENT_BINARY_DIR}/native_tests/err_${err}"
+                 -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/errors/${err}.out
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_output.cmake)
+    set_tests_properties(clay_error_${err} clay_error_${err}_native PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endforeach()
+
 # stack_trace asserts on its own trace (the frames' wording differs by backend)
 add_test(NAME clay_smoke_stack_trace COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/stack_trace.clay)
 set_tests_properties(clay_smoke_stack_trace PROPERTIES

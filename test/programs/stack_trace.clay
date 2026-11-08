@@ -19,12 +19,12 @@ trace = try {
   e stackTrace()
 }
 (trace == nil) ifTrue { raise("no error was raised") }
-// the frames that raised and called it, innermost first (the outermost,
-// the try block itself, is reported differently by the VM and native code)
+// every frame, innermost first: the calls on lines 7, 11 and 15, then the
+// try block itself, called at the try's line
 lines = trace split("\n")
 // (file names are as the program was run: relative or absolute)
 expect = ["stack_trace.clay:7 in value()", "stack_trace.clay:11 in value()",
-          "stack_trace.clay:15 in value()"]
+          "stack_trace.clay:15 in value()", "stack_trace.clay:14 in value()"]
 i = 0
 expect each { |want|
   frame = (lines at(i)) trim

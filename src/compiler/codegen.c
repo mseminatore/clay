@@ -1329,6 +1329,9 @@ static char *emit_dict_lit(CodeGen *cg, AstNode *node) {
 }
 
 static char *emit_try_catch(CodeGen *cg, AstNode *node) {
+    /* the try's own line: calling the try block records it in the trace
+     * (a bare `try` statement otherwise keeps the previous statement's) */
+    emit_line(cg, node->line);
     char *t = temp_name(cg);
     char *try_tmp = temp_name(cg);
     char *err_tmp = temp_name(cg);

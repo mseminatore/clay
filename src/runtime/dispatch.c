@@ -138,6 +138,17 @@ ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv)
     return invoke_method(m, obj, argc, argv);
 }
 
+/* A hint for the classic precedence slip: a message binds tighter than an
+ * operator, so `x == 5 ifTrue { }` sends ifTrue to 5, and `i < 3 whileTrue`
+ * sends whileTrue to 3. "" for other selectors. */
+const char *clay_dnu_hint(const char *selector) {
+    if (strcmp(selector, "ifTrue") == 0 || strcmp(selector, "ifFalse") == 0)
+        return " (a message binds tighter than an operator: write (a == b) ifTrue { ... })";
+    if (strcmp(selector, "whileTrue") == 0 || strcmp(selector, "whileFalse") == 0)
+        return " (whileTrue is sent to a block: write { i < 3 } whileTrue { ... })";
+    return "";
+}
+
 ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, ClayValue *argv) {
     /* Push trace frame for stack traces */
     clay_trace_push(clay_source_file, clay_source_line, selector);
@@ -170,8 +181,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             clay_trace_pop();
             return result;
         }
-        char buf[128];
-        snprintf(buf, sizeof(buf), "integer does not understand '%s'", selector);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "integer does not understand '%s'%s", selector, clay_dnu_hint(selector));
         clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
         clay_trace_pop();
         return CLAY_NIL;
@@ -202,8 +213,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             clay_trace_pop();
             return result;
         }
-        char buf[128];
-        snprintf(buf, sizeof(buf), "float does not understand '%s'", selector);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "float does not understand '%s'%s", selector, clay_dnu_hint(selector));
         clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
         clay_trace_pop();
         return CLAY_NIL;
@@ -219,8 +230,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
                 return result;
             }
         }
-        char buf[128];
-        snprintf(buf, sizeof(buf), "message '%s' sent to nil", selector);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "message '%s' sent to nil%s", selector, clay_dnu_hint(selector));
         clay_raise(CLAY_VAL(clay_error_new(buf, "NilError")));
         clay_trace_pop();
         return CLAY_NIL;
@@ -283,8 +294,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
         return result;
     }
 
-    char buf[128];
-    snprintf(buf, sizeof(buf), "object does not understand '%s'", selector);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "object does not understand '%s'%s", selector, clay_dnu_hint(selector));
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     clay_trace_pop();
     return CLAY_NIL;

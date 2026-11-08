@@ -717,6 +717,8 @@ BcGen = Object clone {
             self expr(n tryBlock)
             (n catchBlock != nil) ifTrue { self expr(n catchBlock) } ifFalse { self pushNil }
             (n finallyBlock != nil) ifTrue { self expr(n finallyBlock) } ifFalse { self pushNil }
+            // the call takes the try's line (bc_compiler.c), for its trace frame
+            curLine = n line
             return self native(N_TRY_CATCH, 3)
         }
         (k == "Raise") ifTrue {

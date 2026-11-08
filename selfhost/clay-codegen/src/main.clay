@@ -875,6 +875,8 @@ CodeGen = Object clone {
     }
 
     tryCatch(n) {
+        // the try's own line: calling the try block records it in the trace
+        self emitLine(n line)
         t = self tempName
         tryTmp = self tempName
         errTmp = self tempName

@@ -1,0 +1,13 @@
+// Misspelled and never-defined names are reported before the program runs
+// (CTest: clay_error_undefined_variable). Names that are fine: globals
+// defined later, block parameters and locals, builtins, and bare names in
+// methods (they may be slots of self).
+Point = Object clone {
+    x = 0
+    show() { x + offset }          // in a method: may be a slot, not checked
+}
+p = Pointt clone                   // line 9: typo
+helper = { |a| a + later + b }     // line 10: 'b' is never defined
+later = 1                          // defined after its use above: fine
+(true) ifTrue { inner = 2 }
+inner println                      // line 13: 'inner' was local to the block

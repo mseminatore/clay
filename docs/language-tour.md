@@ -13,6 +13,24 @@ Integers, strings, booleans, arrays, blocks — all objects. All operations are 
 "hello" length          // send 'length' to a string
 ```
 
+## Variables
+
+A variable comes into existence when it's first assigned: `count = 0`. One
+assigned at the top level of a program is global — visible everywhere,
+including in code written above the assignment. One assigned inside a block
+belongs to that block.
+
+Reading a variable that is never defined is an error, reported before the
+program runs (in the VM and with `--compile` alike), so a typo can't silently
+become `nil`:
+
+```clay norun
+p = Pointt clone    // error: undefined variable 'Pointt'
+```
+
+Inside a method a bare name can also be one of `self`'s slots (see
+[Implicit self](#implicit-self-in-methods)), so names there aren't checked.
+
 ## Message passing
 
 Messages use IO-style syntax: `receiver message(args)`. Parentheses are optional for zero-argument messages.
@@ -36,6 +54,20 @@ Binary operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`) are
 ```
 
 Standard math precedence applies.
+
+**Messages bind tighter than operators.** `x size + 1` is `(x size) + 1`, which is
+usually what you want — but it also means a message after an operator goes to
+the operand next to it, not to the whole comparison:
+
+```clay
+x = 5
+(x == 5) ifTrue { "five" println }   // parenthesize the condition
+// x == 5 ifTrue { ... } would send ifTrue to 5, not to the comparison:
+// "integer does not understand 'ifTrue' (a message binds tighter ...)"
+```
+
+The same goes for loops: `{ i < 3 } whileTrue { ... }` puts the condition in a
+block, which is what `whileTrue` is sent to.
 
 ## Operator overloading
 
@@ -645,6 +677,10 @@ try { s toInt } catch { |e| e type() }   // TypeError — not a number
 
 ## Dict (HashMap)
 
+A Dict keeps its entries in the order their keys were first added: `keys`,
+`values`, `each`, `entries` and `toString` all follow it. Updating a key keeps
+its place; removing it and adding it again moves it to the end.
+
 Dict literals use `#{}` syntax — keys are identifiers that become strings:
 
 ```clay
@@ -682,6 +718,7 @@ d2 = Dict clone; d2 set("a", 1)
 d1 == d2                    // true
 
 // Merge, entries, clear
+other = #{"version": 2}
 d merge(other)              // merge other dict into d (mutates d)
 d entries                   // [[key1, val1], [key2, val2], ...]
 d clear                     // remove all entries

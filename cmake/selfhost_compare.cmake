@@ -81,7 +81,7 @@ foreach(f ${files})
         set(c_out "${WORK}/${index}.c")
         set(clay_out "${WORK}/${index}.clay.c")
         file(REMOVE "${c_out}" "${clay_out}")
-        execute_process(COMMAND "${CLAY}" -c -o "${c_out}" "${f}"
+        execute_process(COMMAND "${CLAY}" --no-check -c -o "${c_out}" "${f}"
                         RESULT_VARIABLE rc_c OUTPUT_QUIET ERROR_QUIET)
         execute_process(COMMAND ${clay_side} "${f}" "${clay_out}" ${plugin_args}
                         RESULT_VARIABLE rc_clay OUTPUT_VARIABLE got ERROR_VARIABLE got)
@@ -103,7 +103,7 @@ foreach(f ${files})
         endif()
         continue()
     endif()
-    execute_process(COMMAND "${CLAY}" ${flag} "${f}"
+    execute_process(COMMAND "${CLAY}" --no-check ${flag} "${f}"
                     RESULT_VARIABLE rc_c OUTPUT_VARIABLE want ERROR_VARIABLE want)
     execute_process(COMMAND ${clay_side} "${f}"
                     RESULT_VARIABLE rc_clay OUTPUT_VARIABLE got ERROR_VARIABLE got)

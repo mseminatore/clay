@@ -112,8 +112,8 @@ static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue 
     const char *sel = (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0]))
         ? clay_string_data(CLAY_OBJ(argv[0]))
         : "???";
-    char buf[128];
-    snprintf(buf, sizeof(buf), "object does not understand '%s'", sel);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "object does not understand '%s'%s", sel, clay_dnu_hint(sel));
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     return CLAY_NIL;
 }

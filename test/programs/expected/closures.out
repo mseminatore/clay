@@ -1,0 +1,14 @@
+=== Basic capture ===
+add5(10) = 15
+=== Scope survival ===
+getter() = 42
+=== String capture ===
+hello(World) = Hello World
+=== Multiple captures ===
+sum() = 30
+=== 3-level nesting ===
+3 * 5 = 15
+=== Counter ===
+count 1 = 1
+count 2 = 2
+count 3 = 3

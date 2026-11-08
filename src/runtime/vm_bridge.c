@@ -1337,6 +1337,13 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     ClayValue catch_block = vm_to_clay(catch_vm);
     ClayValue finally_block = vm_to_clay(finally_vm);
 
+    /* the try's line, so the trace frame for the try block has one (main
+     * code doesn't track lines per instruction; chunks do). ip is past
+     * this CALL_NATIVE; its last byte carries the try's line. */
+    if (g_bc && vm->code == g_bc->code && vm->ip > 0 && vm->ip <= (size_t)g_bc->len) {
+        clay_source_line = g_bc->line_map[vm->ip - 1];
+    }
+
     VmTryRegs st;
     vm_regs_save(vm, &st);
 

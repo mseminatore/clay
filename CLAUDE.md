@@ -80,7 +80,9 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
    `codegen.c` emits human-readable C with `#line` directives for debuggability. `bc_compiler.c`
    compiles the AST directly to bytecode for the VM; the runtime side of the VM (native functions,
    block/method trampolines, the `VM` prototype) is `src/runtime/vm_bridge.c`, part of the runtime
-   library so native programs can run bytecode too. `bricks.c` implements the package manager.
+   library so native programs can run bytecode too. `check.c` reports undefined variables before
+   either backend runs (mirrored by `GlobalCheck` in `selfhost/clay-parser`; `--no-check` skips it).
+   `bricks.c` implements the package manager.
    `dap.c` implements the Debug Adapter Protocol server. `main.c` is the CLI driver (REPLs, flag
    parsing, plugin auto-load).
 

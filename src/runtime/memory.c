@@ -109,19 +109,7 @@ static void clay_dealloc(ClayObject *obj) {
             }
             break;
         case CLAY_TYPE_DICT:
-            if (obj->as.dict.map) {
-                size_t dpos = 0;
-                ht_key_t dkey;
-                ht_value_t dval;
-                while (ht_next(obj->as.dict.map, &dpos, &dkey, &dval)) {
-                    free((void *)dkey);
-                    ClayValue cv = (ClayValue)(uintptr_t)dval;
-                    if (CLAY_IS_PTR(cv) && !CLAY_IS_NIL(cv) && cv != CLAY_TRUE && cv != CLAY_FALSE) {
-                        clay_release(CLAY_OBJ(cv));
-                    }
-                }
-                ht_free(obj->as.dict.map);
-            }
+            if (obj->as.dict.map) clay_dict_free_contents(obj);
             break;
         case CLAY_TYPE_PLUGIN:
             if (obj->as.plugin.data && obj->as.plugin.free_fn)

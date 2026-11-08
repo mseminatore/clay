@@ -1,0 +1,2 @@
+test/errors/helper_with_typo.clay:3: error: undefined variable 'Helpr'
+clay: compilation failed

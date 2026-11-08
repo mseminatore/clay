@@ -61,6 +61,9 @@ test/programs/*.c
 # Executables
 *.exe
 *.out
+# ...except the golden outputs of test programs (cmake/expect_output.cmake)
+!test/programs/expected/*.out
+!test/errors/*.out
 *.app
 *.i*86
 *.x86_64

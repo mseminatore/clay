@@ -1,0 +1,9 @@
+=== Error ===
+stack_trace2.clay:3: RuntimeError: cannot speak
+  at stack_trace2.clay:7 in speak()
+  at stack_trace2.clay:12 in bark()
+  at stack_trace2.clay:11 in value()
+=== Stack Trace ===
+  at stack_trace2.clay:7 in speak()
+  at stack_trace2.clay:12 in bark()
+  at stack_trace2.clay:11 in value()

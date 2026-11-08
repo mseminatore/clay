@@ -1,0 +1,3 @@
+// imported by undefined_in_import.clay
+Helper = Object clone { x = 1 }
+broken = Helpr clone      // line 3: typo, reported against this file

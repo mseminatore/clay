@@ -47,6 +47,7 @@ __declspec(dllimport) DWORD __stdcall GetModuleFileNameA(void *, char *, DWORD);
 #include "lexer.h"
 #include "parser.h"
 #include "version.h"
+#include "check.h"
 #include "codegen.h"
 #include "bc_compiler.h"
 #include "bricks.h"
@@ -96,6 +97,9 @@ static char *replace_ext(const char *path, const char *new_ext) {
  * works when clay is found via PATH. Empty if unknown. */
 static char g_exe_path_buf[1024] = "";
 static char g_exe_dir[1024] = "";
+/* --no-check: skip the undefined-variable check (compiler comparison tools
+ * translate syntax fixtures that aren't runnable programs) */
+static int g_no_check = 0;
 
 static void resolve_exe_path(const char *argv0) {
     char path[1024] = "";
@@ -972,6 +976,10 @@ static int dump_bytecode(const char *filename) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
         return 1;
     }
+    if (!g_no_check && check_undefined_variables(program, filename) > 0) {
+        fprintf(stderr, "clay: compilation failed\n");
+        return 1;
+    }
     if (bc_compile(&bc, program) != 0) {
         fprintf(stderr, "clay: bytecode compilation failed\n");
         return 1;
@@ -1050,6 +1058,12 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     if (!program || parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
         if (program) ast_free(program);
+        free(source);
+        return 1;
+    }
+    if (!g_no_check && check_undefined_variables(program, filename) > 0) {
+        fprintf(stderr, "clay: compilation failed\n");
+        ast_free(program);
         free(source);
         return 1;
     }
@@ -1162,6 +1176,8 @@ int main(int argc, char *argv[]) {
             mem_stats = 1;
         } else if (strcmp(argv[i], "--dap") == 0) {
             dap_mode = 1;
+        } else if (strcmp(argv[i], "--no-check") == 0) {
+            g_no_check = 1;
         } else if (strcmp(argv[i], "--version") == 0) {
             printf("clay %s\n", CLAY_VERSION);
             return 0;
@@ -1169,6 +1185,7 @@ int main(int argc, char *argv[]) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
             printf("  --version     Print the Clay version and exit\n");
+            printf("  --no-check    Don't report undefined variables before compiling\n");
             printf("  --compile     Compile to native binary via C (instead of running in VM)\n");
             printf("  -o <output>   Output binary name (implies --compile)\n");
             printf("  -c            Emit C code only, no compile (implies --compile)\n");
@@ -1317,6 +1334,13 @@ int main(int argc, char *argv[]) {
      * native program resolves them at run time from the same plugins/ */
     clay_bootstrap();
     clay_plugin_auto_load(g_exe_path);
+
+    if (!g_no_check && check_undefined_variables(program, source_file) > 0) {
+        fprintf(stderr, "clay: compilation failed\n");
+        ast_free(program);
+        free(source);
+        return 1;
+    }
 
     /* Generate C code: next to the binary when -o names one (keeps source
      * trees clean), else next to the source */

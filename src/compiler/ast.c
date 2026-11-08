@@ -6,10 +6,13 @@
 #include <stdio.h>
 #include <string.h>
 
+const char *ast_current_file = NULL;
+
 AstNode *ast_new(NodeType type, int line) {
     AstNode *node = (AstNode *)calloc(1, sizeof(AstNode));
     node->type = type;
     node->line = line;
+    node->file = ast_current_file;
     return node;
 }
 
@@ -18,6 +21,7 @@ static void nodelist_clone(NodeList *dst, const NodeList *src);
 AstNode *ast_clone(AstNode *node) {
     if (!node) return NULL;
     AstNode *c = ast_new(node->type, node->line);
+    c->file = node->file;
     switch (node->type) {
         case NODE_INT_LIT:
             c->as.int_lit.value = node->as.int_lit.value;

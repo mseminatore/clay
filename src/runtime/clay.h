@@ -79,6 +79,9 @@ const char *clay_arg_string(int argc, ClayValue *argv, int i, const char *who);
 void        clay_raise_argument_error(const char *who, const char *problem);
 /* A method written in Clay was called with more arguments than it declares */
 void        clay_raise_arity(const char *method, int expected, int got);
+/* A hint to append to "does not understand" for a likely precedence slip
+ * (ifTrue / whileTrue sent to a non-Boolean), or "" */
+const char *clay_dnu_hint(const char *selector);
 intptr_t  clay_to_int(ClayValue v);
 int       clay_is_int(ClayValue v);
 
@@ -154,6 +157,7 @@ struct ClayObject {
 
         struct {
             HashTable *map;
+            struct ClayDictOrder *order;   /* keys in insertion order (clay_dict.c) */
         } dict;
 
         struct {
@@ -381,6 +385,10 @@ ClayValue   clay_dict_get(ClayObject *dict, const char *key);
 int         clay_dict_has(ClayObject *dict, const char *key);
 void        clay_dict_remove(ClayObject *dict, const char *key);
 size_t      clay_dict_size(ClayObject *dict);
+/* Entries in insertion order: pos starts at 0; returns 0 at the end */
+int         clay_dict_next(ClayObject *dict, size_t *pos, const char **key, ClayValue *val);
+void        clay_dict_copy_into(ClayObject *dst, ClayObject *src);  /* clone */
+void        clay_dict_free_contents(ClayObject *dict);              /* dealloc */
 
 /* --- Vec3 helpers --- */
 ClayObject *clay_vec3_new(float x, float y, float z);

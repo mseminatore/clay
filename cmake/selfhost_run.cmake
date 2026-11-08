@@ -43,6 +43,24 @@ foreach(f ${files})
     endif()
 endforeach()
 
+# Compile errors (test/errors/*.clay, helpers excluded): clayc must report
+# the same as clay, apart from its own name in the final line
+file(GLOB errfiles RELATIVE "${ROOT}" "${ROOT}/test/errors/*.clay")
+foreach(f ${errfiles})
+    if(f MATCHES "/helper_")
+        continue()
+    endif()
+    execute_process(COMMAND "${CLAY}" "${f}" WORKING_DIRECTORY "${ROOT}" TIMEOUT 120
+                    RESULT_VARIABLE rc_a OUTPUT_VARIABLE out_a ERROR_VARIABLE out_a)
+    execute_process(COMMAND "${CLAYC}" "${f}" WORKING_DIRECTORY "${ROOT}" TIMEOUT 120
+                    RESULT_VARIABLE rc_b OUTPUT_VARIABLE out_b ERROR_VARIABLE out_b)
+    string(REPLACE "clayc: " "clay: " out_b "${out_b}")
+    if(NOT rc_a STREQUAL rc_b OR NOT out_a STREQUAL out_b)
+        list(APPEND failed "${f}")
+        message("--- ${f}: clay (exit ${rc_a}) ---\n${out_a}--- clayc (exit ${rc_b}) ---\n${out_b}")
+    endif()
+endforeach()
+
 list(LENGTH files count)
 list(LENGTH skipped nskip)
 if(nskip GREATER 0)

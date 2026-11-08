@@ -1,0 +1,4 @@
+test/errors/undefined_variable.clay:9: error: undefined variable 'Pointt'
+test/errors/undefined_variable.clay:10: error: undefined variable 'b'
+test/errors/undefined_variable.clay:13: error: undefined variable 'inner'
+clay: compilation failed

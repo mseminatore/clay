@@ -1,0 +1,8 @@
+doubler(5) = 10
+Array elements:
+10
+20
+30
+Testing booleans:
+1 == 1 is true
+1 == 2 is false

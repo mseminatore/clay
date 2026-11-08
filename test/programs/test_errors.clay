@@ -138,4 +138,13 @@ log = []
 Test eq(try { 7 } finally { log push("f3") }, 7)
 Test eq(log, ["f3"])
 
+
+// a precedence slip gets a hint: ifTrue binds to the 5, not the comparison
+n = 5
+msg = try { n == 5 ifTrue { 1 } } catch { |e| e message() }
+Test eq(msg contains("binds tighter than an operator"), true)
+msg = try { n < 3 whileTrue { 1 } } catch { |e| e message() }
+Test eq(msg contains("whileTrue is sent to a block"), true)
+Test eq((try { n foo } catch { |e| e message() }), "integer does not understand 'foo'")
+
 Test done()

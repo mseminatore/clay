@@ -47,11 +47,15 @@ Node = Object clone {
     superMark = false  // parser-internal: a Self node standing for `super`
     alias = nil        // Import: `as Name`
     fnName = nil       // codegen: the C function of a Block / MethodDef
+    file = nil         // the source file it was parsed from (imports splice
+                       // other files' statements into the program)
+    _file = nil        // shared: the file new nodes get (ast.c ast_current_file)
 
     make(k, l) {
         n = self clone
         n kind = k
         n line = l
+        n file = Node _file
         n
     }
 }
@@ -200,6 +204,7 @@ Parser = Object clone {
         hadError = false
         filename = file
         imported = importedSet ?? #{}
+        Node _file = file
         self advance          // prime the parser
     }
 
@@ -1094,7 +1099,97 @@ Parser = Object clone {
         }
         sub = Parser new(File read(resolved), resolved, imported)
         prog = sub parseProgram
+        Node _file = filename       // back to this file's nodes
         sub hadError ifTrue { hadError = true }
         prog
+    }
+}
+
+// Reads of variables that are never defined (src/compiler/check.c): not
+// assigned at the top level of the program or its imports, not a parameter
+// or assignment of an enclosing block, not a builtin or plugin prototype.
+// Method bodies aren't checked (a bare name there may be one of self's
+// slots). report(program, mainFile) prints each and returns the count.
+GlobalCheck = Object clone {
+    builtins = ["Object", "Number", "String", "Array", "Block", "Nil", "Boolean", "Error",
+                "Dict", "Math", "Console", "File", "System", "FFI", "Date", "Http",
+                "Regex", "Crypto", "Process", "Range", "Fiber", "Db", "Graphics", "Vec3",
+                "Thread", "VM", "BreakSignal", "ContinueSignal", "true", "false", "nil"]
+    _globals = nil
+    _scopes = nil
+    _main = ""
+    _errors = 0
+    _plugins = nil
+
+    report(program, mainFile) {
+        self _main = mainFile
+        self _errors = 0
+        self _scopes = []
+        self _globals = #{}
+        self _plugins = #{}
+        (System pluginGlobals) each { |g| (self _plugins) set(g, true) }
+        self _collect(program items, self _globals)
+        self _walk(program)
+        self _errors
+    }
+
+    // the names a statement list assigns (a block's or the program's)
+    _collect(stmts, into) {
+        stmts each { |s|
+            (s != nil) ifTrue {
+                ((s kind) == "Assign") ifTrue { into set(s name, true) }
+                ((s kind) == "Destructure") ifTrue { (s items) each { |t| into set(t name, true) } }
+            }
+        }
+    }
+
+    _defined(name) {
+        ((self builtins) contains(name)) ifTrue { return true }
+        i = (self _scopes) size - 1
+        { i >= 0 } whileTrue {
+            (((self _scopes) at(i)) has(name)) ifTrue { return true }
+            i = i - 1
+        }
+        ((self _globals) has(name)) || ((self _plugins) has(name))
+    }
+
+    _walkAll(list) { (list != nil) ifTrue { list each { |n| self _walk(n) } } }
+
+    _walk(n) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Ident") ifTrue {
+            (self _defined(n name)) ifFalse {
+                Console error(((n file) ?? (self _main)) + ":" + (n line) toString +
+                              ": error: undefined variable '" + (n name) + "'\n")
+                self _errors = self _errors + 1
+            }
+            return nil
+        }
+        (k == "Block") ifTrue {
+            scope = #{}
+            (n params) each { |p| scope set(p name, true) }
+            self _collect(n body, scope)
+            (self _scopes) push(scope)
+            self _walkAll(n body)
+            (self _scopes) pop
+            return nil
+        }
+        (k == "MethodDef") ifTrue { return nil }      // bare names may be slots
+        (k == "Assign" || k == "SlotDef") ifTrue { return self _walk(n value) }
+        (k == "Send") ifTrue { self _walk(n recv); return self _walkAll(n items) }
+        (k == "Binary") ifTrue { self _walk(n left); return self _walk(n right) }
+        (k == "Clone") ifTrue { self _walk(n recv); return self _walkAll(n items) }
+        (k == "Array" || k == "Program") ifTrue { return self _walkAll(n items) }
+        (k == "DictLit") ifTrue { return self _walkAll(n vals) }
+        (k == "TryCatch") ifTrue {
+            self _walk(n tryBlock)
+            self _walk(n catchBlock)
+            return self _walk(n finallyBlock)
+        }
+        (k == "Raise" || k == "Return") ifTrue { return self _walk(n expr) }
+        (k == "SlotAssign") ifTrue { self _walk(n recv); return self _walk(n value) }
+        (k == "Destructure") ifTrue { return self _walk(n value) }
+        nil
     }
 }

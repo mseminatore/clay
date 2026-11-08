@@ -1,0 +1,6 @@
+something went wrong
+caught: division by zero
+42
+inner caught
+forwarded: banana
+caught: MethodNotFound

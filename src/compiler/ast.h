@@ -39,6 +39,8 @@ typedef struct {
 struct AstNode {
     NodeType type;
     int line;
+    const char *file;   /* source file it was parsed from (imports splice
+                           other files' statements into the program) */
 
     union {
         /* NODE_INT_LIT */
@@ -143,6 +145,8 @@ struct AstNode {
 };
 
 /* --- API --- */
+/* The file new nodes are stamped with; the parser sets it per file */
+extern const char *ast_current_file;
 AstNode *ast_new(NodeType type, int line);
 AstNode *ast_clone(AstNode *node);
 void     ast_free(AstNode *node);

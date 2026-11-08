@@ -1099,6 +1099,7 @@ static AstNode *parse_statement(Parser *p) {
 /* --- Public API --- */
 
 void parser_init(Parser *p, const char *source, const char *filename) {
+    ast_current_file = filename;
     lexer_init(&p->lexer, source);
     p->had_error = 0;
     p->filename = filename;
@@ -1211,9 +1212,12 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     import_parser.had_error = 0;
     import_parser.filename = resolved;
     import_parser.imported = parent->imported; /* share import tracking */
+    const char *saved_file = ast_current_file;
+    ast_current_file = resolved;            /* its nodes come from this file */
     parser_advance(&import_parser);
 
     AstNode *program = parser_parse(&import_parser);
+    ast_current_file = saved_file;
 
     if (import_parser.had_error) {
         parent->had_error = 1;

@@ -1,0 +1,56 @@
+// test_dict_order.clay — Dicts iterate in insertion order
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+d = #{"zeta": 1, "alpha": 2, "mid": 3}
+d set("beta", 4)
+T eq(d keys, ["zeta", "alpha", "mid", "beta"], "literal then set: insertion order")
+T eq(d values, [1, 2, 3, 4], "values follow the keys")
+d set("alpha", 20)
+T eq(d keys, ["zeta", "alpha", "mid", "beta"], "updating a key keeps its place")
+d remove("zeta")
+d set("zeta", 5)
+T eq(d keys, ["alpha", "mid", "beta", "zeta"], "re-adding after remove goes to the end")
+T eq(d toString, "{alpha: 20, mid: 3, beta: 4, zeta: 5}", "toString in order")
+T eq(d entries, [["alpha", 20], ["mid", 3], ["beta", 4], ["zeta", 5]], "entries in order")
+seen = []
+d each { |k, v| seen push(k) }
+T eq(seen, ["alpha", "mid", "beta", "zeta"], "each in order")
+
+c = d clone
+c set("new", 9)
+T eq([c keys, d keys], [["alpha", "mid", "beta", "zeta", "new"], ["alpha", "mid", "beta", "zeta"]], "clone keeps the order, separately")
+m = #{"b": 1}
+m merge(#{"a": 2, "b": 3, "c": 4})
+T eq([m keys, m get("b")], [["b", "a", "c"], 3], "merge adds new keys at the end")
+
+big = Dict clone
+i = 0
+{ i < 200 } whileTrue { big set("k" + i toString, i); i = i + 1 }
+i = 0
+{ i < 198 } whileTrue { big remove("k" + i toString); i = i + 1 }
+T eq([big keys, big size], [["k198", "k199"], 2], "many removals")
+big clear
+big set("again", 1)
+T eq(big keys, ["again"], "clear, then add")
+
+n = Dict clone
+n set("x", nil)
+T eq([n has("x"), n keys, n size], [true, ["x"], 1], "a nil value still counts")
+T eq(#{"a": 1, "b": 2} == #{"b": 2, "a": 1}, true, "equality ignores order")
+
+T done
