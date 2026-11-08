@@ -124,6 +124,112 @@ static const char *parse_string(const char *s, char *out, size_t out_sz) {
     return s;
 }
 
+int brick_safe_flag(const char *flag) {
+    if (!flag || flag[0] != '-' || !flag[1]) return 0;
+    for (const char *c = flag; *c; c++) {
+        char ch = *c;
+        int ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                 (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '=' ||
+                 ch == '+' || ch == ',' || ch == '/' || ch == '-';
+        if (!ok) return 0;
+    }
+    return 1;
+}
+
+/* Skip any JSON value (string, number, literal, array or object) */
+static const char *skip_value(const char *p) {
+    p = skip_ws(p);
+    if (*p == '"') {
+        char discard[1024];
+        return parse_string(p, discard, sizeof(discard));
+    }
+    if (*p == '{' || *p == '[') {
+        int depth = 0;
+        while (*p) {
+            if (*p == '"') {
+                char discard[1024];
+                p = parse_string(p, discard, sizeof(discard));
+                if (!p) return NULL;
+                continue;
+            }
+            if (*p == '{' || *p == '[') depth++;
+            else if (*p == '}' || *p == ']') { depth--; if (depth == 0) return p + 1; }
+            p++;
+        }
+        return NULL;
+    }
+    while (*p && *p != ',' && *p != '}' && *p != ']') p++;
+    return p;
+}
+
+/* ["a", "b"] into out[][width]; returns the end, or NULL if malformed */
+static const char *parse_string_array(const char *p, char *out, size_t width,
+                                      int max, int *count) {
+    p = skip_ws(p);
+    if (*p != '[') return NULL;
+    p = skip_ws(p + 1);
+    while (*p && *p != ']') {
+        if (*count >= max) return NULL;
+        p = parse_string(p, out + (size_t)(*count) * width, width);
+        if (!p) return NULL;
+        (*count)++;
+        p = skip_ws(p);
+        if (*p == ',') p = skip_ws(p + 1);
+    }
+    return *p == ']' ? p + 1 : NULL;
+}
+
+/* "native": { ... } — validated, since it ends up on a compiler command line */
+static const char *parse_native(const char *p, BrickNative *nb) {
+    p = skip_ws(p);
+    if (*p != '{') return NULL;
+    p = skip_ws(p + 1);
+    while (p && *p && *p != '}') {
+        char key[64] = "";
+        p = parse_string(p, key, sizeof(key));
+        if (!p) return NULL;
+        p = skip_ws(p);
+        if (*p != ':') return NULL;
+        p = skip_ws(p + 1);
+        if (strcmp(key, "plugin") == 0) {
+            p = parse_string(p, nb->plugin, sizeof(nb->plugin));
+            if (p && !brick_safe_path(nb->plugin, 0)) {
+                fprintf(stderr, "error: brick.json: bad native plugin name \"%s\"\n", nb->plugin);
+                return NULL;
+            }
+        } else if (strcmp(key, "sources") == 0) {
+            p = parse_string_array(p, &nb->sources[0][0], BRICK_MAX_PATH, BRICK_MAX_NATIVE, &nb->source_count);
+            for (int i = 0; p && i < nb->source_count; i++)
+                if (!brick_safe_path(nb->sources[i], 1)) {
+                    fprintf(stderr, "error: brick.json: bad native source \"%s\"\n", nb->sources[i]);
+                    return NULL;
+                }
+        } else if (strcmp(key, "cflags") == 0 || strcmp(key, "libs") == 0) {
+            int is_c = key[0] == 'c';
+            char (*arr)[BRICK_MAX_FLAG] = is_c ? nb->cflags : nb->libs;
+            int *count = is_c ? &nb->cflag_count : &nb->lib_count;
+            p = parse_string_array(p, &arr[0][0], BRICK_MAX_FLAG, BRICK_MAX_NATIVE, count);
+            for (int i = 0; p && i < *count; i++)
+                if (!brick_safe_flag(arr[i])) {
+                    fprintf(stderr, "error: brick.json: rejecting native flag \"%s\" "
+                            "(a flag starts with '-' and has no spaces, quotes or shell characters)\n",
+                            arr[i]);
+                    return NULL;
+                }
+        } else {
+            p = skip_value(p);
+        }
+        if (!p) return NULL;
+        p = skip_ws(p);
+        if (*p == ',') p = skip_ws(p + 1);
+    }
+    if (p && nb->plugin[0] && nb->source_count == 0) {
+        fprintf(stderr, "error: brick.json: native plugin \"%s\" has no sources\n", nb->plugin);
+        return NULL;
+    }
+    return (p && *p == '}') ? p + 1 : NULL;
+}
+
 /* Parse brick.json content into a BrickManifest */
 static int parse_manifest(const char *json, BrickManifest *m) {
     memset(m, 0, sizeof(*m));
@@ -174,15 +280,10 @@ static int parse_manifest(const char *json, BrickManifest *m) {
                 if (*p == ',') p = skip_ws(p + 1);
             }
             if (*p == '}') p++;
+        } else if (strcmp(key, "native") == 0) {
+            p = parse_native(p, &m->native);
         } else {
-            /* Skip unknown value */
-            if (*p == '"') {
-                char discard[1024];
-                p = parse_string(p, discard, sizeof(discard));
-            } else {
-                /* Skip non-string value */
-                while (*p && *p != ',' && *p != '}') p++;
-            }
+            p = skip_value(p);      /* unknown key (any JSON value) */
         }
         if (!p) return -1;
         p = skip_ws(p);
@@ -221,7 +322,21 @@ int brick_write(const char *path, const BrickManifest *m) {
                 i > 0 ? "," : "", m->deps[i].name, m->deps[i].url);
     }
     if (m->dep_count > 0) fprintf(f, "\n  ");
-    fprintf(f, "}\n}\n");
+    fprintf(f, "}");
+    const BrickNative *nb = &m->native;
+    if (nb->plugin[0]) {
+        fprintf(f, ",\n  \"native\": {\n    \"plugin\": \"%s\",\n    \"sources\": [", nb->plugin);
+        for (int i = 0; i < nb->source_count; i++)
+            fprintf(f, "%s\"%s\"", i ? ", " : "", nb->sources[i]);
+        fprintf(f, "],\n    \"cflags\": [");
+        for (int i = 0; i < nb->cflag_count; i++)
+            fprintf(f, "%s\"%s\"", i ? ", " : "", nb->cflags[i]);
+        fprintf(f, "],\n    \"libs\": [");
+        for (int i = 0; i < nb->lib_count; i++)
+            fprintf(f, "%s\"%s\"", i ? ", " : "", nb->libs[i]);
+        fprintf(f, "]\n  }");
+    }
+    fprintf(f, "\n}\n");
     fclose(f);
     return 0;
 }
@@ -776,6 +891,15 @@ static int install_subdeps(const char *dir, const char *name) {
 }
 
 /* Check out `ref` (or the locked commit, which takes precedence) in `dir` */
+/* Bring a brick's git submodules (e.g. a native brick's C library) to the
+ * commits the checked-out revision records */
+static void sync_submodules(const char *dir) {
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "git -C \"%s\" submodule update --init --recursive --quiet", dir);
+    if (system(cmd) != 0)
+        fprintf(stderr, "  warning: could not update the submodules of %s\n", dir);
+}
+
 static void brick_checkout(const char *dir, const char *name, const char *url,
                            const char *ref) {
     const char *target = brick_locked_sha(name, url);
@@ -785,6 +909,7 @@ static void brick_checkout(const char *dir, const char *name, const char *url,
     snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"", dir, target);
     if (system(cmd) != 0)
         fprintf(stderr, "  warning: could not checkout '%s' for %s\n", target, name);
+    sync_submodules(dir);
 }
 
 /* Install a single dependency (and, recursively, its dependencies).
@@ -806,7 +931,7 @@ static int install_dep(const char *url, const char *name) {
         if (stat(repo_dest, &st) != 0) {
             /* Clone the repo (first sub-brick from this repo) */
             char cmd[2048];
-            snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"",
+            snprintf(cmd, sizeof(cmd), "git clone --quiet --recurse-submodules \"%s\" \"%s\"",
                      clone_url, repo_dest);
             printf("  Cloning %s into %s...\n", clone_url, repo_dest);
             if (system(cmd) != 0) {
@@ -852,7 +977,7 @@ static int install_dep(const char *url, const char *name) {
     }
 
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "git clone --quiet \"%s\" \"%s\"", clone_url, dest);
+    snprintf(cmd, sizeof(cmd), "git clone --quiet --recurse-submodules \"%s\" \"%s\"", clone_url, dest);
     printf("  Installing %s from %s...\n", name, clone_url);
     if (system(cmd) != 0) {
         fprintf(stderr, "  error: failed to clone %s\n", clone_url);
@@ -1134,6 +1259,7 @@ static int update_dep(const char *url, const char *name) {
         snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"",
                  git_dir, ref);
         system(cmd);
+        sync_submodules(git_dir);
     } else {
         char cmd[2048];
         printf("  Updating %s...\n", name);
@@ -1143,6 +1269,7 @@ static int update_dep(const char *url, const char *name) {
             fprintf(stderr, "  warning: pull failed for %s\n", name);
             return -1;
         }
+        sync_submodules(git_dir);
     }
     return 0;
 }

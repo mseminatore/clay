@@ -66,6 +66,10 @@ static const char *const g_plugin_exts[] = {
     NULL
 };
 
+/* Init functions of plugins linked in statically (native bricks) */
+static ClayPluginInitFunc g_static_inits[MAX_PLUGIN_HANDLES];
+static int g_static_init_count = 0;
+
 /* Directory holding the clay executable's plugins/ folder ("" = unknown) */
 static char g_exe_dir[512] = "";
 
@@ -244,6 +248,68 @@ static ClayPluginValue api_get_slot(ClayPluginObject obj, const char *name) {
     return (ClayPluginValue)clay_get_slot((ClayObject *)obj, name);
 }
 
+/* --- version 2 --- */
+
+static void api_retain(ClayPluginValue v) { clay_retain_val((ClayValue)v); }
+static void api_release(ClayPluginValue v) { clay_release_val((ClayValue)v); }
+
+static int api_is_array(ClayPluginValue v) {
+    return CLAY_IS_TYPE((ClayValue)v, CLAY_TYPE_ARRAY);
+}
+
+static ClayPluginValue api_array_new(void) {
+    return (ClayPluginValue)CLAY_VAL(clay_array_new());
+}
+
+static size_t api_array_size(ClayPluginValue arr) {
+    return api_is_array(arr) ? clay_array_size(CLAY_OBJ((ClayValue)arr)) : 0;
+}
+
+static ClayPluginValue api_array_get(ClayPluginValue arr, size_t i) {
+    if (!api_is_array(arr) || i >= clay_array_size(CLAY_OBJ((ClayValue)arr)))
+        return (ClayPluginValue)CLAY_NIL;
+    return (ClayPluginValue)clay_array_at(CLAY_OBJ((ClayValue)arr), i);
+}
+
+static void api_array_push(ClayPluginValue arr, ClayPluginValue v) {
+    if (api_is_array(arr)) clay_array_append(CLAY_OBJ((ClayValue)arr), (ClayValue)v);
+}
+
+/* Count (and copy, up to max) the numbers in v, flattening nested arrays */
+static size_t floats_walk(ClayValue v, float *out, size_t max, size_t n) {
+    if (CLAY_IS_TYPE(v, CLAY_TYPE_ARRAY)) {
+        ClayObject *a = CLAY_OBJ(v);
+        size_t len = clay_array_size(a);
+        for (size_t i = 0; i < len; i++) n = floats_walk(clay_array_at(a, i), out, max, n);
+        return n;
+    }
+    if (!CLAY_IS_INT(v) && !CLAY_IS_FLOAT(v)) {
+        clay_raise(CLAY_VAL(clay_error_new("expected an Array of numbers", "TypeError")));
+        return n;
+    }
+    if (out && n < max) out[n] = clay_to_float(v);
+    return n + 1;
+}
+
+static size_t api_to_floats(ClayPluginValue arr, float *out, size_t max) {
+    return floats_walk((ClayValue)arr, out, max, 0);
+}
+
+static ClayPluginValue api_from_floats(const float *data, size_t n, size_t cols) {
+    ClayObject *arr = clay_array_new();
+    if (cols == 0) {
+        for (size_t i = 0; i < n; i++) clay_array_append(arr, clay_float_tag(data[i]));
+        return (ClayPluginValue)CLAY_VAL(arr);
+    }
+    for (size_t r = 0; r + cols <= n; r += cols) {
+        ClayObject *row = clay_array_new();
+        for (size_t c = 0; c < cols; c++) clay_array_append(row, clay_float_tag(data[r + c]));
+        clay_array_append(arr, CLAY_VAL(row));
+        clay_release(row);
+    }
+    return (ClayPluginValue)CLAY_VAL(arr);
+}
+
 /* The global API vtable — single instance */
 static const ClayPluginAPI g_plugin_api = {
     .register_type    = api_register_type,
@@ -267,6 +333,16 @@ static const ClayPluginAPI g_plugin_api = {
     .raise            = api_raise,
     .set_slot         = api_set_slot,
     .get_slot         = api_get_slot,
+    .api_version      = CLAY_PLUGIN_API_VERSION,
+    .retain           = api_retain,
+    .release          = api_release,
+    .is_array         = api_is_array,
+    .array_new        = api_array_new,
+    .array_size       = api_array_size,
+    .array_get        = api_array_get,
+    .array_push       = api_array_push,
+    .to_floats        = api_to_floats,
+    .from_floats      = api_from_floats,
 };
 
 /* ------------------------------------------------------------------ */
@@ -291,7 +367,19 @@ static int load_plugin_lib_ex(const char *path, ClayObject **proto_out) {
         }
     }
 
-    ClayPluginInitFunc init_fn = (ClayPluginInitFunc)LIB_SYM(handle, "clay_plugin_init");
+    /* <name>_plugin_init (name = the file name without its extension), or
+     * the older clay_plugin_init */
+    ClayPluginInitFunc init_fn = NULL;
+    {
+        const char *base = path;
+        for (const char *c = path; *c; c++) if (*c == '/' || *c == '\\') base = c + 1;
+        char sym[256];
+        size_t n = 0;
+        while (base[n] && base[n] != '.' && n < sizeof(sym) - 16) { sym[n] = base[n]; n++; }
+        snprintf(sym + n, sizeof(sym) - n, "_plugin_init");
+        init_fn = (ClayPluginInitFunc)LIB_SYM(handle, sym);
+    }
+    if (!init_fn) init_fn = (ClayPluginInitFunc)LIB_SYM(handle, "clay_plugin_init");
     if (!init_fn) {
         LIB_CLOSE(handle);
         return 0;
@@ -314,6 +402,20 @@ static int load_plugin_lib_ex(const char *path, ClayObject **proto_out) {
 
 static int load_plugin_lib(const char *path) {
     return load_plugin_lib_ex(path, NULL);
+}
+
+/* Load the plugin library at `path` (a native brick's): 1 on success */
+int clay_plugin_load_file(const char *path) {
+    return load_plugin_lib_ex(path, NULL);
+}
+
+/* Register a plugin linked into this executable (a native brick in a
+ * `clay --compile` program): runs its init once */
+void clay_plugin_register_static(ClayPluginInitFunc init_fn) {
+    for (int i = 0; i < g_static_init_count; i++)
+        if (g_static_inits[i] == init_fn) return;
+    if (g_static_init_count < MAX_PLUGIN_HANDLES) g_static_inits[g_static_init_count++] = init_fn;
+    init_fn(&g_plugin_api);
 }
 
 /* Copy the directory part of `path` (including the trailing separator) */

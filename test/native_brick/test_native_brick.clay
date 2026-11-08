@@ -1,0 +1,21 @@
+// A native brick (bricks/stats: C sources built into a plugin on first use)
+import("stats")
+
+check = { |what, got, want|
+    (got == want) ifFalse { raise("FAIL: " + what + ": " + got toString + " != " + want toString) }
+}
+
+check value("plugin API version", StatsNative apiVersion, 2)
+check value("sum", Stats sum([1, 2, 3.5]), 6.5)
+check value("nested arrays flatten", Stats sum([[1, 2], [3, 4]]), 10)
+check value("mean", Stats mean([2, 4]), 3)
+check value("from_floats flat", Stats doubled([1, 2, 3]), [2, 4, 6])
+check value("from_floats rows", Stats doubled([1, 2, 3, 4], 2), [[2, 4], [6, 8]])
+a = Stats accumulator
+a add(1) add(2, 6)
+check value("native data", a mean, 3)
+b = Stats accumulator
+check value("separate instances", b mean, 0)
+check value("TypeError on a non-number", (try { Stats sum([1, "x"]) } catch { |e| e type }), "TypeError")
+check value("ArgumentError", (try { StatsNative sum(5) } catch { |e| e type }), "ArgumentError")
+"native brick ok" println

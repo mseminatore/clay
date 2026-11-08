@@ -24,6 +24,8 @@ vm_quick.*
 
 # Installed brick dependencies (created by `bricks install`)
 bricks/
+# ...except the native-brick test fixture (its build/ output stays ignored)
+!test/native_brick/bricks/
 
 # Generated C from Clay compiler
 test/programs/*.c

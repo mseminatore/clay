@@ -34,6 +34,9 @@ A dependency's name — its key in `deps` — is what you import and the directo
 (`bricks/some-lib`). `clay bricks add` takes the name from the repository unless you give one, so a
 repository called `clay-foo` can be imported as plain `foo`.
 
+A brick can also ship C code in a `"native"` section, compiled the first time it's imported: see
+[Native bricks](native-and-plugins.md#native-bricks).
+
 ## Using bricks
 
 Import a brick by name (no `.clay` extension, no path separator):

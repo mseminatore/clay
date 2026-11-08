@@ -1735,21 +1735,21 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     *nv = CLAYVM_NIL_VAL;
     ht_add(g, (ht_key_t)strdup("nil"), (ht_value_t)nv);
 
-    /* Add plugin-registered globals */
-    for (int i = 0; ; i++) {
-        ClayObject *pobj = NULL;
-        const char *pname = NULL;
-        /* Iterate plugin globals via the public API */
-        extern int clay_plugin_is_global(const char *name);
-        extern ClayObject *clay_plugin_get_global(const char *name);
-        /* Use index-based access — need an accessor */
-        extern int clay_plugin_global_count(void);
-        extern const char *clay_plugin_global_name(int idx);
-        extern ClayObject *clay_plugin_global_object(int idx);
-        if (i >= clay_plugin_global_count()) break;
-        pname = clay_plugin_global_name(i);
-        pobj = clay_plugin_global_object(i);
-        if (!pname || !pobj) continue;
+    bc_vm_add_plugin_globals(vm);
+}
+
+/* Make every loaded plugin's prototypes VM globals (again after plugins
+ * load later, e.g. a native brick's when its import is parsed); names the
+ * VM already has are left alone */
+void bc_vm_add_plugin_globals(clayvm_vm_t *vm) {
+    extern int clay_plugin_global_count(void);
+    extern const char *clay_plugin_global_name(int idx);
+    extern ClayObject *clay_plugin_global_object(int idx);
+    HashTable *g = (HashTable *)vm->globals;
+    for (int i = 0; i < clay_plugin_global_count(); i++) {
+        const char *pname = clay_plugin_global_name(i);
+        ClayObject *pobj = clay_plugin_global_object(i);
+        if (!pname || !pobj || ht_find(g, (ht_key_t)pname)) continue;
         clayvm_value_t *pv = (clayvm_value_t *)malloc(sizeof(clayvm_value_t));
         *pv = CLAYVM_OBJ(pobj);
         ht_add(g, (ht_key_t)strdup(pname), (ht_value_t)pv);

@@ -190,6 +190,7 @@ set(COMPILER_LIB_SOURCES
     src/compiler/bc_compiler.c
     src/compiler/bricks.c
     src/compiler/check.c
+    src/compiler/native_bricks.c
     src/compiler/dap.c
 )
 
@@ -483,6 +484,18 @@ foreach(smoke ${CLAY_GOLDEN_TESTS})
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/programs
         LABELS "smoke")
 endforeach()
+# A native brick (test/native_brick/bricks/stats): its C is built into a
+# plugin on first use for the VM, and linked into the --compile executable
+add_test(NAME clay_native_brick COMMAND clay_compiler test_native_brick.clay)
+add_test(NAME clay_native_brick_compiled
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DSRC=test_native_brick.clay
+             -DOUT=${CMAKE_CURRENT_BINARY_DIR}/native_tests/native_brick${CMAKE_EXECUTABLE_SUFFIX}
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/native_test.cmake)
+set_tests_properties(clay_native_brick clay_native_brick_compiled PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/native_brick
+    RESOURCE_LOCK native_brick_build)
+
 # Compile errors: each test/errors/<name>.clay must fail with exactly
 # test/errors/<name>.out, in the VM and with --compile (clayc is checked
 # against clay in cmake/selfhost_run.cmake)

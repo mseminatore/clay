@@ -65,6 +65,10 @@ returns heavily.
 the `clay` binary by CMake, records paths inside the build directory, and there
 is no `cmake --install` yet. Build Clay from source and run it from there.
 
+**`clayc` doesn't build native bricks.** Programs that import a brick with C
+code (a `"native"` section in its `brick.json`) run with `clay` and build with
+`clay --compile`, but not yet with `clayc`, the Clay compiler written in Clay.
+
 ## REPL
 
 **A very long REPL session can run out of constants.** Every number and `nil`

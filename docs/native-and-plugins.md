@@ -108,12 +108,16 @@ static ClayPluginValue mathex_sqrt(ClayPluginObject self, int argc, ClayPluginVa
 
 static ClayPluginMethod methods[] = { { "sqrt", mathex_sqrt }, { NULL, NULL } };
 
-CLAY_PLUGIN_EXPORT void clay_plugin_init(const ClayPluginAPI *clay_api) {
+CLAY_PLUGIN_EXPORT void mathex_plugin_init(const ClayPluginAPI *clay_api) {
     api = clay_api;
     ClayPluginType def = { "MathEx", methods, NULL, 0 };
     api->register_type(&def);
 }
 ```
+
+The entry point is named after the library, `<name>_plugin_init` (`mathex.so`:
+`mathex_plugin_init`), so several plugins can be linked into one executable;
+the older `clay_plugin_init` is still accepted for plugins loaded from a file.
 
 ```sh
 cc -shared -fPIC -I src/runtime mathex.c -o plugins/mathex.so -lm   # Linux / macOS
@@ -131,6 +135,58 @@ a path. Every plugin in the `plugins/` folder beside the executable is loaded
 automatically at startup, so its prototypes are available without the call
 (loading the same plugin twice is harmless). The CMake build compiles the
 examples in [`examples/plugins/`](../examples/plugins/) into `build/plugins/`.
+
+### Plugin API version 2
+
+`api->api_version` says which functions the table has; fields are only ever
+added at the end. Version 2 adds what wrapping a C library needs:
+
+- `retain` / `release`: keep a Clay value beyond the call (e.g. inside native
+  data). `make_*`, `send`, `array_new` and `from_floats` return new references;
+  arguments and `array_get` results are borrowed.
+- Arrays: `is_array`, `array_new`, `array_size`, `array_get`, `array_push`.
+- Numbers in bulk: `to_floats(arr, out, max)` flattens an Array (of rows) of
+  numbers into a `float` buffer and returns the count (call it with `max` 0 to
+  size the buffer); `from_floats(data, n, cols)` makes an Array of numbers, or of
+  rows of `cols` numbers. Data crosses into C in one call, not value by value.
+
+A C struct per object: register the type with a `free_fn`, `clone` the
+prototype in a constructor method, `set_data` the struct on the clone, and
+`get_data` it in the other methods; `free_fn` runs when the object is freed.
+
+## Native bricks
+
+A brick can ship C sources: Clay compiles them into a plugin the first time
+the brick is imported, with the same compiler and flags as `clay --compile`,
+and keeps the result in the brick's `build/` directory (rebuilt when a source,
+the compiler or the Clay version changes). A `clay --compile` executable links
+the sources in directly, so it doesn't depend on the plugin file. The brick's
+`brick.json` lists them:
+
+```json
+{
+  "name": "ann",
+  "main": "src/main.clay",
+  "native": {
+    "plugin": "ann",
+    "sources": ["native/clay_ann.c", "native/libann/ann.c", "native/libann/tensor.c"],
+    "cflags": ["-DUSE_FAST_MATH"],
+    "libs": ["-lm", "-lpthread"]
+  }
+}
+```
+
+- `plugin` names the library, and so the entry point: `ann_plugin_init`.
+- `sources` are relative to the brick, and may be in a git submodule:
+  `clay bricks add` and `install` fetch submodules.
+- `cflags` and `libs` are options for the compiler and linker. Each must start
+  with `-` and contain only letters, digits and `. _ = + , / -`, because they end up
+  on a command line. A `brick.json` that breaks these rules fails to import.
+
+The brick's `main` file wraps the plugin's prototypes in a Clay API. See
+[clay-ann](https://github.com/mseminatore/clay-ann), neural networks over the
+libann C library, for a complete example. `clayc`, the Clay compiler written in
+Clay, doesn't build native bricks yet.
 
 ---
 

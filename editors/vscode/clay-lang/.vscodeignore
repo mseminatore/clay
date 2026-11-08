@@ -2,3 +2,5 @@
 src/**
 tsconfig.json
 node_modules/**
+images/make_icon.py
+images/icon-512.png

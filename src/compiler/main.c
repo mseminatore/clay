@@ -48,6 +48,7 @@ __declspec(dllimport) DWORD __stdcall GetModuleFileNameA(void *, char *, DWORD);
 #include "parser.h"
 #include "version.h"
 #include "check.h"
+#include "native_bricks.h"
 #include "codegen.h"
 #include "bc_compiler.h"
 #include "bricks.h"
@@ -318,15 +319,26 @@ static int compile_c_file(const char *c_file, const char *output_name,
             if (find_vs_path(vs_path, sizeof(vs_path)) != 0) return 1;
             snprintf(cmd, sizeof(cmd),
                 "cmd /c \"\"%s\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 >nul 2>&1 && "
-                "\"%s\" %s %s /Fo\"%%TEMP%%\\\\\" \"%s\" /Fe:\"%s\" %s %s\"",
-                vs_path, cfg.cc, cfg.cflags, quiet ? "/W0" : "/W3",
-                c_file, output_name, cfg.libs, quiet ? ">nul 2>&1" : "");
+                "\"%s\" %s %s /Fo\"%%TEMP%%\\\\\" \"%s\"",
+                vs_path, cfg.cc, cfg.cflags, quiet ? "/W0" : "/W3", c_file);
+            native_bricks_compile_args(cmd, sizeof(cmd), 1);
+            size_t mlen = strlen(cmd);
+            snprintf(cmd + mlen, sizeof(cmd) - mlen, " /Fe:\"%s\" %s", output_name, cfg.libs);
+            native_bricks_link_args(cmd, sizeof(cmd), 1);
+            mlen = strlen(cmd);
+            snprintf(cmd + mlen, sizeof(cmd) - mlen, " %s\"", quiet ? ">nul 2>&1" : "");
             fflush(stdout);
             return system(cmd);
         }
 #endif
-        snprintf(cmd, sizeof(cmd), "\"%s\" %s %s \"%s\" %s -o \"%s\"",
-                 cfg.cc, cfg.cflags, quiet ? "-w" : "-Wall", c_file, cfg.libs, output_name);
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s %s \"%s\"",
+                 cfg.cc, cfg.cflags, quiet ? "-w" : "-Wall", c_file);
+        native_bricks_compile_args(cmd, sizeof(cmd), 0);      /* native bricks' C */
+        size_t clen = strlen(cmd);
+        snprintf(cmd + clen, sizeof(cmd) - clen, " %s", cfg.libs);
+        native_bricks_link_args(cmd, sizeof(cmd), 0);
+        clen = strlen(cmd);
+        snprintf(cmd + clen, sizeof(cmd) - clen, " -o \"%s\"", output_name);
         fflush(stdout);
         return system(cmd);
     }
@@ -347,10 +359,13 @@ static int compile_c_file(const char *c_file, const char *output_name,
     for (int i = 0; clay_native_sources[i]; i++)
         if (append_source(cmd, sizeof(cmd), clay_dir, clay_native_sources[i]) != 0)
             return 1;
+    native_bricks_compile_args(cmd, sizeof(cmd), 1);
     size_t len = strlen(cmd);
     snprintf(cmd + len, sizeof(cmd) - len,
-        "/Fe:\"%s\" winhttp.lib ws2_32.lib user32.lib bcrypt.lib %s\"",
-        output_name, quiet ? ">nul 2>&1" : "");
+        " /Fe:\"%s\" winhttp.lib ws2_32.lib user32.lib bcrypt.lib", output_name);
+    native_bricks_link_args(cmd, sizeof(cmd), 1);
+    len = strlen(cmd);
+    snprintf(cmd + len, sizeof(cmd) - len, " %s\"", quiet ? ">nul 2>&1" : "");
 #else
     snprintf(cmd, sizeof(cmd),
         "cc -std=c99 -O2 %s "
@@ -365,12 +380,14 @@ static int compile_c_file(const char *c_file, const char *output_name,
     for (int i = 0; clay_native_sources[i]; i++)
         if (append_source(cmd, sizeof(cmd), clay_dir, clay_native_sources[i]) != 0)
             return 1;
+    native_bricks_compile_args(cmd, sizeof(cmd), 0);
+    native_bricks_link_args(cmd, sizeof(cmd), 0);
     size_t len = strlen(cmd);
     snprintf(cmd + len, sizeof(cmd) - len,
 #ifdef __linux__
-        "-lm -ldl -lpthread -o \"%s\"",
+        " -lm -ldl -lpthread -o \"%s\"",
 #else
-        "-lm -ldl -o \"%s\"",
+        " -lm -ldl -o \"%s\"",
 #endif
         output_name);
 #endif
@@ -378,6 +395,42 @@ static int compile_c_file(const char *c_file, const char *output_name,
     return system(cmd);
 }
 
+
+void bc_vm_add_plugin_globals(clayvm_vm_t *vm);   /* vm_bridge.c */
+
+/* Build (if needed) and load the plugins of the native bricks the program
+ * imports, with this build's compiler (clay-native.cfg) */
+static int prepare_native_bricks(void) {
+    if (native_bricks_count() == 0) return 0;
+    static NativeCfg cfg;
+    static char clay_dir[1024];
+    find_clay_dir(clay_dir, sizeof(clay_dir));
+    NativeToolchain tc;
+    memset(&tc, 0, sizeof(tc));
+    tc.clay_dir = clay_dir;
+    if (load_native_cfg(&cfg)) {
+        tc.msvc = strcmp(cfg.kind, "msvc") == 0;
+        tc.cc = cfg.cc;
+        tc.cflags = cfg.cflags;
+    } else {
+#ifdef _WIN32
+        tc.msvc = 1;
+        tc.cc = "cl";
+        tc.cflags = "/D_CRT_SECURE_NO_WARNINGS";
+#else
+        tc.cc = "cc";
+        tc.cflags = "-std=c99";
+#endif
+    }
+#ifdef _WIN32
+    static char vs_path[512];
+    if (tc.msvc) {
+        if (find_vs_path(vs_path, sizeof(vs_path)) != 0) return -1;
+        tc.vs_path = vs_path;
+    }
+#endif
+    return native_bricks_load(&tc);
+}
 
 /* --- REPL --- */
 
@@ -976,10 +1029,12 @@ static int dump_bytecode(const char *filename) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
         return 1;
     }
-    if (!g_no_check && check_undefined_variables(program, filename) > 0) {
+    if (prepare_native_bricks() != 0 ||
+        (!g_no_check && check_undefined_variables(program, filename) > 0)) {
         fprintf(stderr, "clay: compilation failed\n");
         return 1;
     }
+    bc_vm_add_plugin_globals(&vm);     /* native bricks' prototypes */
     if (bc_compile(&bc, program) != 0) {
         fprintf(stderr, "clay: bytecode compilation failed\n");
         return 1;
@@ -1061,12 +1116,14 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
         free(source);
         return 1;
     }
-    if (!g_no_check && check_undefined_variables(program, filename) > 0) {
+    if (prepare_native_bricks() != 0 ||
+        (!g_no_check && check_undefined_variables(program, filename) > 0)) {
         fprintf(stderr, "clay: compilation failed\n");
         ast_free(program);
         free(source);
         return 1;
     }
+    bc_vm_add_plugin_globals(&vm);     /* native bricks' prototypes */
 
     if (bc_compile(&bc, program) != 0) {
         fprintf(stderr, "clay: bytecode compilation failed\n");
@@ -1335,7 +1392,8 @@ int main(int argc, char *argv[]) {
     clay_bootstrap();
     clay_plugin_auto_load(g_exe_path);
 
-    if (!g_no_check && check_undefined_variables(program, source_file) > 0) {
+    if (prepare_native_bricks() != 0 ||
+        (!g_no_check && check_undefined_variables(program, source_file) > 0)) {
         fprintf(stderr, "clay: compilation failed\n");
         ast_free(program);
         free(source);
@@ -1356,6 +1414,11 @@ int main(int argc, char *argv[]) {
     CodeGen cg;
     codegen_init(&cg, out, source_file);
     cg.plugin_exe_path = g_exe_path_buf;   /* native program loads clay's plugins/ */
+    static const char *native_plugins[64];
+    for (int i = 0; i < native_bricks_count() && i < 64; i++)
+        native_plugins[i] = native_bricks_plugin(i);
+    cg.native_plugins = native_plugins;
+    cg.native_plugin_count = native_bricks_count() < 64 ? native_bricks_count() : 64;
     codegen_emit(&cg, program);
     fclose(out);
 

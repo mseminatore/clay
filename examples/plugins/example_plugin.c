@@ -83,7 +83,7 @@ static ClayPluginMethod methods[] = {
     { NULL, NULL }
 };
 
-CLAY_PLUGIN_EXPORT void clay_plugin_init(const ClayPluginAPI *clay_api) {
+CLAY_PLUGIN_EXPORT void mathex_plugin_init(const ClayPluginAPI *clay_api) {
     api = clay_api;
     ClayPluginType def = { "MathEx", methods, NULL, 0 };
     api->register_type(&def);

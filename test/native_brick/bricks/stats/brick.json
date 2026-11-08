@@ -1,0 +1,13 @@
+{
+  "name": "stats",
+  "version": "0.1.0",
+  "description": "Test fixture: a native brick (C plugin + Clay wrapper)",
+  "main": "src/main.clay",
+  "deps": {},
+  "native": {
+    "plugin": "stats",
+    "sources": ["native/stats.c"],
+    "cflags": ["-DSTATS_SCALE=2"],
+    "libs": []
+  }
+}
