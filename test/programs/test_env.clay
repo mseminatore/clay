@@ -2,27 +2,41 @@
 import("stdlib/env")
 
 // Test load
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 vars = Env load("test/programs/test.env")
 
-(vars get("APP_NAME") == "MyCoolApp") ifTrue { "PASS: APP_NAME" println } ifFalse { ("FAIL: APP_NAME = " + vars get("APP_NAME")) println }
-(vars get("PORT") == "3000") ifTrue { "PASS: PORT" println } ifFalse { ("FAIL: PORT = " + vars get("PORT")) println }
-(vars get("DEBUG") == "true") ifTrue { "PASS: DEBUG" println } ifFalse { ("FAIL: DEBUG = " + vars get("DEBUG")) println }
+(vars get("APP_NAME") == "MyCoolApp") ifTrue { "PASS: APP_NAME" println } ifFalse { TestFails fail(("FAIL: APP_NAME = " + vars get("APP_NAME"))) }
+(vars get("PORT") == "3000") ifTrue { "PASS: PORT" println } ifFalse { TestFails fail(("FAIL: PORT = " + vars get("PORT"))) }
+(vars get("DEBUG") == "true") ifTrue { "PASS: DEBUG" println } ifFalse { TestFails fail(("FAIL: DEBUG = " + vars get("DEBUG"))) }
 
 // Test quoted value stripping
-(vars get("SECRET") == "my-secret-value") ifTrue { "PASS: double quoted" println } ifFalse { ("FAIL: double quoted = " + vars get("SECRET")) println }
-(vars get("QUOTED_SINGLE") == "single-quoted") ifTrue { "PASS: single quoted" println } ifFalse { ("FAIL: single quoted = " + vars get("QUOTED_SINGLE")) println }
+(vars get("SECRET") == "my-secret-value") ifTrue { "PASS: double quoted" println } ifFalse { TestFails fail(("FAIL: double quoted = " + vars get("SECRET"))) }
+(vars get("QUOTED_SINGLE") == "single-quoted") ifTrue { "PASS: single quoted" println } ifFalse { TestFails fail(("FAIL: single quoted = " + vars get("QUOTED_SINGLE"))) }
 
 // Test Env get with default
 val = Env get("APP_NAME", "default")
-(val == "MyCoolApp") ifTrue { "PASS: get loaded var" println } ifFalse { ("FAIL: get loaded var = " + val) println }
+(val == "MyCoolApp") ifTrue { "PASS: get loaded var" println } ifFalse { TestFails fail(("FAIL: get loaded var = " + val)) }
 
 missing = Env get("NONEXISTENT_VAR_XYZ", "fallback")
-(missing == "fallback") ifTrue { "PASS: get default" println } ifFalse { ("FAIL: get default = " + missing) println }
+(missing == "fallback") ifTrue { "PASS: get default" println } ifFalse { TestFails fail(("FAIL: get default = " + missing)) }
 
 // Test has
-(Env has("APP_NAME") == true) ifTrue { "PASS: has loaded" println } ifFalse { "FAIL: has loaded" println }
-(Env has("NONEXISTENT_VAR_XYZ") == false) ifTrue { "PASS: has missing" println } ifFalse { "FAIL: has missing" println }
+(Env has("APP_NAME") == true) ifTrue { "PASS: has loaded" println } ifFalse { TestFails fail("FAIL: has loaded") }
+(Env has("NONEXISTENT_VAR_XYZ") == false) ifTrue { "PASS: has missing" println } ifFalse { TestFails fail("FAIL: has missing") }
 
 // Test all
 allVars = Env all()
-(allVars has("DB_HOST") == true) ifTrue { "PASS: all has DB_HOST" println } ifFalse { "FAIL: all has DB_HOST" println }
+(allVars has("DB_HOST") == true) ifTrue { "PASS: all has DB_HOST" println } ifFalse { TestFails fail("FAIL: all has DB_HOST") }
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}

@@ -1,4 +1,13 @@
 // Test operator overloading in clone body
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 Vec = Object clone {
   x = 0
   y = 0
@@ -30,19 +39,19 @@ v1 = Vec new(1, 2)
 v2 = Vec new(3, 4)
 
 v3 = v1 + v2
-(v3 x == 4) ifTrue { "PASS: + x" println } ifFalse { "FAIL: + x got " + v3 x toString println }
-(v3 y == 6) ifTrue { "PASS: + y" println } ifFalse { "FAIL: + y got " + v3 y toString println }
+(v3 x == 4) ifTrue { "PASS: + x" println } ifFalse { TestFails fail("FAIL: + x got " + v3 x toString) }
+(v3 y == 6) ifTrue { "PASS: + y" println } ifFalse { TestFails fail("FAIL: + y got " + v3 y toString) }
 
 v4 = v2 - v1
-(v4 x == 2) ifTrue { "PASS: - x" println } ifFalse { "FAIL: - x" println }
-(v4 y == 2) ifTrue { "PASS: - y" println } ifFalse { "FAIL: - y" println }
+(v4 x == 2) ifTrue { "PASS: - x" println } ifFalse { TestFails fail("FAIL: - x") }
+(v4 y == 2) ifTrue { "PASS: - y" println } ifFalse { TestFails fail("FAIL: - y") }
 
 v5 = v1 * 3
-(v5 x == 3) ifTrue { "PASS: * x" println } ifFalse { "FAIL: * x" println }
-(v5 y == 6) ifTrue { "PASS: * y" println } ifFalse { "FAIL: * y" println }
+(v5 x == 3) ifTrue { "PASS: * x" println } ifFalse { TestFails fail("FAIL: * x") }
+(v5 y == 6) ifTrue { "PASS: * y" println } ifFalse { TestFails fail("FAIL: * y") }
 
-(v1 == Vec new(1, 2)) ifTrue { "PASS: ==" println } ifFalse { "FAIL: ==" println }
-(v1 != v2) ifTrue { "PASS: !=" println } ifFalse { "FAIL: !=" println }
+(v1 == Vec new(1, 2)) ifTrue { "PASS: ==" println } ifFalse { TestFails fail("FAIL: ==") }
+(v1 != v2) ifTrue { "PASS: !=" println } ifFalse { TestFails fail("FAIL: !=") }
 
 v3 toString println
 
@@ -59,8 +68,8 @@ Money setMethod("==", { |other| self amount == other amount })
 m1 = Money new(10)
 m2 = Money new(20)
 m3 = m1 + m2
-(m3 amount == 30) ifTrue { "PASS: setMethod +" println } ifFalse { "FAIL: setMethod +" println }
-(Money new(5) == Money new(5)) ifTrue { "PASS: setMethod ==" println } ifFalse { "FAIL: setMethod ==" println }
+(m3 amount == 30) ifTrue { "PASS: setMethod +" println } ifFalse { TestFails fail("FAIL: setMethod +") }
+(Money new(5) == Money new(5)) ifTrue { "PASS: setMethod ==" println } ifFalse { TestFails fail("FAIL: setMethod ==") }
 
 // Test comparison operators
 Temp = Object clone {
@@ -74,8 +83,12 @@ Temp = Object clone {
 
 t1 = Temp new(20)
 t2 = Temp new(30)
-(t1 < t2) ifTrue { "PASS: <" println } ifFalse { "FAIL: <" println }
-(t2 > t1) ifTrue { "PASS: >" println } ifFalse { "FAIL: >" println }
-(t1 <= t2) ifTrue { "PASS: <=" println } ifFalse { "FAIL: <=" println }
-(t2 >= t1) ifTrue { "PASS: >=" println } ifFalse { "FAIL: >=" println }
+(t1 < t2) ifTrue { "PASS: <" println } ifFalse { TestFails fail("FAIL: <") }
+(t2 > t1) ifTrue { "PASS: >" println } ifFalse { TestFails fail("FAIL: >") }
+(t1 <= t2) ifTrue { "PASS: <=" println } ifFalse { TestFails fail("FAIL: <=") }
+(t2 >= t1) ifTrue { "PASS: >=" println } ifFalse { TestFails fail("FAIL: >=") }
 
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}

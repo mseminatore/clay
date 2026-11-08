@@ -2,18 +2,32 @@
 import("math_lib.clay") as MathLib
 
 // Access value through namespace
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 pi = MathLib PI
-(pi > 3) ifTrue { "PASS: namespaced slot" println } ifFalse { "FAIL: PI" println }
+(pi > 3) ifTrue { "PASS: namespaced slot" println } ifFalse { TestFails fail("FAIL: PI") }
 
 // Invoke block through namespace with args
 result = MathLib double(5)
-(result == 10) ifTrue { "PASS: namespaced block call" println } ifFalse { "FAIL: double(5) got " + result toString println }
+(result == 10) ifTrue { "PASS: namespaced block call" println } ifFalse { TestFails fail("FAIL: double(5) got " + result toString) }
 
 // Block that references imported globals
 area = MathLib circleArea(1)
-(area > 3) ifTrue { "PASS: block with closure" println } ifFalse { "FAIL: circleArea got " + area toString println }
+(area > 3) ifTrue { "PASS: block with closure" println } ifFalse { TestFails fail("FAIL: circleArea got " + area toString) }
 
 // Namespace is independent - mutation doesn't affect global
 MathLib PI = 2.71828
-(MathLib PI > 2.7) ifTrue { "PASS: namespace mutation" println } ifFalse { "FAIL: mutation" println }
-(PI > 3) ifTrue { "PASS: global unaffected" println } ifFalse { "FAIL: global affected" println }
+(MathLib PI > 2.7) ifTrue { "PASS: namespace mutation" println } ifFalse { TestFails fail("FAIL: mutation") }
+(PI > 3) ifTrue { "PASS: global unaffected" println } ifFalse { TestFails fail("FAIL: global affected") }
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}

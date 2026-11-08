@@ -330,10 +330,79 @@ static int re_search(const char *pat, const char *text, int *match_start, int *m
 /* ---------- Unix/macOS: POSIX regex ---------- */
 #include <regex.h>
 
-static int re_search(const char *pat, const char *text, int *match_start, int *match_len) {
+/* POSIX ERE has no \d \w \s (macOS supports none; glibc only \w \s), so
+ * rewrite them as character classes before regcomp:
+ *   \d -> [[:digit:]]   \w -> [[:alnum:]_]   \s -> [[:space:]]
+ *   \D \W \S -> the negated classes; inside [...] the classes are spliced
+ *   in ([\d.] -> [[:digit:].]). Returns a malloc'd pattern. */
+static char *re_translate(const char *pat) {
+    size_t n = strlen(pat);
+    char *out = (char *)malloc(n * 12 + 1);    /* worst case: every \W -> [^[:alnum:]_] */
+    if (!out) return NULL;
+    size_t o = 0;
+    int in_class = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = pat[i];
+        if (c == '\\' && i + 1 < n) {
+            char e = pat[i + 1];
+            const char *rep = NULL;
+            if (in_class) {
+                if (e == 'd') rep = "[:digit:]";
+                else if (e == 'w') rep = "[:alnum:]_";
+                else if (e == 's') rep = "[:space:]";
+            } else {
+                if (e == 'd') rep = "[[:digit:]]";
+                else if (e == 'D') rep = "[^[:digit:]]";
+                else if (e == 'w') rep = "[[:alnum:]_]";
+                else if (e == 'W') rep = "[^[:alnum:]_]";
+                else if (e == 's') rep = "[[:space:]]";
+                else if (e == 'S') rep = "[^[:space:]]";
+            }
+            if (rep) {
+                size_t rl = strlen(rep);
+                memcpy(out + o, rep, rl);
+                o += rl;
+            } else {
+                out[o++] = c;
+                out[o++] = e;
+            }
+            i++;
+            continue;
+        }
+        if (!in_class && c == '[') {
+            in_class = 1;
+            out[o++] = c;
+            /* a leading ^ and a leading ] belong to the class */
+            if (i + 1 < n && pat[i + 1] == '^') out[o++] = pat[++i];
+            if (i + 1 < n && pat[i + 1] == ']') out[o++] = pat[++i];
+            continue;
+        }
+        if (in_class && c == '[' && i + 1 < n && pat[i + 1] == ':') {
+            /* a POSIX class [:name:] inside the brackets: copy it whole */
+            const char *end = strstr(pat + i + 2, ":]");
+            if (end) {
+                size_t len = (size_t)(end + 2 - (pat + i));
+                memcpy(out + o, pat + i, len);
+                o += len;
+                i += len - 1;
+                continue;
+            }
+        }
+        if (in_class && c == ']') in_class = 0;
+        out[o++] = c;
+    }
+    out[o] = '\0';
+    return out;
+}
+
+static int re_search(const char *pat_in, const char *text, int *match_start, int *match_len) {
     regex_t re;
     regmatch_t pmatch[1];
-    if (regcomp(&re, pat, REG_EXTENDED) != 0) return 0;
+    char *pat = re_translate(pat_in);
+    if (!pat) return 0;
+    int rc = regcomp(&re, pat, REG_EXTENDED);
+    free(pat);
+    if (rc != 0) return 0;
     int result = regexec(&re, text, 1, pmatch, 0);
     if (result == 0) {
         *match_start = (int)pmatch[0].rm_so;

@@ -138,13 +138,20 @@ static void skip_newlines(Parser *p) {
 }
 
 /* Is the current token a newline, followed (after any more newlines) by a
- * `{`? Looks ahead on a copy of the lexer; nothing is consumed. */
+ * `{` alone on its line? That's an Allman-style clone body:
+ *     Point = Object clone
+ *     {
+ * A `{` with more on its line starts a new statement instead, so
+ * `p = Point clone` then `{ i < 3 } whileTrue { ... }` stays two statements.
+ * Looks ahead on a copy of the lexer; nothing is consumed. */
 static int newlines_then_lbrace(Parser *p) {
     if (!check(p, TOK_NEWLINE)) return 0;
     Lexer look = p->lexer;
     Token t;
     do { t = lexer_next(&look); } while (t.type == TOK_NEWLINE);
-    return t.type == TOK_LBRACE;
+    if (t.type != TOK_LBRACE) return 0;
+    t = lexer_next(&look);
+    return t.type == TOK_NEWLINE || t.type == TOK_EOF;
 }
 
 /* Return the operator string if the current token is an overloadable operator,
@@ -743,7 +750,7 @@ static AstNode *parse_postfix(Parser *p) {
             int send_line = p->previous.line;
 
             /* Check for clone with body: expr clone { ... } or expr clone({ ... }).
-             * The `{` may start the next line (`X = Object clone` newline `{`). */
+             * The `{` may be on the next line if it's alone there (Allman). */
             if (strcmp(msg_name, "clone") == 0 && newlines_then_lbrace(p)) {
                 while (check(p, TOK_NEWLINE)) parser_advance(p);
             }

@@ -159,3 +159,5 @@ assert value(outer isDone() == true, "nested: outer done")
 assert value(inner isDone() == true, "nested: inner done")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

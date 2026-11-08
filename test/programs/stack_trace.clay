@@ -11,9 +11,26 @@ outer = {
   middle value()
 }
 
-try {
+trace = try {
   outer value()
+  nil
 } catch { |e|
-  e message() println
-  e stackTrace() println
+  (e message() == "deep error") ifFalse { raise("wrong message: " + e message()) }
+  e stackTrace()
 }
+(trace == nil) ifTrue { raise("no error was raised") }
+// the frames that raised and called it, innermost first (the outermost,
+// the try block itself, is reported differently by the VM and native code)
+lines = trace split("\n")
+// (file names are as the program was run: relative or absolute)
+expect = ["stack_trace.clay:7 in value()", "stack_trace.clay:11 in value()",
+          "stack_trace.clay:15 in value()"]
+i = 0
+expect each { |want|
+  frame = (lines at(i)) trim
+  ((frame startsWith("at ")) && (frame endsWith(want))) ifFalse {
+    raise("frame " + i toString + ": got '" + frame + "', want 'at ...'" + want + "'")
+  }
+  i = i + 1
+}
+"stack trace ok" println

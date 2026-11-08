@@ -39,6 +39,19 @@ instead of a long parameter list.
   `"v=${d get("k")}"` is a parse error. Compute the value first:
   `k = d get("k")`, then `"v=${k}"`.
 
+**Reference cycles are never freed.** Clay counts references and has no cycle
+collector, so objects that refer to each other (a parent with a `children`
+array whose children point back with `parent`) stay alive after the last
+outside reference goes. Break the cycle when you're done (`child parent = nil`)
+in long-running programs. `System liveObjects` growing steadily is the sign
+to look for.
+
+**A bare `{` on the line after `clone` is read as the clone's body.** That is
+how Allman-style bodies work (`Point = Object clone` then `{` alone on the
+next line). A block statement written with its `{` alone on the line directly
+after a `clone` line is therefore misread; put something after the `{`, or a
+blank statement between them.
+
 ## Native compilation
 
 **Native programs leak a little memory on non-local exits.** When an exception

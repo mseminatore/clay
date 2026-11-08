@@ -18,3 +18,12 @@ B = A clone
 C = A clone
 c = C clone; d = 3
 { 4 } value
+
+// ...but only a `{` alone on its line: one with more on the line starts the
+// next statement (a block), so these stay two statements each
+p = A clone
+{ x < 3 } whileTrue { x = x + 1 }
+q = A clone
+{ n = n + 1 } value
+r = A clone
+{ |k| k * 2 } value(4)

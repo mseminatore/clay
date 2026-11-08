@@ -2,35 +2,49 @@
 import("stdlib/base64")
 
 // Test encoding
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 result = Base64 encode("Hello, World!")
-(result == "SGVsbG8sIFdvcmxkIQ==") ifTrue { "PASS: encode Hello, World!" println } ifFalse { ("FAIL: encode got " + result) println }
+(result == "SGVsbG8sIFdvcmxkIQ==") ifTrue { "PASS: encode Hello, World!" println } ifFalse { TestFails fail(("FAIL: encode got " + result)) }
 
 // Test decoding
 decoded = Base64 decode("SGVsbG8sIFdvcmxkIQ==")
-(decoded == "Hello, World!") ifTrue { "PASS: decode Hello, World!" println } ifFalse { ("FAIL: decode got " + decoded) println }
+(decoded == "Hello, World!") ifTrue { "PASS: decode Hello, World!" println } ifFalse { TestFails fail(("FAIL: decode got " + decoded)) }
 
 // Test roundtrip
 original = "Clay is awesome"
-(Base64 decode(Base64 encode(original)) == original) ifTrue { "PASS: roundtrip" println } ifFalse { "FAIL: roundtrip" println }
+(Base64 decode(Base64 encode(original)) == original) ifTrue { "PASS: roundtrip" println } ifFalse { TestFails fail("FAIL: roundtrip") }
 
 // Test empty string
-(Base64 encode("") == "") ifTrue { "PASS: encode empty" println } ifFalse { "FAIL: encode empty" println }
-(Base64 decode("") == "") ifTrue { "PASS: decode empty" println } ifFalse { "FAIL: decode empty" println }
+(Base64 encode("") == "") ifTrue { "PASS: encode empty" println } ifFalse { TestFails fail("FAIL: encode empty") }
+(Base64 decode("") == "") ifTrue { "PASS: decode empty" println } ifFalse { TestFails fail("FAIL: decode empty") }
 
 // Test single char (padding)
 r1 = Base64 encode("A")
-(r1 == "QQ==") ifTrue { "PASS: encode A" println } ifFalse { ("FAIL: encode A got " + r1) println }
+(r1 == "QQ==") ifTrue { "PASS: encode A" println } ifFalse { TestFails fail(("FAIL: encode A got " + r1)) }
 
 // Test two chars (padding)
 r2 = Base64 encode("AB")
-(r2 == "QUI=") ifTrue { "PASS: encode AB" println } ifFalse { ("FAIL: encode AB got " + r2) println }
+(r2 == "QUI=") ifTrue { "PASS: encode AB" println } ifFalse { TestFails fail(("FAIL: encode AB got " + r2)) }
 
 // Test three chars (no padding)
 r3 = Base64 encode("ABC")
-(r3 == "QUJD") ifTrue { "PASS: encode ABC" println } ifFalse { ("FAIL: encode ABC got " + r3) println }
+(r3 == "QUJD") ifTrue { "PASS: encode ABC" println } ifFalse { TestFails fail(("FAIL: encode ABC got " + r3)) }
 
 // Test decode single char
-(Base64 decode("QQ==") == "A") ifTrue { "PASS: decode A" println } ifFalse { "FAIL: decode A" println }
+(Base64 decode("QQ==") == "A") ifTrue { "PASS: decode A" println } ifFalse { TestFails fail("FAIL: decode A") }
 
 // Test decode two chars
-(Base64 decode("QUI=") == "AB") ifTrue { "PASS: decode AB" println } ifFalse { "FAIL: decode AB" println }
+(Base64 decode("QUI=") == "AB") ifTrue { "PASS: decode AB" println } ifFalse { TestFails fail("FAIL: decode AB") }
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}

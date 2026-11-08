@@ -41,7 +41,10 @@ make test-clay
   back to compiling the runtime sources listed in `clay_native_sources[]` in `main.c`.
 - `.clay` integration programs live in `test/programs/` and are each registered individually in
   `CMakeLists.txt` as `add_test(NAME clay_test_<name> COMMAND clay_compiler <path>.clay)` — running the
-  program with a zero exit code is the test.
+  program with a zero exit code is the test, so a test program must exit non-zero on any failed
+  check (`raise`, or `System exit(1)` after counting failures); printing "FAIL" is not enough.
+  Demo-style programs without checks are golden-output tests instead (`clay_smoke_*`): their output
+  must equal `test/programs/expected/<name>.out` (VM and native; `cmake/expect_output.cmake`).
 - Docs tests: every ```` ```clay ```` block in `docs/*.md` and `README.md` is run by `doc_test`
   (`tools/doc_test.c`; CTest label `docs`, 30 s limit per block). Mark fragments and examples that
   block or need the network/a window/installed bricks as ```` ```clay norun ````.

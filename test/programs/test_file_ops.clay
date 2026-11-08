@@ -71,3 +71,5 @@ File delete("_test_tmpdir/_b.txt")
 // Note: remove() works on empty dirs on most platforms
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

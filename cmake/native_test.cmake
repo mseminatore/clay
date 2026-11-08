@@ -1,6 +1,7 @@
 # native_test.cmake — compile a .clay program with `clay --compile` and run it.
 #
-#   cmake -DCLAY=<clay binary> -DSRC=<program.clay> -DOUT=<binary to build> -P native_test.cmake
+#   cmake -DCLAY=<clay binary> -DSRC=<program.clay> -DOUT=<binary to build>
+#         [-DEXPECTED=<golden output>] -P native_test.cmake
 #
 # Passes when the program compiles and exits with status 0 (test programs
 # raise — and so exit non-zero — on any failed assertion).
@@ -16,6 +17,15 @@ execute_process(
     RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "clay --compile failed (${rc}):\n${out}\n${err}")
+endif()
+
+# With -DEXPECTED=<file.out>, its output must also match the golden file
+# (the same one the VM run is checked against)
+if(EXPECTED)
+    execute_process(COMMAND "${OUT}" RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out)
+    include("${CMAKE_CURRENT_LIST_DIR}/expect_compare.cmake")
+    expect_compare("${rc}" "${out}" "${EXPECTED}")
+    return()
 endif()
 
 execute_process(

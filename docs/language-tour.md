@@ -104,8 +104,19 @@ Counter increment
 Counter count println   // 1
 ```
 
-Because of that, a block literal can't start the line right after a bare
-`X clone`: it would be read as the clone's body.
+For a clone body on the next line, the `{` must be alone on its line. A `{`
+with more after it on the line starts the next statement instead, as a block:
+
+```clay
+Shape = Object clone
+{
+    sides = 0
+}
+n = 0
+s = Shape clone
+{ n < 3 } whileTrue { n = n + 1 }   // a loop, not the clone's body
+n println                            // 3
+```
 
 Inside methods, bare identifiers like `x` resolve to slots on `self` — both for reads and writes: if `self` has a slot `x`, then `x = val` writes to it (Io-style `updateSlot` semantics). Names that aren't slots create method-local variables. Use `self x = val` when a parameter shadows a slot name, as in the `init` pattern below. The exact rules are in [Implicit self](#implicit-self-in-methods).
 

@@ -37,3 +37,5 @@ assert value(resp body() length() > 0, "GET example.com body should not be empty
 assert value(resp body() contains("Example Domain"), "body should contain 'Example Domain'")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

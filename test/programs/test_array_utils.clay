@@ -118,3 +118,5 @@ u3 = strs unique()
 assert value(u3 size() == 2, "unique strings size == 2")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

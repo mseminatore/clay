@@ -23,10 +23,17 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#ifndef PSAPI_VERSION
+#define PSAPI_VERSION 2   /* K32GetProcessMemoryInfo, in kernel32: no psapi.lib */
+#endif
+#include <psapi.h>
 #else
 #include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
+#endif
+#if defined(__APPLE__)
+#include <mach/mach.h>    /* task_info: resident memory */
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -441,6 +448,31 @@ static ClayValue file_tempDir(ClayObject *self, int argc, ClayValue *argv) {
 #endif
     clay_raise(CLAY_VAL(clay_error_new("Cannot create a temporary directory", "FileError")));
     return CLAY_NIL;
+}
+
+/* The process's resident memory in bytes (what the OS has in RAM for it),
+ * or -1 if it can't be read. */
+long long clay_process_memory(void) {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        return (long long)pmc.WorkingSetSize;
+    return -1;
+#elif defined(__APPLE__)
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+        return (long long)info.resident_size;
+    return -1;
+#else
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (!f) return -1;
+    long pages_total = 0, pages_resident = 0;
+    int got = fscanf(f, "%ld %ld", &pages_total, &pages_resident);
+    fclose(f);
+    if (got != 2) return -1;
+    return (long long)pages_resident * (long long)sysconf(_SC_PAGESIZE);
+#endif
 }
 
 /* Is stdout an interactive terminal (so colour codes are safe)? On Windows

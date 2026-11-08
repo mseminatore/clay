@@ -61,3 +61,5 @@ f = d format("%Y")
 assert value(f == d year() toString(), "format %Y matches year")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

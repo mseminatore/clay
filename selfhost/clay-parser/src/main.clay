@@ -243,11 +243,15 @@ Parser = Object clone {
     }
 
     // newline(s) then `{` (looking ahead, nothing consumed)
+    // a newline, then (after any more) a `{` alone on its line: an
+    // Allman-style clone body (parser.c newlines_then_lbrace)
     newlinesThenBrace() {
         (cur kind != "NEWLINE") ifTrue { return false }
         i = idx
         { (self tokenAt(i)) kind == "NEWLINE" } whileTrue { i = i + 1 }
-        (self tokenAt(i)) kind == "{"
+        ((self tokenAt(i)) kind == "{") ifFalse { return false }
+        after = (self tokenAt(i + 1)) kind
+        after == "NEWLINE" || after == "EOF"
     }
 
     mark() { [idx, cur, prev] }

@@ -44,16 +44,26 @@ i = 0
 t2 = System clock()
 assert value(t2 >= t1, "clock should not go backwards")
 
-// Test 6: args returns an array
+// Test 6: args returns an array of the arguments after the script name
+// (none here)
 a = System args()
-assert value(a size() > 0, "args should have at least 1 element")
-
-// Test 7: first arg is the executable or script
-// (it's the clay executable path)
-assert value(a at(0) != nil, "first arg should not be nil")
+assert value(a type == "Array", "args is an array")
+assert value(a size() == 0, "args excludes the script itself")
 
 // Test 8: allocCount and deallocCount still work
 assert value(System allocCount() > 0, "allocCount > 0")
 assert value(System deallocCount() >= 0, "deallocCount >= 0")
 
+// liveObjects / memory / version
+l0 = System liveObjects
+held = [[1], [2], [3]]
+assert value(System liveObjects >= l0 + 4, "liveObjects counts new objects")
+held = nil
+assert value(System liveObjects <= l0, "liveObjects drops when they are freed")
+assert value(System liveObjects == System allocCount - System deallocCount, "liveObjects = alloc - dealloc")
+mem = System memory
+assert value(mem == nil || mem > 1000000, "memory is the resident size in bytes")
+assert value(System version startsWith("0."), "version")
+
 (passed toString() + " passed, " + failed toString() + " failed") println()
+(failed > 0) ifTrue { System exit(1) }

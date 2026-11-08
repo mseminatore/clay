@@ -367,17 +367,26 @@ set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_e
 file(GLOB CLAY_NATIVE_TEST_PROGRAMS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/test/programs
      ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_*.clay)
 list(APPEND CLAY_NATIVE_TEST_PROGRAMS
-     closures.clay compound_ops.clay dict.clay errors.clay hello.clay implicit_self.clay
+     blocks.clay closures.clay compound_ops.clay dict.clay errors.clay hello.clay implicit_self.clay
      import_test.clay interp.clay logic.clay point.clay proto_chain.clay self.clay
      stack_trace.clay stack_trace2.clay)
 set(CLAY_ROOT_CWD_TESTS test_base64 test_url test_config test_env test_markdown)
 foreach(prog ${CLAY_NATIVE_TEST_PROGRAMS})
     get_filename_component(name ${prog} NAME_WE)
+    # golden-output programs build from a relative path (they run in
+    # test/programs), so file names in their output match the VM run's
+    set(golden "")
+    set(src ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/${prog})
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/expected/${name}.out)
+        set(golden -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/programs/expected/${name}.out)
+        set(src ${prog})
+    endif()
     add_test(NAME clay_native_${name}
              COMMAND ${CMAKE_COMMAND}
                  -DCLAY=$<TARGET_FILE:clay_compiler>
-                 -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/test/programs/${prog}
+                 -DSRC=${src}
                  -DOUT=${CMAKE_CURRENT_BINARY_DIR}/native_tests/${name}${CMAKE_EXECUTABLE_SUFFIX}
+                 ${golden}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/native_test.cmake)
     if(name IN_LIST CLAY_ROOT_CWD_TESTS)
         set_tests_properties(clay_native_${name} PROPERTIES
@@ -454,17 +463,27 @@ add_test(NAME clay_docs_readme
 set_tests_properties(clay_docs_readme PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc_tests LABELS "docs")
 
-# Smoke tests: programs without assertions — they pass if they run to completion
-# (no crash, no uncaught error). Excluded: bench_dispatch (benchmark), dap_test
-# (debugger fixture), math/math_lib (libraries imported by import_test).
-foreach(smoke closures compound_ops dict errors hello implicit_self import_test
-              interp logic point proto_chain self stack_trace stack_trace2 test_db_fix)
+# Golden-output tests: demo programs without assertions; each must print
+# exactly test/programs/expected/<name>.out (native builds are checked against
+# the same file). Not tests: bench_dispatch (benchmark), dap_test (debugger
+# fixture), math/math_lib (libraries imported by import_test).
+set(CLAY_GOLDEN_TESTS blocks closures compound_ops dict errors hello implicit_self
+    import_test interp logic point proto_chain self stack_trace2 test_db_fix)
+foreach(smoke ${CLAY_GOLDEN_TESTS})
     add_test(NAME clay_smoke_${smoke}
-             COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/${smoke}.clay)
+             COMMAND ${CMAKE_COMMAND}
+                 -DCLAY=$<TARGET_FILE:clay_compiler>
+                 -DSRC=${smoke}.clay
+                 -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/programs/expected/${smoke}.out
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_output.cmake)
     set_tests_properties(clay_smoke_${smoke} PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/programs
         LABELS "smoke")
 endforeach()
+# stack_trace asserts on its own trace (the frames' wording differs by backend)
+add_test(NAME clay_smoke_stack_trace COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/stack_trace.clay)
+set_tests_properties(clay_smoke_stack_trace PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/programs LABELS "smoke")
 
 # Example plugin — mathex
 add_library(mathex MODULE examples/plugins/example_plugin.c)

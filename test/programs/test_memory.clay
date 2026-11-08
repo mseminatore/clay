@@ -46,3 +46,5 @@ assert value(System allocCount() >= System deallocCount(), "allocs >= deallocs")
 assert value(System type() == "System", "System type should be System")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

@@ -1,22 +1,36 @@
 // Test multi-line strings
 
 // Basic multi-line
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 s1 = """hello
 world"""
-(s1 length > 5) ifTrue { "PASS: multiline basic" println } ifFalse { "FAIL: multiline basic" println }
+(s1 length > 5) ifTrue { "PASS: multiline basic" println } ifFalse { TestFails fail("FAIL: multiline basic") }
 
 // Interpolation in multi-line
 name = "Clay"
 s2 = """Hello
 ${name}!"""
-(s2 contains("Clay")) ifTrue { "PASS: multiline interp" println } ifFalse { "FAIL: multiline interp" println }
+(s2 contains("Clay")) ifTrue { "PASS: multiline interp" println } ifFalse { TestFails fail("FAIL: multiline interp") }
 
 // Empty multi-line
 s3 = """"""
-(s3 == "") ifTrue { "PASS: empty triple" println } ifFalse { "FAIL: empty triple" println }
+(s3 == "") ifTrue { "PASS: empty triple" println } ifFalse { TestFails fail("FAIL: empty triple") }
 
 // Backslash is literal
 s4 = """path\to\file"""
-(s4 contains("\\")) ifTrue { "PASS: literal backslash" println } ifFalse { "FAIL: literal backslash" println }
+(s4 contains("\\")) ifTrue { "PASS: literal backslash" println } ifFalse { TestFails fail("FAIL: literal backslash") }
 
 "All multi-line string tests completed" println
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}

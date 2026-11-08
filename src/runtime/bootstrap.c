@@ -492,6 +492,22 @@ static ClayValue system_alloc_count(ClayObject *self, int argc, ClayValue *argv)
     return clay_int((intptr_t)clay_alloc_count);
 }
 
+/* System liveObjects - objects allocated and not yet freed (prototypes and
+ * other permanent objects included) */
+static ClayValue system_live_objects(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return clay_int((intptr_t)(clay_alloc_count - clay_dealloc_count));
+}
+
+/* System memory - the process's resident memory in bytes, as the OS reports
+ * it (everything: objects, the VM, buffers); nil if it can't be read */
+static ClayValue system_memory(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    extern long long clay_process_memory(void);
+    long long bytes = clay_process_memory();
+    return bytes < 0 ? CLAY_NIL : clay_int((intptr_t)bytes);
+}
+
 static ClayValue system_dealloc_count(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
     return clay_int((intptr_t)clay_dealloc_count);
@@ -751,6 +767,8 @@ void clay_bootstrap(void) {
     clay_set_slot_take(clay_System, "_name", CLAY_VAL(clay_string_new("System")));
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
+    clay_set_method(clay_System, "liveObjects", system_live_objects);
+    clay_set_method(clay_System, "memory", system_memory);
     clay_set_method(clay_System, "exit", system_exit);
     clay_set_method(clay_System, "run", system_run);
     clay_set_method(clay_System, "env", system_env);

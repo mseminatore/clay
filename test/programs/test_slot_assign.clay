@@ -2,6 +2,15 @@
 // when x is a known slot from the enclosing clone block
 
 // Basic slot write without self
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 Point = Object clone {
   x = 0
   y = 0
@@ -18,9 +27,9 @@ Point = Object clone {
 
 p = Point clone
 p moveTo(3, 4)
-(p x == 3) ifTrue { "PASS: x == 3" println } ifFalse { "FAIL: x != 3, got " + p x toString println }
-(p y == 4) ifTrue { "PASS: y == 4" println } ifFalse { "FAIL: y != 4, got " + p y toString println }
-(p toString == "(3, 4)") ifTrue { "PASS: toString" println } ifFalse { "FAIL: toString = " + p toString println }
+(p x == 3) ifTrue { "PASS: x == 3" println } ifFalse { TestFails fail("FAIL: x != 3, got " + p x toString) }
+(p y == 4) ifTrue { "PASS: y == 4" println } ifFalse { TestFails fail("FAIL: y != 4, got " + p y toString) }
+(p toString == "(3, 4)") ifTrue { "PASS: toString" println } ifFalse { TestFails fail("FAIL: toString = " + p toString) }
 
 // Truly new names should still create locals (not write to slot)
 Counter = Object clone {
@@ -36,7 +45,7 @@ c = Counter clone
 c increment
 c increment
 c increment
-(c count == 3) ifTrue { "PASS: count == 3" println } ifFalse { "FAIL: count != 3, got " + c count toString println }
+(c count == 3) ifTrue { "PASS: count == 3" println } ifFalse { TestFails fail("FAIL: count != 3, got " + c count toString) }
 
 // Parameter names should take priority over slot names
 Rect = Object clone {
@@ -53,12 +62,17 @@ Rect = Object clone {
 
 r = Rect clone
 r resize(5, 10)
-(r area == 50) ifTrue { "PASS: area == 50" println } ifFalse { "FAIL: area != 50, got " + r area toString println }
+(r area == 50) ifTrue { "PASS: area == 50" println } ifFalse { TestFails fail("FAIL: area != 50, got " + r area toString) }
 
 // Cloned instances should be independent
 p2 = Point clone
 p2 moveTo(10, 20)
-(p x == 3) ifTrue { "PASS: p.x still 3" println } ifFalse { "FAIL: p.x changed" println }
-(p2 x == 10) ifTrue { "PASS: p2.x == 10" println } ifFalse { "FAIL: p2.x != 10" println }
+(p x == 3) ifTrue { "PASS: p.x still 3" println } ifFalse { TestFails fail("FAIL: p.x changed") }
+(p2 x == 10) ifTrue { "PASS: p2.x == 10" println } ifFalse { TestFails fail("FAIL: p2.x != 10") }
 
 "All slot assignment tests completed" println
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}

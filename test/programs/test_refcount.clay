@@ -1,35 +1,55 @@
-// test_refcount.clay - refcount regression tests
+// test_refcount.clay - refcount regression tests: repeating an operation must
+// not grow the number of live objects (System liveObjects = allocated - freed)
 
-// --- Test 1: Dict each does not leak key strings ---
-before = System allocCount
+failures = 0
+
+// live objects gained over 100 more runs of `block`, after one warm-up run
+// (the warm-up creates anything made once, e.g. a native program's literals)
+growth = { |block|
+  block value
+  b = System liveObjects
+  n = 0
+  { n < 100 } whileTrue { block value; n = n + 1 }
+  System liveObjects - b
+}
+
+check = { |what, block|
+  g = growth value(block)
+  (g > 0) ifTrue {
+    ("FAIL: " + what + " leaks " + g toString + " objects per 100 runs") println
+    failures = failures + 1
+  } ifFalse { ("ok: " + what) println }
+}
+
+// --- Dict each does not leak key strings ---
 d = #{ "a": 1, "b": 2, "c": 3 }
 count = 0
-d each({ |k, v| count = count + v })
-after = System allocCount
-delta1 = after - before
-("test 1 - dict each: alloc delta = " + delta1 toString) println
+check value("dict each", { d each({ |k, v| count = count + v }) })
 
-// --- Test 2: Slot write releases old value ---
+// --- Slot write releases the old value ---
 Point = Object clone {
   _x = 0
-  _y = 0
   setX(v) { _x = v }
 }
-before2 = System allocCount
 p = Point clone
-p setX("hello")
-p setX("world")
-p setX("final")
-after2 = System allocCount
-delta2 = after2 - before2
-("test 2 - slot write: alloc delta = " + delta2 toString) println
+check value("slot write", { p setX("hello"); p setX("world" + 1 toString) })
 
-// --- Test 3: Array toString does not leak ---
-before3 = System allocCount
+// --- Array toString does not leak ---
 arr = [1, 2, 3, "four", "five"]
-s = arr toString
-after3 = System allocCount
-delta3 = after3 - before3
-("test 3 - array toString: alloc delta = " + delta3 toString) println
+s = nil
+check value("array toString", { s = arr toString })
 
+// --- Closures, exceptions and string building release their temporaries ---
+check value("closure call", { f = { |x| x + count }; f value(1) })
+check value("try/catch", { try { raise("x") } catch { |e| e message } })
+check value("string concat", { t = "a" + count toString + "b" })
+
+// --- and the measurement does see a real leak ---
+kept = []
+(growth value({ kept push("x" + kept size toString) }) == 100) ifFalse {
+  "FAIL: growth didn't detect objects that are kept alive" println
+  failures = failures + 1
+}
+
+(failures > 0) ifTrue { System exit(1) }
 "PASS" println

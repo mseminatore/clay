@@ -56,3 +56,5 @@ Cat = Object clone { _name = "Cat" }
 assert value(Cat type() == "Cat", "named clone type should be Cat")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+
+(failed > 0) ifTrue { System exit(1) }

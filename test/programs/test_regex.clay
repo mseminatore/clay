@@ -73,3 +73,4 @@ assert value("abc123" test("\\d+") == true, "string test true")
 assert value("abcdef" test("\\d+") == false, "string test false")
 
 (passed toString() + " passed, " + failed toString() + " failed") println()
+(failed > 0) ifTrue { System exit(1) }

@@ -135,4 +135,17 @@ Test eq(_Base twice, 4)
 Test eq(_Kid twice, 5)
 Test eq(_Kid getSlot("_name"), "_Kid")
 
+
+// After `x = P clone`, a next-line `{` is the clone body only when it is
+// alone on its line; `{ ... } whileTrue` / `{ ... } value` start new statements
+loops = 0
+p1 = Object clone
+{ loops < 3 } whileTrue { loops = loops + 1 }
+Test eq(loops, 3)
+bumped = 10
+p2 = Object clone
+{ bumped = bumped + 1 } value
+Test eq(bumped, 11)
+Test eq(p2 hasSlot("bumped"), false)
+
 Test done()

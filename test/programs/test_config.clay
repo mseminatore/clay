@@ -2,6 +2,15 @@
 import("stdlib/config")
 
 // Test parse with INI-style input
+// failures are counted, and the program exits 1 if there were any
+TestFails = Object clone {
+    count = 0
+    fail(msg) {
+        msg println
+        self count = self count + 1
+    }
+}
+
 input = "[database]
 host = localhost
 port = 5432
@@ -22,37 +31,42 @@ cfg = Config parse(input)
 
 // Test section access
 db = cfg get("database")
-(db get("host") == "localhost") ifTrue { "PASS: db host" println } ifFalse { ("FAIL: db host = " + db get("host")) println }
-(db get("port") == "5432") ifTrue { "PASS: db port" println } ifFalse { ("FAIL: db port = " + db get("port")) println }
-(db get("name") == "myapp") ifTrue { "PASS: db name" println } ifFalse { "FAIL: db name" println }
+(db get("host") == "localhost") ifTrue { "PASS: db host" println } ifFalse { TestFails fail(("FAIL: db host = " + db get("host"))) }
+(db get("port") == "5432") ifTrue { "PASS: db port" println } ifFalse { TestFails fail(("FAIL: db port = " + db get("port"))) }
+(db get("name") == "myapp") ifTrue { "PASS: db name" println } ifFalse { TestFails fail("FAIL: db name") }
 
 srv = cfg get("server")
-(srv get("host") == "0.0.0.0") ifTrue { "PASS: server host" println } ifFalse { "FAIL: server host" println }
-(srv get("port") == "8080") ifTrue { "PASS: server port" println } ifFalse { "FAIL: server port" println }
+(srv get("host") == "0.0.0.0") ifTrue { "PASS: server host" println } ifFalse { TestFails fail("FAIL: server host") }
+(srv get("port") == "8080") ifTrue { "PASS: server port" println } ifFalse { TestFails fail("FAIL: server port") }
 
 // Test quoted value stripping
 auth = cfg get("auth")
-(auth get("secret") == "my-secret-key") ifTrue { "PASS: quoted value" println } ifFalse { ("FAIL: quoted value = " + auth get("secret")) println }
-(auth get("timeout") == "3600") ifTrue { "PASS: timeout" println } ifFalse { "FAIL: timeout" println }
+(auth get("secret") == "my-secret-key") ifTrue { "PASS: quoted value" println } ifFalse { TestFails fail(("FAIL: quoted value = " + auth get("secret"))) }
+(auth get("timeout") == "3600") ifTrue { "PASS: timeout" println } ifFalse { TestFails fail("FAIL: timeout") }
 
 // Test Config get helper with default
 val = Config get(cfg, "database", "host", "127.0.0.1")
-(val == "localhost") ifTrue { "PASS: get existing" println } ifFalse { "FAIL: get existing" println }
+(val == "localhost") ifTrue { "PASS: get existing" println } ifFalse { TestFails fail("FAIL: get existing") }
 
 missing = Config get(cfg, "database", "missing_key", "default_val")
-(missing == "default_val") ifTrue { "PASS: get default" println } ifFalse { "FAIL: get default" println }
+(missing == "default_val") ifTrue { "PASS: get default" println } ifFalse { TestFails fail("FAIL: get default") }
 
 missing_section = Config get(cfg, "nonexistent", "key", "fallback")
-(missing_section == "fallback") ifTrue { "PASS: get missing section" println } ifFalse { "FAIL: get missing section" println }
+(missing_section == "fallback") ifTrue { "PASS: get missing section" println } ifFalse { TestFails fail("FAIL: get missing section") }
 
 // Test sections
 secs = Config sections(cfg)
-(secs length() == 4) ifTrue { "PASS: section count" println } ifFalse { ("FAIL: section count = " + secs length() toString) println }
+(secs length() == 4) ifTrue { "PASS: section count" println } ifFalse { TestFails fail(("FAIL: section count = " + secs length() toString)) }
 
 // Test merge
 override = Config parse("[database]
 host = production.db.com
 ")
 merged = Config merge(cfg, override)
-(merged get("database") get("host") == "production.db.com") ifTrue { "PASS: merge override" println } ifFalse { "FAIL: merge override" println }
-(merged get("database") get("port") == "5432") ifTrue { "PASS: merge preserve" println } ifFalse { "FAIL: merge preserve" println }
+(merged get("database") get("host") == "production.db.com") ifTrue { "PASS: merge override" println } ifFalse { TestFails fail("FAIL: merge override") }
+(merged get("database") get("port") == "5432") ifTrue { "PASS: merge preserve" println } ifFalse { TestFails fail("FAIL: merge preserve") }
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}
