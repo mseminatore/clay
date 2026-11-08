@@ -511,6 +511,13 @@ CodeGen = Object clone {
             (self isBuiltinGlobal(nm)) ifTrue { return nil }
             (params contains(nm)) ifTrue { return nil }
             (caps contains(nm)) ifTrue { return nil }
+            // a slot of the clone body is read from the method's self, even
+            // when a top-level variable has the same name
+            ((self isKnownSlot(nm)) && (self isLocal("_method_self")) &&
+             ((self isLocal(nm)) == false || (self isToplevelVar(nm)))) ifTrue {
+                self captureMethodSelf(caps)
+                return nil
+            }
             (self isToplevelVar(nm)) ifTrue { return nil }    // uses the static
             (self isLocal(nm)) ifTrue {
                 caps push(nm)
@@ -641,6 +648,16 @@ CodeGen = Object clone {
         (self hasSlotFlag(nm)) ifTrue {
             self line("ClayValue " + t + " = CLAY_IS_TRUTHY(" + (self flagExpr(nm)) + ") ? clay_get_slot(" +
                       (self methodSelfExpr) + ", \"" + nm + "\") : " + (self localReadExpr(nm)) + ";")
+            return t
+        }
+        // a slot declared in the clone body wins over a top-level variable
+        (inMethod && methodCtx && (self isKnownSlot(nm)) && (self isFnLocal(nm)) == false &&
+         (self isBoxed(nm)) == false) ifTrue {
+            (self isBoxed("_method_self")) ifTrue {
+                self line("ClayValue " + t + " = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"" + nm + "\");")
+            } ifFalse {
+                self line("ClayValue " + t + " = clay_get_slot(" + (self methodSelfExpr) + ", \"" + nm + "\");")
+            }
             return t
         }
         (self isBoxed(nm)) ifTrue {
@@ -1029,7 +1046,8 @@ CodeGen = Object clone {
         ((self hasSlotFlag(nm)) && (self isKnownSlot(nm)) == false) ifTrue {
             self flaggedWrite(nm, v, o)
         } ifFalse {
-            ((self isKnownSlot(nm)) && (isMethod == false || (self isLocal(nm)) == false)) ifTrue {
+            // a known slot beats a top-level variable; a parameter or local wins
+            ((self isKnownSlot(nm)) && (isMethod == false || (self isFnLocal(nm)) == false)) ifTrue {
                 self retains(v, 1 - o)
                 self line("clay_set_slot(" + (self methodSelfExpr) + ", \"" + nm + "\", " + v + ");")
             } ifFalse {

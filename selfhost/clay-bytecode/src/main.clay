@@ -743,8 +743,10 @@ BcGen = Object clone {
             (self isCaptured(s)) ifTrue { self native(N_CELL_GET, 1) }
             return nil
         }
-        (inMeth && (self isBuiltin(nm)) == false && (self isUserGlobal(nm)) == false) ifTrue {
-            // implicit self: a slot or method of self
+        (inMeth && (self isBuiltin(nm)) == false &&
+         ((self isKnownSlot(nm)) || (self isUserGlobal(nm)) == false)) ifTrue {
+            // implicit self: a slot or method of self (a slot declared in the
+            // clone body wins over a global of the same name)
             self native(N_LOAD_SELF, 0)
             self pushString(nm)
             return self native(N_SEND, 2)

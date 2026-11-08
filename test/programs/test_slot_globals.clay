@@ -1,0 +1,56 @@
+// test_slot_globals.clay — in a method, a slot declared in the object's
+// clone body wins over a top-level variable of the same name
+
+T = Object clone {
+    _p = 0
+    _f = 0
+    eq(a, b, what) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue { self _f = self _f + 1; ("FAIL: " + what + ": " + a toString() + " != " + b toString()) println() }
+        self
+    }
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+Config = Object clone {
+    path = "/etc/app.conf"
+    major = 1
+    show() { path }
+    setPath(p) { path = p }
+    bump() { major = major + 1; major }
+    inBlock() { [1, 2] map { |i| path } }
+    setInBlock(p) { [1] each { |i| path = p } }
+    param(path) { path }                 // a parameter still wins
+    explicit() { self path }
+}
+// top-level variables named like the slots (as a script using a brick might)
+path = "./local.conf"
+major = 100
+
+T eq(Config show, "/etc/app.conf", "read in a method")
+Config setPath("/new")
+T eq([Config getSlot("path"), path], ["/new", "./local.conf"], "write in a method goes to the slot")
+T eq(Config bump, 2, "read-modify-write")
+T eq(major, 100, "the global is untouched")
+T eq(Config inBlock, ["/new", "/new"], "read in a block inside a method")
+Config setInBlock("/blk")
+T eq([Config getSlot("path"), path], ["/blk", "./local.conf"], "write in a block inside a method")
+T eq(Config param("arg"), "arg", "a parameter shadows the slot")
+T eq(Config explicit, "/blk", "self path")
+T eq(path, "./local.conf", "top-level code still sees the global")
+
+// a slot only inherited (not declared in this clone body) isn't known here,
+// so the top-level variable still wins: write `self path` for those
+Sub = Config clone {
+    inherited() { path }
+    inheritedExplicit() { self path }
+}
+T eq(Sub inherited, "./local.conf", "inherited slot: the global (documented)")
+T eq(Sub inheritedExplicit, "/blk", "inherited slot via self")
+
+T done

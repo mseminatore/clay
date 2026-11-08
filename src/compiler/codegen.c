@@ -781,6 +781,13 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             if (is_builtin_global(name)) break;
             if (name_in_list(name, block_params, param_count)) break;
             if (capture_has(caps, name)) break;
+            /* A slot of the clone body is read from the method's self, even
+             * when a top-level variable has the same name */
+            if (is_known_slot(cg, name) && is_local(cg, "_method_self") &&
+                (!is_local(cg, name) || is_toplevel_var(cg, name))) {
+                if (!capture_has(caps, "_method_self")) capture_add(caps, "_method_self");
+                break;
+            }
             /* If it's a local in the enclosing scope, it needs capture */
             if (is_toplevel_var(cg, name)) {
                 /* uses the static */
@@ -918,6 +925,16 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
         local_read_expr(cg, node->as.ident.name, local, sizeof(local));
         fprintf(cg->out, "ClayValue %s = CLAY_IS_TRUTHY(%s) ? clay_get_slot(%s, \"%s\") : %s;\n",
                 t, flag, method_self_expr(cg), node->as.ident.name, local);
+    } else if (cg->in_method && cur_method_ctx && is_known_slot(cg, node->as.ident.name) &&
+               !is_fn_local(cg, node->as.ident.name) && !is_boxed(cg, node->as.ident.name)) {
+        /* A slot declared in the clone body wins over a top-level variable of
+         * the same name (bc_compiler.c and clay-codegen do the same) */
+        if (is_boxed(cg, "_method_self"))
+            fprintf(cg->out, "ClayValue %s = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"%s\");\n",
+                    t, node->as.ident.name);
+        else
+            fprintf(cg->out, "ClayValue %s = clay_get_slot(%s, \"%s\");\n",
+                    t, method_self_expr(cg), node->as.ident.name);
     } else if (is_boxed(cg, node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, c_safe_name(node->as.ident.name));
     } else if (is_local(cg, node->as.ident.name)) {
@@ -1602,8 +1619,10 @@ static void emit_fn_assign(CodeGen *cg, AstNode *stmt, int is_method) {
     int own = is_owned_temp(cg, val);
     if (has_slot_flag(cg, name) && !is_known_slot(cg, name)) {
         emit_flagged_write(cg, name, val, own);
-    } else if (is_known_slot(cg, name) && (!is_method || !is_local(cg, name))) {
-        /* Known slot from the enclosing clone → write to the method's self */
+    } else if (is_known_slot(cg, name) && (!is_method || !is_fn_local(cg, name))) {
+        /* Known slot from the enclosing clone → write to the method's self
+         * (even if a top-level variable has the same name; a parameter or
+         * local of the method still wins) */
         emit_retains(cg, val, 1 - own);
         emit_indent(cg);
         fprintf(cg->out, "clay_set_slot(%s, \"%s\", %s);\n", method_self_expr(cg), name, val);

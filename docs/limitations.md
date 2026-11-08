@@ -6,22 +6,22 @@ release.
 
 ## Language
 
-**A top-level variable hides a slot of the same name inside methods.** A bare
-name in a method looks up globals before `self`'s slots, so a script-level
-variable shadows the slot:
+**A top-level variable can hide an inherited slot inside methods.** A slot
+declared in an object's own `clone` body always wins over a top-level variable
+of the same name. A slot the object only inherits from a prototype isn't known
+when the method is compiled, so there the top-level variable wins:
 
 ```clay norun
-Config = Object clone {
-    path = "/etc/app.conf"
-    show() { path }            // reads the global below, not the slot
+Base = Object clone { path = "/etc/app.conf" }
+Sub = Base clone {
+    show() { path }            // the inherited slot isn't declared here
 }
 path = "./local.conf"
-Config show println            // ./local.conf
+Sub show println               // ./local.conf
 ```
 
-Write `self path` to read the slot explicitly, or avoid giving top-level
-variables the same names as slots. This bites most often when a script uses a
-brick whose objects have common slot names (`path`, `name`, `data`, ...).
+Write `self path` to read such a slot explicitly, or redeclare it in the
+clone body.
 
 **A method takes at most 16 parameters.** A 17th parameter isn't bound: using
 it fails with `object does not understand 'a16'`. Pass a Dict or an object

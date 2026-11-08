@@ -848,8 +848,11 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_u16(bc, (uint16_t)bc->native_cell_get);
                     emit_byte(bc, 1);
                 }
-            } else if (bc->in_method && !is_builtin_global(ident_name) && !bc_is_user_global(bc, ident_name)) {
+            } else if (bc->in_method && !is_builtin_global(ident_name) &&
+                       (bc_is_known_slot(bc, ident_name) || !bc_is_user_global(bc, ident_name))) {
                 /* Inside a method: bare identifier → implicit self slot lookup.
+                 * A slot declared in the clone body wins over a global of the
+                 * same name (codegen.c and clay-bytecode do the same).
                  * Emit: load_self, push slot name, send(name, 0 args) */
                 emit_op(bc, CLAYVM_OP_CALL_NATIVE);
                 emit_u16(bc, (uint16_t)bc->native_load_self);

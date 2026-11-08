@@ -1,8 +1,8 @@
 # The Clay guide
 
-Clay is a prototype-based, pure object-oriented language: everything is an
+Clay is an experimental, prototype-based, pure object-oriented language: everything is an
 object, objects talk by sending messages, and new objects are made by cloning
-existing ones. Programs run instantly in a bytecode VM or compile to C for
+existing ones. Programs run in a bytecode VM or compile to C for
 native executables.
 
 1. **[Getting started](getting-started.md)** — build Clay, write and run a

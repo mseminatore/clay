@@ -226,7 +226,18 @@ Point = Object clone {
 }
 ```
 
-The lookup order is: local variable → captured variable → top-level variable (wherever it is assigned in the file) → `self` slot or method. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (top-level blocks do share the program's variables):
+The lookup order is: local variable or parameter → captured variable → a slot declared in the enclosing `clone` body → top-level variable (wherever it is assigned in the file) → `self` slot or method. So a slot declared in the object's own body always beats a top-level variable of the same name, which keeps a brick's objects working whatever names the script using them chooses:
+
+```clay
+Config = Object clone {
+  path = "/etc/app.conf"
+  show() { path }          // the slot, not the top-level `path` below
+}
+path = "./local.conf"
+Config show println        // /etc/app.conf
+```
+
+A slot that's only inherited from a prototype, not declared in this clone body, isn't known when the method is compiled, so there a top-level variable of the same name still wins — write `self path` to be explicit. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (top-level blocks do share the program's variables):
 
 ```clay
 Point = Object clone {
