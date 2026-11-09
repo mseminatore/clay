@@ -22,4 +22,7 @@ p hadError ifTrue {
     Console print("clay: compilation failed due to parse errors\n")
     System exit(1)
 }
-File write(outPath, (CodeGen new(path, exe)) generate(program))
+(NativeBricks count > 0) ifTrue { NativeBricks load(NativeBricks defaultCfg) }
+cg = CodeGen new(path, exe)
+cg nativePlugins = NativeBricks plugins
+File write(outPath, cg generate(program))

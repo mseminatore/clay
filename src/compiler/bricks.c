@@ -1232,7 +1232,10 @@ static int cmd_list(void) {
 }
 
 /* Update a single installed dependency by pulling latest or re-cloning */
-static int update_dep(const char *url, const char *name) {
+/* Update one dependency; *changed is set when its checkout moved to a
+ * different commit (or it had to be installed) */
+static int update_dep(const char *url, const char *name, int *changed) {
+    *changed = 0;
     char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
     split_url_parts(url, clone_url, sizeof(clone_url),
                     subpath, sizeof(subpath), ref, sizeof(ref));
@@ -1244,13 +1247,17 @@ static int update_dep(const char *url, const char *name) {
     struct stat st;
     if (stat(git_dir, &st) != 0) {
         printf("  %s: not installed, installing...\n", name);
+        *changed = 1;
         return install_dep(url, name);
     }
+
+    char before[128] = "", after[128] = "";
+    get_dep_resolved(git_dir, before, sizeof(before));
 
     if (ref[0]) {
         char cmd[2048];
         snprintf(cmd, sizeof(cmd), "git -C \"%s\" fetch --quiet origin", git_dir);
-        printf("  Updating %s (ref: %s)...\n", name, ref);
+
         int rc = system(cmd);
         if (rc != 0) {
             fprintf(stderr, "  warning: fetch failed for %s\n", name);
@@ -1264,7 +1271,6 @@ static int update_dep(const char *url, const char *name) {
         /* fetch, then move to the remote's default branch: a checkout made
          * from brick.lock is on a detached HEAD, where `git pull` fails */
         char cmd[2048];
-        printf("  Updating %s...\n", name);
         snprintf(cmd, sizeof(cmd),
                  "git -C \"%s\" fetch --quiet origin && git -C \"%s\" checkout --quiet --detach origin/HEAD",
                  git_dir, git_dir);
@@ -1275,6 +1281,12 @@ static int update_dep(const char *url, const char *name) {
         }
         sync_submodules(git_dir);
     }
+    get_dep_resolved(git_dir, after, sizeof(after));
+    *changed = strcmp(before, after) != 0;
+    if (*changed)
+        printf("  %s: %.7s -> %.7s\n", name, before[0] ? before : "?", after[0] ? after : "?");
+    else
+        printf("  %s: up to date (%.7s)\n", name, after);
     return 0;
 }
 
@@ -1292,17 +1304,24 @@ static int cmd_update(void) {
     }
     printf("Updating %d dependenc%s...\n", m.dep_count,
            m.dep_count == 1 ? "y" : "ies");
-    int failures = 0;
+    int failures = 0, updated = 0;
     g_visited_count = 0;
     for (int i = 0; i < m.dep_count; i++) {
-        if (update_dep(m.deps[i].url, m.deps[i].name) != 0)
+        int changed = 0;
+        if (update_dep(m.deps[i].url, m.deps[i].name, &changed) != 0)
             failures++;
+        else if (changed)
+            updated++;
     }
-    if (failures)
+    if (failures) {
         printf("Done with %d failure(s).\n", failures);
-    else {
+    } else {
         bricks_write_lock(&m);
-        printf("All dependencies up to date.\n");
+        if (updated == 0)
+            printf("Everything was already up to date.\n");
+        else
+            printf("Updated %d of %d dependenc%s.\n", updated, m.dep_count,
+                   m.dep_count == 1 ? "y" : "ies");
     }
     return failures ? 1 : 0;
 }
