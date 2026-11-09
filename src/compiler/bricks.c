@@ -1261,12 +1261,16 @@ static int update_dep(const char *url, const char *name) {
         system(cmd);
         sync_submodules(git_dir);
     } else {
+        /* fetch, then move to the remote's default branch: a checkout made
+         * from brick.lock is on a detached HEAD, where `git pull` fails */
         char cmd[2048];
         printf("  Updating %s...\n", name);
-        snprintf(cmd, sizeof(cmd), "git -C \"%s\" pull --quiet", git_dir);
+        snprintf(cmd, sizeof(cmd),
+                 "git -C \"%s\" fetch --quiet origin && git -C \"%s\" checkout --quiet --detach origin/HEAD",
+                 git_dir, git_dir);
         int rc = system(cmd);
         if (rc != 0) {
-            fprintf(stderr, "  warning: pull failed for %s\n", name);
+            fprintf(stderr, "  warning: update failed for %s\n", name);
             return -1;
         }
         sync_submodules(git_dir);
