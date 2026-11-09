@@ -16,6 +16,7 @@
  *   clone_body  = "{" { slot_or_method NEWLINE } "}"
  */
 #include "parser.h"
+#include "native_bricks.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -1166,14 +1167,29 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
             char manifest_path[BRICK_MAX_PATH * 2];
             snprintf(manifest_path, sizeof(manifest_path), "%s/%s/brick.json",
                      try_dirs[d], import_path);
-            BrickManifest bm;
-            if (brick_parse(manifest_path, &bm) == 0 && bm.main_file[0]) {
+            static BrickManifest bm;      /* large: keep it off the stack */
+            int prc = brick_parse(manifest_path, &bm);
+            if (prc == -2) {
+                /* a brick.json that exists but is invalid (e.g. a rejected
+                 * native flag): don't quietly import it without its native part */
+                fprintf(stderr, "%s: invalid %s\n", parent->filename, manifest_path);
+                parent->had_error = 1;
+                return NULL;
+            }
+            if (prc == 0 && bm.main_file[0]) {
                 char brick_main[BRICK_MAX_PATH * 2];
                 snprintf(brick_main, sizeof(brick_main), "%s/%s/%s",
                          try_dirs[d], import_path, bm.main_file);
                 struct stat st;
                 if (stat(brick_main, &st) == 0) {
                     resolved = strdup(brick_main);
+                    /* a native brick: its plugin is built and loaded before
+                     * the program is compiled (native_bricks.c) */
+                    if (bm.native.plugin[0]) {
+                        char brick_dir[BRICK_MAX_PATH * 2];
+                        snprintf(brick_dir, sizeof(brick_dir), "%s/%s", try_dirs[d], import_path);
+                        native_bricks_note(brick_dir, &bm.native);
+                    }
                 }
             }
             /* Fallback: bricks/<path>/src/main.clay */

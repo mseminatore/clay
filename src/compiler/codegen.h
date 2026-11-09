@@ -29,6 +29,8 @@ typedef struct {
      * C variables that hold a reference, and cells created here — all released
      * when the function returns. */
     const char *plugin_exe_path; /* clay binary whose plugins/ native programs load */
+    const char **native_plugins; /* native bricks linked in: <name>_plugin_init */
+    int native_plugin_count;
     int in_function;
     int fn_has_ret_frame; /* method catching non-local returns (see emit_ret_frame) */
     int fn_is_block;     /* emitting a block function (always returns an owned value) */

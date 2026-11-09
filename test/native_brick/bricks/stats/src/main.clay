@@ -1,0 +1,7 @@
+// stats -- a native brick test fixture: a Clay wrapper over the C plugin
+Stats = Object clone {
+    sum(xs) { StatsNative sum(xs) }
+    mean(xs) { (xs size == 0) ifTrue { return 0 }; (StatsNative sum(xs)) / xs size }
+    doubled(xs, cols = 0) { StatsNative scale(xs, cols) }
+    accumulator() { StatsAcc new }
+}

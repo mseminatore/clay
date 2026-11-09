@@ -5,6 +5,11 @@
   "version": "0.2.0",
   "publisher": "clay-lang",
   "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#B9542F",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/mseminatore/clay.git",

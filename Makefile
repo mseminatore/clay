@@ -41,7 +41,7 @@ VM_OBJS = $(VM_SRCS:.c=.o)
 
 COMPILER_SRCS = src/compiler/main.c src/compiler/lexer.c src/compiler/parser.c \
                 src/compiler/ast.c src/compiler/codegen.c \
-                src/compiler/bc_compiler.c src/compiler/bricks.c src/compiler/check.c \
+                src/compiler/bc_compiler.c src/compiler/bricks.c src/compiler/check.c src/compiler/native_bricks.c \
                 src/compiler/dap.c
 COMPILER_OBJS = $(COMPILER_SRCS:.c=.o)
 # Everything but main.o: what the unit tests link against (CMake's clay_compiler_lib)

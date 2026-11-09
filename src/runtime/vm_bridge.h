@@ -115,6 +115,7 @@ typedef struct {
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);
+void bc_vm_add_plugin_globals(clayvm_vm_t *vm);
 
 /* Register a compiled method: returns its method-slot index (the constant
  * set_method takes) */
