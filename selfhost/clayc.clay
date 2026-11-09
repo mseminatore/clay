@@ -145,6 +145,12 @@ Clayc = Object clone {
         p = Parser new(File read(source), source)
         program = p parseProgram
         p hadError ifTrue { self fail("compilation failed due to parse errors") }
+        // native bricks: build (if needed) and load their plugins first, so
+        // the check and the compilers see their prototypes
+        (NativeBricks count > 0) ifTrue {
+            cfg = (cfgPath != nil) ifTrue { NativeBricks readCfg(cfgPath) } ifFalse { NativeBricks defaultCfg }
+            try { NativeBricks load(cfg) } catch { |e| self fail(e message) }
+        }
         // misspelled names (src/compiler/check.c)
         ((GlobalCheck report(program, source)) > 0) ifTrue { self fail("compilation failed") }
         program
@@ -174,13 +180,17 @@ Clayc = Object clone {
         cFile = (mode == "c") ifTrue { output ?? ((self stripExt(source)) + ".c") } ifFalse {
             (self stripExt(exe)) + ".c"
         }
-        File write(cFile, (CodeGen new(source, pluginExe)) generate(program))
+        cg = CodeGen new(source, pluginExe)
+        cg nativePlugins = NativeBricks plugins
+        File write(cFile, cg generate(program))
         Console print("clayc: generated " + cFile + "\n")
         (mode == "c") ifTrue { return 0 }
 
         cfg = self readCfg
-        cmd = "\"" + (cfg get("cc")) + "\" " + ((cfg get("cflags")) ?? "") + " -Wall \"" + cFile + "\" " +
-              (cfg get("libs")) + " -o \"" + exe + "\""
+        libs = cfg get("libs")
+        cmd = "\"" + (cfg get("cc")) + "\" " + ((cfg get("cflags")) ?? "") + " -Wall \"" + cFile + "\"" +
+              (NativeBricks compileArgs) + " " + libs + (NativeBricks linkArgs(" " + libs)) +
+              " -o \"" + exe + "\""
         Console print("clayc: compiling " + cFile + " -> " + exe + "\n")
         rc = System run(cmd)
         (rc != 0) ifTrue { self fail("C compilation failed") }

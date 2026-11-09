@@ -186,7 +186,8 @@ the sources in directly, so it doesn't depend on the plugin file. The brick's
 The brick's `main` file wraps the plugin's prototypes in a Clay API. See
 [clay-ann](https://github.com/mseminatore/clay-ann), neural networks over the
 libann C library, for a complete example. `clayc`, the Clay compiler written in
-Clay, doesn't build native bricks yet.
+Clay, supports native bricks too: it shares the same `build/` cache, and finds
+the C compiler through `--cfg`, `CLAY_NATIVE_CFG`, or the Clay build it came from.
 
 ---
 

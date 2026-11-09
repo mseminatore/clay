@@ -58,8 +58,6 @@ endif()
 file(GLOB_RECURSE files
      "${ROOT}/test/*.clay" "${ROOT}/examples/*.clay" "${ROOT}/selfhost/*.clay"
      "${ROOT}/tools/*.clay" "${ROOT}/docs/*.clay" "${ROOT}/bricks/*.clay")
-# native bricks are compiled by clay but not yet by the Clay compiler (clayc)
-list(FILTER files EXCLUDE REGEX "/test/native_brick/")
 list(SORT files)
 list(LENGTH files count)
 if(count LESS 50)

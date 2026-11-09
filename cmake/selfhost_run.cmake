@@ -43,6 +43,20 @@ foreach(f ${files})
     endif()
 endforeach()
 
+# A native brick (test/native_brick): clayc builds/loads its plugin too
+set(nb "${ROOT}/test/native_brick")
+execute_process(COMMAND "${CLAY}" test_native_brick.clay WORKING_DIRECTORY "${nb}" TIMEOUT 300
+                RESULT_VARIABLE rc_a OUTPUT_VARIABLE out_a ERROR_VARIABLE err_a)
+execute_process(COMMAND "${CLAYC}" test_native_brick.clay WORKING_DIRECTORY "${nb}" TIMEOUT 300
+                RESULT_VARIABLE rc_b OUTPUT_VARIABLE out_b ERROR_VARIABLE err_b)
+# (a "building native brick" line may come from whichever ran first)
+string(REGEX REPLACE "clay: building native brick[^\n]*\n" "" err_a "${err_a}")
+string(REGEX REPLACE "clay: building native brick[^\n]*\n" "" err_b "${err_b}")
+if(NOT rc_a STREQUAL rc_b OR NOT out_a STREQUAL out_b OR NOT err_a STREQUAL err_b)
+    list(APPEND failed "test/native_brick/test_native_brick.clay")
+    message("--- native brick: clay (exit ${rc_a}) ---\n${out_a}${err_a}--- clayc (exit ${rc_b}) ---\n${out_b}${err_b}")
+endif()
+
 # Compile errors (test/errors/*.clay, helpers excluded): clayc must report
 # the same as clay, apart from its own name in the final line
 file(GLOB errfiles RELATIVE "${ROOT}" "${ROOT}/test/errors/*.clay")

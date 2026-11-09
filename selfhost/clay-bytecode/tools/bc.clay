@@ -15,6 +15,7 @@ p hadError ifTrue {
     Console print("clay: compilation failed due to parse errors\n")
     System exit(1)
 }
+(NativeBricks count > 0) ifTrue { NativeBricks load(NativeBricks defaultCfg) }
 bc = BcGen new(path)
 ((bc compile(program)) == nil) ifTrue {
     Console print("clay: bytecode compilation failed\n")
