@@ -1331,9 +1331,12 @@ NativeBricks = Object clone {
     // key=value lines of a clay-native.cfg, or nil if there's none
     readCfg(path) {
         (path == nil || (File exists(path)) == false) ifTrue { return nil }
+        // exactly as main.c's load_native_cfg (only the line ending is
+        // removed): the values feed the build stamp, which must match clay's
         cfg = #{}
         (File read(path)) split("\n") each { |raw|
-            l = raw trim
+            l = raw
+            { (l length > 0) && ((l at(l length - 1)) == "\r") } whileTrue { l = l slice(0, l length - 1) }
             ((l length > 0) && (l startsWith("#")) == false) ifTrue {
                 eq = l indexOf("=")
                 (eq > 0) ifTrue { cfg set(l slice(0, eq), l slice(eq + 1, l length)) }
@@ -1353,7 +1356,13 @@ NativeBricks = Object clone {
         }
         lib = Parser libDir
         (lib == nil) ifTrue { return nil }
-        self readCfg((lib slice(0, lib length - 4)) + "/build/clay-native.cfg")
+        // single-config builds put it in build/, Visual Studio's in build/<Config>/
+        root = lib slice(0, lib length - 4)
+        found = nil
+        ["/build/", "/build/Debug/", "/build/Release/", "/build/RelWithDebInfo/"] each { |d|
+            (found == nil) ifTrue { found = self readCfg(root + d + "clay-native.cfg") }
+        }
+        found
     }
 
     _ext() {
@@ -1371,12 +1380,13 @@ NativeBricks = Object clone {
     }
 
     // Build (if stale) and load every noted brick's plugin. Raises on failure.
+    // A compiler (cfg) is only needed to build: without one, a cached plugin
+    // at least as new as its sources is used as it is. clayc can't drive
+    // MSVC, so there a stale plugin has to be rebuilt by clay first.
     load(cfg) {
         (self count == 0) ifTrue { return nil }
-        (cfg == nil || (cfg get("cc")) == nil) ifTrue {
-            raise("native bricks need clay-native.cfg (the C compiler of a clay build)")
-        }
-        ((cfg get("kind")) == "msvc") ifTrue { raise("native bricks with MSVC: use clay, not clayc") }
+        haveCfg = (cfg != nil) && ((cfg get("cc")) != nil)
+        msvc = haveCfg && ((cfg get("kind")) == "msvc")
         lib = Parser libDir
         clayDir = (lib == nil) ifTrue { "." } ifFalse { lib slice(0, lib length - 4) }
         (NativeBricks _list) each { |b|
@@ -1384,9 +1394,9 @@ NativeBricks = Object clone {
             plugin = b at(1)
             libPath = dir + "/build/" + plugin + (self _ext)
             stampPath = dir + "/build/" + plugin + ".stamp"
-            stamp = self _stamp(b, cfg)
+            stamp = haveCfg ifTrue { self _stamp(b, cfg) } ifFalse { nil }
             stale = (File exists(libPath)) == false
-            (stale == false) ifTrue {
+            (stale == false && haveCfg) ifTrue {
                 stale = ((File exists(stampPath)) == false) || ((File read(stampPath)) != stamp)
             }
             (stale == false) ifTrue {
@@ -1397,7 +1407,17 @@ NativeBricks = Object clone {
                     ((File modified(p)) > libTime) ifTrue { stale = true }
                 }
             }
-            stale ifTrue { self _build(b, cfg, clayDir, libPath, stampPath, stamp) }
+            stale ifTrue {
+                haveCfg ifFalse {
+                    raise("native brick '" + plugin + "' needs building, but no clay-native.cfg was found " +
+                          "(pass --cfg or set CLAY_NATIVE_CFG)")
+                }
+                msvc ifTrue {
+                    raise("native brick '" + plugin + "' needs building with MSVC, which clayc can't do: " +
+                          "run the program once with clay to build it")
+                }
+                self _build(b, cfg, clayDir, libPath, stampPath, stamp)
+            }
             System plugin(libPath)
         }
         nil
