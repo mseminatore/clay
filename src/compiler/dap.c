@@ -975,6 +975,9 @@ static char *dap_read_file(const char *path) {
 /*  Main DAP entry point                                               */
 /* ------------------------------------------------------------------ */
 
+int prepare_native_bricks(void);                     /* main.c */
+void bc_vm_add_plugin_globals(clayvm_vm_t *vm);      /* vm_bridge.c */
+
 int dap_run(const char *filename) {
     memset(&g_dap, 0, sizeof(g_dap));
 
@@ -1078,6 +1081,17 @@ int dap_run(const char *filename) {
         free(source);
         return 1;
     }
+
+    /* Build/load the plugins of imported native bricks (e.g. ann) and
+     * register their prototypes, as the plain VM run does in main.c */
+    if (prepare_native_bricks() != 0) {
+        dap_send_output("stderr", "clay: failed to build/load native bricks\n");
+        ast_free(program);
+        dap_send_event("terminated");
+        free(source);
+        return 1;
+    }
+    bc_vm_add_plugin_globals(&vm);
 
     /* Compile to bytecode */
     if (bc_compile(&bc, program) != 0) {

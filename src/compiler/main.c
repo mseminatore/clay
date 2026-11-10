@@ -400,7 +400,7 @@ void bc_vm_add_plugin_globals(clayvm_vm_t *vm);   /* vm_bridge.c */
 
 /* Build (if needed) and load the plugins of the native bricks the program
  * imports, with this build's compiler (clay-native.cfg) */
-static int prepare_native_bricks(void) {
+int prepare_native_bricks(void) {
     if (native_bricks_count() == 0) return 0;
     static NativeCfg cfg;
     static char clay_dir[1024];
