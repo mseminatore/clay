@@ -250,6 +250,13 @@ static ClayPluginValue api_get_slot(ClayPluginObject obj, const char *name) {
 
 /* --- version 2 --- */
 
+/* Output for plugins: stdout, or the debugger's output hook when one is set */
+static void api_write_output(const char *text) {
+    if (!text) return;
+    if (clay_output_fn) clay_output_fn(text);
+    else { fputs(text, stdout); }
+}
+
 static void api_retain(ClayPluginValue v) { clay_retain_val((ClayValue)v); }
 static void api_release(ClayPluginValue v) { clay_release_val((ClayValue)v); }
 
@@ -343,6 +350,7 @@ static const ClayPluginAPI g_plugin_api = {
     .array_push       = api_array_push,
     .to_floats        = api_to_floats,
     .from_floats      = api_from_floats,
+    .write_output     = api_write_output,
 };
 
 /* ------------------------------------------------------------------ */

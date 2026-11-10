@@ -136,9 +136,17 @@ typedef struct ClayPluginAPI {
      * numbers when cols > 0. */
     size_t          (*to_floats)(ClayPluginValue arr, float *out, size_t max);
     ClayPluginValue (*from_floats)(const float *data, size_t n, size_t cols);
+
+    /* ---- version 3 ---- */
+
+    /* Write text where Clay's own output goes: stdout, or the debugger's
+     * Debug Console under --dap. Use it instead of printf/fputs(stdout) for
+     * output the user should see (progress, logs): C stdout is the debug
+     * protocol channel when Clay runs as a debug adapter. */
+    void            (*write_output)(const char *text);
 } ClayPluginAPI;
 
-#define CLAY_PLUGIN_API_VERSION 2
+#define CLAY_PLUGIN_API_VERSION 3
 
 /* Plugin entry point signature */
 typedef void (*ClayPluginInitFunc)(const ClayPluginAPI *api);

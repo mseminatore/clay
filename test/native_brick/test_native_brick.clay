@@ -5,7 +5,7 @@ check = { |what, got, want|
     (got == want) ifFalse { raise("FAIL: " + what + ": " + got toString + " != " + want toString) }
 }
 
-check value("plugin API version", StatsNative apiVersion, 2)
+check value("plugin API version", StatsNative apiVersion, 3)
 check value("sum", Stats sum([1, 2, 3.5]), 6.5)
 check value("nested arrays flatten", Stats sum([[1, 2], [3, 4]]), 10)
 check value("mean", Stats mean([2, 4]), 3)

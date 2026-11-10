@@ -150,6 +150,14 @@ added at the end. Version 2 adds what wrapping a C library needs:
   size the buffer); `from_floats(data, n, cols)` makes an Array of numbers, or of
   rows of `cols` numbers. Data crosses into C in one call, not value by value.
 
+### Plugin API version 3
+
+Version 3 adds `write_output(text)`: it writes where Clay's own output goes, which
+is stdout, or the Debug Console when Clay runs as a debug adapter (`--dap`).
+Use it for output the user should see (progress, logs) instead of `printf` or
+`fputs(stdout)`, because in a debug session C's stdout is the protocol channel
+and such text is lost. Check `api->api_version >= 3` before using it.
+
 A C struct per object: register the type with a `free_fn`, `clone` the
 prototype in a constructor method, `set_data` the struct on the clone, and
 `get_data` it in the other methods; `free_fn` runs when the object is freed.
