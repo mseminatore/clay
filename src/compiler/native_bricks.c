@@ -33,6 +33,7 @@ typedef struct {
 
 static NativeBrick g_bricks[MAX_NATIVE_BRICKS];
 static int g_brick_count = 0;
+static int g_loaded = 0;     /* bricks already loaded (the REPL loads more as imports arrive) */
 
 void native_bricks_note(const char *brick_dir, const BrickNative *native) {
     for (int i = 0; i < g_brick_count; i++)
@@ -141,7 +142,7 @@ int native_bricks_load(const NativeToolchain *tc) {
 #else
     const char *ext = ".so";
 #endif
-    for (int i = 0; i < g_brick_count; i++) {
+    for (int i = g_loaded; i < g_brick_count; i++) {
         const NativeBrick *b = &g_bricks[i];
         char lib[BRICK_MAX_PATH * 2], stamp_path[BRICK_MAX_PATH * 2];
         snprintf(lib, sizeof(lib), "%s/build/%s%s", b->dir, b->native.plugin, ext);
@@ -170,6 +171,7 @@ int native_bricks_load(const NativeToolchain *tc) {
                             "entry point\n", b->native.plugin, lib, b->native.plugin);
             return -1;
         }
+        g_loaded = i + 1;
     }
     return 0;
 }

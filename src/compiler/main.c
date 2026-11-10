@@ -894,6 +894,16 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             continue;
         }
 
+        /* An import of a native brick (ann, ...) was just parsed: build and
+         * load its plugin, and make its prototypes VM globals */
+        if (prepare_native_bricks() != 0) {
+            fprintf(stderr, "clay: compilation failed\n");
+            ast_free(program);
+            input_len = 0;
+            continue;
+        }
+        bc_vm_add_plugin_globals(&vm);
+
         /* Reset bytecode (keep constants & globals) */
         bc.len = 0;
         bc.had_error = 0;
