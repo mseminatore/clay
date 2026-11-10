@@ -1140,7 +1140,7 @@ static int cmd_install(void) {
 void clay_bootstrap(void);                               /* runtime */
 char *clay_http_get_text(const char *url, int *status);  /* runtime: http.c */
 
-#define REGISTRY_URL "https://raw.githubusercontent.com/mseminatore/clay-registry/main/index.json"
+#define REGISTRY_URL "https://raw.githubusercontent.com/mseminatore/clay-registry/index/index.json"
 #define REGISTRY_MAX_INDEX (4 * 1024 * 1024)
 
 static const char *registry_hosts[] = { "github.com/", "gitlab.com/", "codeberg.org/", "bitbucket.org/", NULL };

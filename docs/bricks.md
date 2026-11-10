@@ -101,10 +101,9 @@ Searching only reads the list. Nothing is downloaded, built or run until you `cl
 URL yourself, and a listing means the entry was checked, not that the code was reviewed: read a
 brick before depending on it, and pin it (`@v1.0.0`; `brick.lock` records the commit). The list
 is treated as untrusted data: only `https` repositories on known hosts (GitHub, GitLab, Codeberg,
-Bitbucket) are shown, and text is clipped. The last list fetched is kept in `~/.clay/registry.json`
+Bitbucket) are shown, and text is clipped. The list is the registry's generated `index.json` (on its `index` branch). The last list fetched is kept in `~/.clay/registry.json`
 and used when the network is unavailable. `CLAY_REGISTRY` names another list: a URL, or a local
-file for a mirror or a private registry (the format is `{"version": 1, "bricks": [...]}`, as the
-registry's `index.json`).
+file for a mirror or a private registry (the same `{"version": 1, "bricks": [...]}` format).
 
 ### Native bricks
 
