@@ -4,6 +4,11 @@
 #include "clay_plugin.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stats_extra.h>
+
+#ifndef STATS_OS
+#error "STATS_OS comes from the host platform's cflags-<platform> in brick.json"
+#endif
 
 #ifndef STATS_SCALE
 #error "STATS_SCALE comes from brick.json cflags"
@@ -67,8 +72,18 @@ static ClayPluginValue stats_version(ClayPluginObject self, int argc, ClayPlugin
     return api->make_int(api->api_version);
 }
 
+/* the cflags-<platform> entry of the host (1 macos, 2 linux, 3 windows) and the -I@/ header */
+static ClayPluginValue stats_os(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return api->make_int(STATS_OS);
+}
+static ClayPluginValue stats_extra(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return api->make_int(STATS_EXTRA);
+}
+
 static ClayPluginMethod stats_methods[] = {
-    { "sum", stats_sum }, { "scale", stats_scale }, { "apiVersion", stats_version }, { NULL, NULL }
+    { "os", stats_os }, { "extra", stats_extra }, { "sum", stats_sum }, { "scale", stats_scale }, { "apiVersion", stats_version }, { NULL, NULL }
 };
 static ClayPluginMethod acc_methods[] = {
     { "new", acc_new }, { "add", acc_add }, { "mean", acc_mean }, { NULL, NULL }

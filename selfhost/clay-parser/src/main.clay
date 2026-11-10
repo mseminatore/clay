@@ -1250,9 +1250,12 @@ NativeBricks = Object clone {
     }
 
     // brick_safe_flag: starts with '-', then letters, digits, . _ = + , / -
+    // (-I@/dir and -L@/dir are also accepted: a directory inside the brick)
     safeFlag(f) {
         ((f length < 2) || (f startsWith("-")) == false) ifTrue { return false }
         i = 0
+        ((f length >= 4) && ((f byteAt(1) == 73) || (f byteAt(1) == 76)) &&
+         (f byteAt(2) == 64) && (f byteAt(3) == 47)) ifTrue { i = 4 }
         { i < f length } whileTrue {
             (self _safeChar(f byteAt(i), "=+,/")) ifFalse { return false }
             i = i + 1
@@ -1273,6 +1276,15 @@ NativeBricks = Object clone {
         i = 1
         { i < parts size } whileTrue { out push(parts at(i)); i = i + 2 }
         out
+    }
+
+    // a flag as it goes on the command line: -I@/dir -> -I"<brick dir>/dir"
+    expandFlag(f, dir) {
+        ((f length >= 4) && ((f byteAt(1) == 73) || (f byteAt(1) == 76)) &&
+         (f byteAt(2) == 64) && (f byteAt(3) == 47)) ifTrue {
+            return "-" + (f slice(1, 2)) + "\"" + dir + "/" + (f slice(4, f length)) + "\""
+        }
+        f
     }
 
     // [plugin, sources, cflags, libs] from brick.json text, nil if it has no
@@ -1300,6 +1312,17 @@ NativeBricks = Object clone {
         cflags = self _strings(obj, "cflags")
         libs = self _strings(obj, "libs")
         (sources == nil || cflags == nil || libs == nil) ifTrue { return false }
+        // what this platform adds: "sources-macos", "cflags-linux", "libs-windows"
+        plat = "-" + System platform
+        more = self _strings(obj, "sources" + plat)
+        (more == nil) ifTrue { return false }
+        more each { |f| sources push(f) }
+        more = self _strings(obj, "cflags" + plat)
+        (more == nil) ifTrue { return false }
+        more each { |f| cflags push(f) }
+        more = self _strings(obj, "libs" + plat)
+        (more == nil) ifTrue { return false }
+        more each { |f| libs push(f) }
         (plugin == "") ifTrue { return nil }
         (self safePath(plugin, false)) ifFalse {
             Console error("error: brick.json: bad native plugin name \"" + plugin + "\"\n")
@@ -1429,10 +1452,10 @@ NativeBricks = Object clone {
         tmp = libPath + "." + (Crypto randomBytes(4)) + ".tmp"
         cmd = "\"" + (cfg get("cc")) + "\" " + ((cfg get("cflags")) ?? "") + " -O2 -fPIC -shared -w " +
               "-I\"" + clayDir + "/src/runtime\" "
-        (b at(3)) each { |f| cmd = cmd + f + " " }
+        (b at(3)) each { |f| cmd = cmd + (self expandFlag(f, dir)) + " " }
         (b at(2)) each { |s| cmd = cmd + "\"" + dir + "/" + s + "\" " }
         cmd = cmd + "-o \"" + tmp + "\""
-        (b at(4)) each { |f| cmd = cmd + " " + f }
+        (b at(4)) each { |f| cmd = cmd + " " + (self expandFlag(f, dir)) }
         Console error("clay: building native brick '" + (b at(1)) + "'...\n")
         ((System run(cmd)) != 0) ifTrue {
             (File exists(tmp)) ifTrue { File delete(tmp) }
@@ -1447,7 +1470,7 @@ NativeBricks = Object clone {
     compileArgs() {
         s = ""
         (NativeBricks _list) each { |b|
-            (b at(3)) each { |f| s = s + " " + f }
+            (b at(3)) each { |f| s = s + " " + (self expandFlag(f, b at(0))) }
             (b at(2)) each { |src| s = s + " \"" + (b at(0)) + "/" + src + "\"" }
         }
         s
@@ -1456,7 +1479,8 @@ NativeBricks = Object clone {
     linkArgs(existing) {
         s = ""
         (NativeBricks _list) each { |b|
-            (b at(4)) each { |f|
+            (b at(4)) each { |lf|
+                f = self expandFlag(lf, b at(0))
                 ((existing contains(" " + f + " ")) || (existing endsWith(" " + f)) ||
                  (s contains(" " + f + " ")) || (s endsWith(" " + f))) ifFalse { s = s + " " + f }
             }

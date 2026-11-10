@@ -6,6 +6,8 @@ check = { |what, got, want|
 }
 
 check value("plugin API version", StatsNative apiVersion, 3)
+check value("cflags for this platform only", StatsNative os, ((System platform) == "macos") ifTrue { 1 } ifFalse { ((System platform) == "linux") ifTrue { 2 } ifFalse { 3 } })
+check value("-I@/ is a directory in the brick", StatsNative extra, 7)
 check value("sum", Stats sum([1, 2, 3.5]), 6.5)
 check value("nested arrays flatten", Stats sum([[1, 2], [3, 4]]), 10)
 check value("mean", Stats mean([2, 4]), 3)

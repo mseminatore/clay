@@ -126,7 +126,11 @@ static const char *parse_string(const char *s, char *out, size_t out_sz) {
 
 int brick_safe_flag(const char *flag) {
     if (!flag || flag[0] != '-' || !flag[1]) return 0;
-    for (const char *c = flag; *c; c++) {
+    /* -I@/dir and -L@/dir name a directory inside the brick (see
+     * brick_expand_flag): the "@/" is only accepted right after -I or -L */
+    const char *c = flag;
+    if ((flag[1] == 'I' || flag[1] == 'L') && flag[2] == '@' && flag[3] == '/') c = flag + 4;
+    for (; *c; c++) {
         char ch = *c;
         int ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                  (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '=' ||
@@ -134,6 +138,14 @@ int brick_safe_flag(const char *flag) {
         if (!ok) return 0;
     }
     return 1;
+}
+
+/* A flag as it goes on the command line: -I@/dir becomes -I"<brick_dir>/dir" */
+void brick_expand_flag(char *out, size_t sz, const char *flag, const char *brick_dir) {
+    if ((flag[1] == 'I' || flag[1] == 'L') && flag[2] == '@' && flag[3] == '/')
+        snprintf(out, sz, "-%c\"%s/%s\"", flag[1], brick_dir, flag + 4);
+    else
+        snprintf(out, sz, "%s", flag);
 }
 
 /* Skip any JSON value (string, number, literal, array or object) */
@@ -179,6 +191,17 @@ static const char *parse_string_array(const char *p, char *out, size_t width,
     return *p == ']' ? p + 1 : NULL;
 }
 
+/* The platform a brick is built on: macos, windows or linux (any other Unix) */
+static const char *host_platform(void) {
+#if defined(_WIN32)
+    return "windows";
+#elif defined(__APPLE__)
+    return "macos";
+#else
+    return "linux";
+#endif
+}
+
 /* "native": { ... } — validated, since it ends up on a compiler command line */
 static const char *parse_native(const char *p, BrickNative *nb) {
     p = skip_ws(p);
@@ -191,6 +214,19 @@ static const char *parse_native(const char *p, BrickNative *nb) {
         p = skip_ws(p);
         if (*p != ':') return NULL;
         p = skip_ws(p + 1);
+        /* "cflags-macos", "libs-linux", "sources-windows": what a platform
+         * adds to the plain lists; other platforms' entries are skipped */
+        char *dash = strchr(key, '-');
+        if (dash) {
+            if (strcmp(dash + 1, host_platform()) == 0) *dash = '\0';
+            else {
+                p = skip_value(p);
+                if (!p) return NULL;
+                p = skip_ws(p);
+                if (*p == ',') p = skip_ws(p + 1);
+                continue;
+            }
+        }
         if (strcmp(key, "plugin") == 0) {
             p = parse_string(p, nb->plugin, sizeof(nb->plugin));
             if (p && !brick_safe_path(nb->plugin, 0)) {

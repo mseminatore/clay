@@ -6,8 +6,22 @@
   "deps": {},
   "native": {
     "plugin": "stats",
-    "sources": ["native/stats.c"],
-    "cflags": ["-DSTATS_SCALE=2"],
-    "libs": []
+    "sources": [
+      "native/stats.c"
+    ],
+    "cflags": [
+      "-DSTATS_SCALE=2",
+      "-I@/native/inc"
+    ],
+    "libs": [],
+    "cflags-macos": [
+      "-DSTATS_OS=1"
+    ],
+    "cflags-linux": [
+      "-DSTATS_OS=2"
+    ],
+    "cflags-windows": [
+      "-DSTATS_OS=3"
+    ]
   }
 }

@@ -97,8 +97,11 @@ static int build_plugin(const NativeBrick *b, const NativeToolchain *tc,
     }
     n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, tc->msvc ? "/I\"%s/src/runtime\" " : "-I\"%s/src/runtime\" ",
                           tc->clay_dir);
-    for (int i = 0; i < b->native.cflag_count; i++)
-        n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, "%s ", b->native.cflags[i]);
+    for (int i = 0; i < b->native.cflag_count; i++) {
+        char fl[BRICK_MAX_PATH * 2];
+        brick_expand_flag(fl, sizeof(fl), b->native.cflags[i], b->dir);
+        n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, "%s ", fl);
+    }
     for (int i = 0; i < b->native.source_count; i++)
         n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, "\"%s/%s\" ", b->dir, b->native.sources[i]);
     if (tc->msvc) {
@@ -106,8 +109,11 @@ static int build_plugin(const NativeBrick *b, const NativeToolchain *tc,
     } else {
         n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, "-o \"%s\"", tmp);
     }
-    for (int i = 0; i < b->native.lib_count; i++)
-        n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, " %s", b->native.libs[i]);
+    for (int i = 0; i < b->native.lib_count; i++) {
+        char fl[BRICK_MAX_PATH * 2];
+        brick_expand_flag(fl, sizeof(fl), b->native.libs[i], b->dir);
+        n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, " %s", fl);
+    }
     if (tc->msvc) n += (size_t)snprintf(cmd + n, sizeof(cmd) - n, "\"");
     if (n >= sizeof(cmd)) {
         fprintf(stderr, "clay: native brick '%s': build command too long\n", b->native.plugin);
@@ -180,8 +186,11 @@ void native_bricks_compile_args(char *buf, size_t sz, int msvc) {
     size_t n = strlen(buf);
     for (int i = 0; i < g_brick_count && n < sz; i++) {
         const NativeBrick *b = &g_bricks[i];
-        for (int f = 0; f < b->native.cflag_count && n < sz; f++)
-            n += (size_t)snprintf(buf + n, sz - n, " %s", b->native.cflags[f]);
+        for (int f = 0; f < b->native.cflag_count && n < sz; f++) {
+            char fl[BRICK_MAX_PATH * 2];
+            brick_expand_flag(fl, sizeof(fl), b->native.cflags[f], b->dir);
+            n += (size_t)snprintf(buf + n, sz - n, " %s", fl);
+        }
         for (int s = 0; s < b->native.source_count && n < sz; s++)
             n += (size_t)snprintf(buf + n, sz - n, " \"%s/%s\"", b->dir, b->native.sources[s]);
     }
@@ -192,15 +201,17 @@ void native_bricks_link_args(char *buf, size_t sz, int msvc) {
     size_t n = strlen(buf);
     for (int i = 0; i < g_brick_count && n < sz; i++)
         for (int l = 0; l < g_bricks[i].native.lib_count && n < sz; l++) {
+            char fl[BRICK_MAX_PATH * 2];
+            brick_expand_flag(fl, sizeof(fl), g_bricks[i].native.libs[l], g_bricks[i].dir);
             /* skip one the command already has (e.g. -lm), which some
              * linkers warn about */
-            char needle[BRICK_MAX_FLAG + 4];
-            snprintf(needle, sizeof(needle), " %s ", g_bricks[i].native.libs[l]);
-            char tail[BRICK_MAX_FLAG + 4];
-            snprintf(tail, sizeof(tail), " %s", g_bricks[i].native.libs[l]);
+            char needle[BRICK_MAX_PATH * 2 + 4];
+            snprintf(needle, sizeof(needle), " %s ", fl);
+            char tail[BRICK_MAX_PATH * 2 + 4];
+            snprintf(tail, sizeof(tail), " %s", fl);
             size_t tl = strlen(tail);
             if (strstr(buf, needle) || (n >= tl && strcmp(buf + n - tl, tail) == 0)) continue;
-            n += (size_t)snprintf(buf + n, sz - n, " %s", g_bricks[i].native.libs[l]);
+            n += (size_t)snprintf(buf + n, sz - n, " %s", fl);
         }
     (void)msvc;
 }

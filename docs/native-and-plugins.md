@@ -191,6 +191,29 @@ the sources in directly, so it doesn't depend on the plugin file. The brick's
   with `-` and contain only letters, digits and `. _ = + , / -`, because they end up
   on a command line. A `brick.json` that breaks these rules fails to import.
 
+### Per-platform options and brick-relative paths
+
+Each list can be extended for one platform with a key that adds `-macos`,
+`-linux` or `-windows` (`linux` is any other Unix): `sources-macos`,
+`cflags-linux`, `libs-windows`. Only the host's entries are used, appended to
+the plain list, so a brick can use a platform's faster library where there is one:
+
+```json
+"native": {
+  "plugin": "ann",
+  "sources": ["native/clay_ann.c", "native/libann/tensor.c"],
+  "libs": ["-lm"],
+  "cflags-macos": ["-DUSE_BLAS", "-I@/native/shim"],
+  "libs-macos": ["-Wl,-framework,Accelerate"]
+}
+```
+
+- A flag has no spaces, so a linker option that takes an argument is written
+  with commas: `-Wl,-framework,Accelerate`.
+- `-I@/dir` and `-L@/dir` name a directory inside the brick (here
+  `<brick>/native/shim`), whatever the current directory is. The `@/` is only
+  accepted right after `-I` or `-L`.
+
 The brick's `main` file wraps the plugin's prototypes in a Clay API. See
 [clay-ann](https://github.com/mseminatore/clay-ann), neural networks over the
 libann C library, for a complete example. `clayc`, the Clay compiler written in
