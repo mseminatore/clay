@@ -1,9 +1,9 @@
-# Clay
+# Welcome to the Clay language
 [![CI](https://github.com/mseminatore/clay/actions/workflows/ci.yml/badge.svg)](https://github.com/mseminatore/clay/actions/workflows/ci.yml)
 
-Clay is a prototype-based, pure object-oriented programming language. Everything is an object. Objects communicate via message passing. New objects are created by cloning existing ones and adding or modifying slots and methods.
+Clay is a prototype-based, pure object-oriented programming language. Everything is an `Object`. Objects communicate via message passing. New objects are created by cloning existing ones and adding or modifying slots and methods.
 
-Clay programs run instantly in an embedded bytecode VM, or compile to human-readable C for native executables.
+Clay programs run in an embedded bytecode VM, or compile to C for native executables.
 
 ```clay
 Animal = Object clone {
@@ -29,12 +29,17 @@ r = try { 10 / 0 } catch { |e| e type }
 r println                                    // DivisionByZero
 ```
 
-**Highlights:** message passing all the way down · prototypes instead of classes ·
-closures, fibers and threads · a standard library of bricks (JSON, CSV, HTTP
-server, ORM, templates, …) and a Git-based package manager · native compilation
-through C · a VS Code extension with a full debugger.
+**Language Features:** 
+- message are sent to objects
+- prototypes instead of classes
+- closures, fibers and threads
+- standard library of bricks (JSON, CSV, HTTP
+server, ORM, templates, …)
+- a Git-based package manager
+- native compilation to C for speed and distribution 
+- a VS Code extension with a full debugger.
 
-## Building
+## Building Clay
 
 Requires CMake 3.10+ and a C compiler. On Windows, Visual Studio is detected automatically.
 OpenSSL (HTTPS) and SDL2 (`Graphics`) are optional and picked up when installed.
