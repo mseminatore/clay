@@ -151,6 +151,11 @@ static void dap_output_hook(const char *text) {
     dap_send_output("stdout", text);
 }
 
+/* Parse errors (file:line: error: ...) show in the Debug Console like any output */
+static void dap_parse_error_hook(const char *text) {
+    dap_send_output("stderr", text);
+}
+
 static void dap_send_stopped(const char *reason, const char *description) {
     cJSON *ev = dap_event("stopped");
     cJSON *body = cJSON_AddObjectToObject(ev, "body");
@@ -1072,8 +1077,10 @@ int dap_run(const char *filename) {
 
     /* Parse */
     Parser parser;
+    parser_error_hook = dap_parse_error_hook;
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
+    parser_error_hook = NULL;
 
     if (!program || parser.had_error) {
         dap_send_output("stderr", "clay: compilation failed due to parse errors\n");

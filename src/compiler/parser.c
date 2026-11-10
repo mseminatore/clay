@@ -17,6 +17,7 @@
  */
 #include "parser.h"
 #include "native_bricks.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -88,10 +89,24 @@ static void mark_imported(Parser *p, const char *path) {
 
 /* --- Utilities --- */
 
+/* Parse errors go to stderr, or to parser_error_hook when a front end (the
+ * debug adapter) has no terminal to show them on */
+void (*parser_error_hook)(const char *text) = NULL;
+
+static void parser_report(const char *fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (parser_error_hook) parser_error_hook(buf);
+    else fputs(buf, stderr);
+}
+
 static void parser_error(Parser *p, const char *msg) {
     if (p->had_error) return;
     p->had_error = 1;
-    fprintf(stderr, "%s:%d: error: %s (got '%.*s')\n",
+    parser_report("%s:%d: error: %s (got '%.*s')\n",
             p->filename, p->current.line, msg,
             p->current.length, p->current.start);
 }
@@ -100,7 +115,7 @@ static void parser_error(Parser *p, const char *msg) {
 static void parser_error_prev(Parser *p, const char *msg) {
     if (p->had_error) return;
     p->had_error = 1;
-    fprintf(stderr, "%s:%d: error: %s: %.*s\n",
+    parser_report("%s:%d: error: %s: %.*s\n",
             p->filename, p->previous.line, msg,
             p->previous.length, p->previous.start);
 }
@@ -1172,7 +1187,7 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
             if (prc == -2) {
                 /* a brick.json that exists but is invalid (e.g. a rejected
                  * native flag): don't quietly import it without its native part */
-                fprintf(stderr, "%s: invalid %s\n", parent->filename, manifest_path);
+                parser_report("%s: invalid %s\n", parent->filename, manifest_path);
                 parent->had_error = 1;
                 return NULL;
             }
@@ -1217,7 +1232,7 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
 
     char *source = read_file(resolved);
     if (!source) {
-        fprintf(stderr, "%s: cannot open import '%s'\n", parent->filename, resolved);
+        parser_report("%s: cannot open import '%s'\n", parent->filename, resolved);
         parent->had_error = 1;
         free(resolved);
         return NULL;

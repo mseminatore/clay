@@ -19,6 +19,9 @@ typedef struct {
     ImportEntry *imported;  /* linked list of already-imported paths */
 } Parser;
 
+/* Where parse errors are written instead of stderr (NULL: stderr) */
+extern void (*parser_error_hook)(const char *text);
+
 void    parser_init(Parser *parser, const char *source, const char *filename);
 AstNode *parser_parse(Parser *parser);
 void    parser_free_imports(Parser *parser);
