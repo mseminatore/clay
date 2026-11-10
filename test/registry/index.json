@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "bricks": [
+    {
+      "name": "ann",
+      "repo": "github.com/mseminatore/clay-ann",
+      "description": "Neural networks over libann",
+      "tags": ["machine-learning", "native"],
+      "license": "MIT",
+      "native": true,
+      "version": "0.2.0"
+    },
+    {
+      "name": "plain",
+      "repo": "codeberg.org/someone/clay-plain",
+      "description": "A pure Clay brick",
+      "tags": ["utility"],
+      "license": "MIT",
+      "native": false
+    },
+    {
+      "name": "evil",
+      "repo": "evil.example/x",
+      "description": "not on a known host, so never shown",
+      "license": "MIT"
+    },
+    {
+      "name": "sneaky",
+      "repo": "github.com/someone/sneaky",
+      "description": "control \u001b[31mchars\u001b[0m are stripped\u0007",
+      "license": "MIT"
+    },
+    {
+      "name": "Bad Name",
+      "repo": "github.com/someone/bad",
+      "description": "an unsafe name is never shown",
+      "license": "MIT"
+    }
+  ]
+}

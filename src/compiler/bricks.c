@@ -9,6 +9,7 @@
  *   clay bricks list
  *   clay bricks remove <name>
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,12 @@
 #define strdup _strdup
 #endif
 #include "bricks.h"
+#include "cJSON.h"
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#endif
 
 /* --- Input validation ---
  *
@@ -1121,7 +1128,229 @@ static int cmd_install(void) {
 /* Add a dependency. `as` (optional) names it, which is also its import path
  * and install directory: "stdlib" for a repository, or the part before the
  * sub-brick for a monorepo URL ("stdlib" + ".../markdown" → "stdlib/markdown"). */
-static int cmd_add(const char *url, const char *as) {
+/* --- The registry: a list of bricks, for finding them -----------------------
+ *
+ * clay-registry (github.com/mseminatore/clay-registry) publishes index.json,
+ * one entry per listed brick: name, repo, description, tags, license, native.
+ * `search` and `info` only print what they find; installing is still
+ * `clay bricks add <url>`, by hand, so the registry can't make anything run.
+ * The index is data from strangers: entries are checked and clipped before
+ * they're shown. CLAY_REGISTRY names another index (a URL, or a local file). */
+
+void clay_bootstrap(void);                               /* runtime */
+char *clay_http_get_text(const char *url, int *status);  /* runtime: http.c */
+
+#define REGISTRY_URL "https://raw.githubusercontent.com/mseminatore/clay-registry/main/index.json"
+#define REGISTRY_MAX_INDEX (4 * 1024 * 1024)
+
+static const char *registry_hosts[] = { "github.com/", "gitlab.com/", "codeberg.org/", "bitbucket.org/", NULL };
+
+/* ~/.clay/registry.json: the last index fetched, used when the network isn't there */
+static int registry_cache_path(char *out, size_t sz) {
+    const char *home = getenv("HOME");
+    if (!home) home = getenv("USERPROFILE");
+    if (!home || !*home) return 0;
+    snprintf(out, sz, "%s/.clay", home);
+    make_dir(out);
+    snprintf(out, sz, "%s/.clay/registry.json", home);
+    return 1;
+}
+
+static char *read_whole_file(const char *path, size_t limit) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    char *buf = (char *)malloc(limit + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t n = fread(buf, 1, limit, f);
+    fclose(f);
+    buf[n] = '\0';
+    return buf;
+}
+
+/* the index text: CLAY_REGISTRY (a file or URL), else the registry, else the cache */
+static char *registry_fetch(int *from_cache) {
+    *from_cache = 0;
+    const char *src = getenv("CLAY_REGISTRY");
+    if (src && *src && strncmp(src, "http://", 7) != 0 && strncmp(src, "https://", 8) != 0) {
+        char *text = read_whole_file(src, REGISTRY_MAX_INDEX);
+        if (!text) fprintf(stderr, "error: cannot read CLAY_REGISTRY file '%s'\n", src);
+        return text;
+    }
+    const char *url = src && *src ? src : REGISTRY_URL;
+    clay_bootstrap();                         /* Http lives in the runtime */
+    int status = 0;
+    char *text = clay_http_get_text(url, &status);
+    char cache[BRICK_MAX_PATH];
+    int have_cache = registry_cache_path(cache, sizeof(cache));
+    if (text && strlen(text) <= REGISTRY_MAX_INDEX) {
+        if (have_cache) {
+            FILE *f = fopen(cache, "wb");
+            if (f) { fputs(text, f); fclose(f); }
+        }
+        return text;
+    }
+    free(text);
+    if (have_cache && (text = read_whole_file(cache, REGISTRY_MAX_INDEX)) != NULL) {
+        *from_cache = 1;
+        fprintf(stderr, "(cannot reach %s%s; using the copy from the last search)\n",
+                url, status ? "" : "");
+        return text;
+    }
+    fprintf(stderr, "error: cannot fetch the brick index from %s (HTTP %d)\n", url, status);
+    return NULL;
+}
+
+/* the entry's string field, clipped to width and stripped of control characters;
+ * "" when absent or not a string */
+static void registry_text(const cJSON *entry, const char *key, char *out, size_t width) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(entry, key);
+    size_t n = 0;
+    if (cJSON_IsString(v) && v->valuestring)
+        for (const unsigned char *c = (const unsigned char *)v->valuestring; *c && n + 1 < width; c++)
+            if (*c >= 32 && *c != 127) out[n++] = (char)*c;
+    out[n] = '\0';
+}
+
+/* a listed brick worth showing: a safe name and an https repo on a known host */
+static int registry_entry_ok(const cJSON *e, char *name, size_t nsz, char *repo, size_t rsz) {
+    registry_text(e, "name", name, nsz);
+    registry_text(e, "repo", repo, rsz);
+    if (!name[0] || !brick_safe_path(name, 0)) return 0;
+    if (!repo[0] || strstr(repo, "..") || !brick_safe_url(repo) || strncmp(repo, "http", 4) == 0) return 0;
+    for (int i = 0; registry_hosts[i]; i++)
+        if (strncmp(repo, registry_hosts[i], strlen(registry_hosts[i])) == 0 && repo[strlen(registry_hosts[i])])
+            return 1;
+    return 0;
+}
+
+static int registry_is_native(const cJSON *e) {
+    return cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, "native"));
+}
+
+static void registry_tags(const cJSON *e, char *out, size_t sz) {
+    out[0] = '\0';
+    const cJSON *tags = cJSON_GetObjectItemCaseSensitive(e, "tags");
+    size_t n = 0;
+    int count = 0;
+    const cJSON *t;
+    cJSON_ArrayForEach(t, tags) {
+        if (count++ >= 8) break;
+        char tag[40];
+        size_t k = 0;
+        if (!cJSON_IsString(t) || !t->valuestring) continue;
+        for (const char *c = t->valuestring; *c && k + 1 < sizeof(tag); c++)
+            if ((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '-') tag[k++] = *c;
+        tag[k] = '\0';
+        if (k) n += (size_t)snprintf(out + n, sz > n ? sz - n : 0, "%s%s", n ? ", " : "", tag);
+    }
+}
+
+static int str_contains_nocase(const char *hay, const char *needle) {
+    size_t n = strlen(needle);
+    if (!n) return 1;
+    for (const char *p = hay; *p; p++) {
+        size_t i = 0;
+        while (i < n && p[i] && tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == n) return 1;
+    }
+    return 0;
+}
+
+static cJSON *registry_load(void) {
+    int from_cache;
+    char *text = registry_fetch(&from_cache);
+    if (!text) return NULL;
+    cJSON *index = cJSON_Parse(text);
+    free(text);
+    cJSON *bricks = index ? cJSON_GetObjectItemCaseSensitive(index, "bricks") : NULL;
+    if (!cJSON_IsArray(bricks)) {
+        fprintf(stderr, "error: the brick index is not in the expected format\n");
+        cJSON_Delete(index);
+        return NULL;
+    }
+    return index;
+}
+
+/* clay bricks search [words]: the listed bricks whose name, description or tags
+ * contain every word (all of them with no words) */
+static int cmd_search(int argc, char **argv) {
+    cJSON *index = registry_load();
+    if (!index) return 1;
+    const cJSON *bricks = cJSON_GetObjectItemCaseSensitive(index, "bricks");
+    int shown = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, bricks) {
+        char name[BRICK_MAX_NAME], repo[BRICK_MAX_PATH], desc[256], tags[256];
+        if (!cJSON_IsObject(e) || !registry_entry_ok(e, name, sizeof(name), repo, sizeof(repo))) continue;
+        registry_text(e, "description", desc, sizeof(desc));
+        registry_tags(e, tags, sizeof(tags));
+        int match = 1;
+        for (int i = 0; i < argc && match; i++)
+            match = str_contains_nocase(name, argv[i]) || str_contains_nocase(desc, argv[i]) ||
+                    str_contains_nocase(tags, argv[i]);
+        if (!match) continue;
+        printf("%s%s\n    %s\n    https://%s\n", name, registry_is_native(e) ? "  (native: builds C code)" : "", desc, repo);
+        shown++;
+    }
+    if (!shown) printf("no bricks match\n");
+    else printf("\nInstall one with: clay bricks add <url>\n");
+    cJSON_Delete(index);
+    return 0;
+}
+
+/* clay bricks info <name>: everything the index says about one brick */
+static int cmd_info(const char *wanted) {
+    cJSON *index = registry_load();
+    if (!index) return 1;
+    const cJSON *bricks = cJSON_GetObjectItemCaseSensitive(index, "bricks");
+    int found = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, bricks) {
+        char name[BRICK_MAX_NAME], repo[BRICK_MAX_PATH], text[256];
+        if (!cJSON_IsObject(e) || !registry_entry_ok(e, name, sizeof(name), repo, sizeof(repo))) continue;
+        if (strcmp(name, wanted) != 0) continue;
+        found = 1;
+        printf("%s\n", name);
+        registry_text(e, "description", text, sizeof(text));
+        printf("  %s\n", text);
+        printf("  repository: https://%s\n", repo);
+        registry_text(e, "version", text, 40);
+        if (text[0]) printf("  version:    %s\n", text);
+        registry_text(e, "license", text, 40);
+        if (text[0]) printf("  license:    %s\n", text);
+        registry_tags(e, text, sizeof(text));
+        if (text[0]) printf("  tags:       %s\n", text);
+        registry_text(e, "homepage", text, sizeof(text));
+        if (strncmp(text, "https://", 8) == 0) printf("  homepage:   %s\n", text);
+        printf("  native:     %s\n", registry_is_native(e) ? "yes: its C code is built on first import" : "no");
+        printf("\nInstall with: clay bricks add %s %s\n", repo, name);
+        break;
+    }
+    if (!found) printf("'%s' is not in the brick index (try: clay bricks search %s)\n", wanted, wanted);
+    cJSON_Delete(index);
+    return found ? 0 : 1;
+}
+
+/* A brick that compiles C code is a bigger step than one that's only Clay: say so
+ * when it's added, and ask when someone is there to answer (a terminal). Returns 1 to
+ * go ahead. */
+static int native_consent(const char *url, const char *name, const char *dir, int yes) {
+    char mpath[BRICK_MAX_PATH * 2];
+    snprintf(mpath, sizeof(mpath), "%s/brick.json", dir);
+    static BrickManifest m;
+    if (brick_parse(mpath, &m) != 0 || !m.native.plugin[0]) return 1;
+    printf("note: '%s' is a native brick: when it's first imported, Clay compiles the C code in\n"
+           "      %s (%d source file%s) with your C compiler and loads it.\n",
+           name, url, m.native.source_count, m.native.source_count == 1 ? "" : "s");
+    if (yes || !isatty(fileno(stdin))) return 1;
+    printf("Add it? [y/N] ");
+    fflush(stdout);
+    char answer[16] = "";
+    if (!fgets(answer, sizeof(answer), stdin)) return 0;
+    return answer[0] == 'y' || answer[0] == 'Y';
+}
+
+static int cmd_add(const char *url, const char *as, int yes) {
     BrickManifest m;
     int prc = brick_parse("brick.json", &m);
     if (prc != 0) {
@@ -1174,6 +1403,13 @@ static int cmd_add(const char *url, const char *as) {
     if (install_dep(url, name) != 0) {
         brick_undo_install(&before);
         fprintf(stderr, "'%s' was not added\n", name);
+        return 1;
+    }
+    char dir[BRICK_MAX_PATH * 2];
+    brick_install_dir(url, name, dir, sizeof(dir));
+    if (!native_consent(url, name, dir, yes)) {
+        brick_undo_install(&before);
+        printf("'%s' was not added\n", name);
         return 1;
     }
 
@@ -1373,8 +1609,11 @@ int brick_command(int argc, char **argv) {
         fprintf(stderr, "  install           Install dependencies from brick.json\n");
         fprintf(stderr, "  update            Update installed dependencies\n");
         fprintf(stderr, "  add <url> [name]  Add a dependency (name = its import path)\n");
+        fprintf(stderr, "                    --yes: add a native brick without asking\n");
         fprintf(stderr, "  remove <name>     Remove a dependency\n");
         fprintf(stderr, "  list              Show project info and dependencies\n");
+        fprintf(stderr, "  search [words]    Find bricks in the registry (clay-registry on GitHub)\n");
+        fprintf(stderr, "  info <name>       What the registry says about a brick\n");
         return 1;
     }
 
@@ -1386,11 +1625,26 @@ int brick_command(int argc, char **argv) {
     } else if (strcmp(cmd, "update") == 0) {
         return cmd_update();
     } else if (strcmp(cmd, "add") == 0) {
-        if (argc < 2) {
-            fprintf(stderr, "Usage: clay bricks add <url> [name]\n");
+        const char *args[2] = { NULL, NULL };
+        int nargs = 0, yes = 0;
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) yes = 1;
+            else if (nargs < 2) args[nargs++] = argv[i];
+            else nargs++;
+        }
+        if (nargs < 1 || nargs > 2) {
+            fprintf(stderr, "Usage: clay bricks add <url> [name] [--yes]\n");
             return 1;
         }
-        return cmd_add(argv[1], argc >= 3 ? argv[2] : NULL);
+        return cmd_add(args[0], args[1], yes);
+    } else if (strcmp(cmd, "search") == 0) {
+        return cmd_search(argc - 1, argv + 1);
+    } else if (strcmp(cmd, "info") == 0) {
+        if (argc < 2) {
+            fprintf(stderr, "Usage: clay bricks info <name>\n");
+            return 1;
+        }
+        return cmd_info(argv[1]);
     } else if (strcmp(cmd, "remove") == 0) {
         if (argc < 2) {
             fprintf(stderr, "Usage: clay bricks remove <name>\n");

@@ -187,6 +187,8 @@ the sources in directly, so it doesn't depend on the plugin file. The brick's
 - `plugin` names the library, and so the entry point: `ann_plugin_init`.
 - `sources` are relative to the brick, and may be in a git submodule:
   `clay bricks add` and `install` fetch submodules.
+- Because a native brick runs C code it ships, `clay bricks add` says so when adding one and,
+  at a terminal, asks before going ahead (`--yes` skips the question).
 - `cflags` and `libs` are options for the compiler and linker. Each must start
   with `-` and contain only letters, digits and `. _ = + , / -`, because they end up
   on a command line. A `brick.json` that breaks these rules fails to import.

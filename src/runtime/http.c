@@ -415,6 +415,25 @@ static ClayValue do_http_request(const char *url, const char *method, const char
 }
 #endif /* _WIN32 */
 
+/* GET for C callers such as `clay bricks search`: the body as a new string (free it),
+ * or NULL when the request fails; *status gets the HTTP status (0 on failure).
+ * Needs clay_bootstrap() to have run. */
+char *clay_http_get_text(const char *url, int *status) {
+    ClayValue resp = do_http_request(url, "GET", NULL, 0);
+    char *text = NULL;
+    int code = 0;
+    if (CLAY_IS_OBJ(resp)) {
+        ClayValue st = clay_get_slot(CLAY_OBJ(resp), "_status");
+        ClayValue body = clay_get_slot(CLAY_OBJ(resp), "_body");
+        if (CLAY_IS_INT(st)) code = (int)clay_to_int(st);
+        if (code >= 200 && code < 300 && CLAY_IS_TYPE(body, CLAY_TYPE_STRING))
+            text = strdup(clay_string_data(CLAY_OBJ(body)));
+    }
+    clay_release_val(resp);
+    if (status) *status = code;
+    return text;
+}
+
 /* Http get(url) */
 static ClayValue http_get(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc;

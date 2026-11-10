@@ -12,6 +12,8 @@ clay bricks install                           # install all deps from brick.json
 clay bricks update                            # update all deps to latest
 clay bricks list                              # show project info
 clay bricks remove some-lib                   # remove a dependency
+clay bricks search neural networks            # find bricks in the registry
+clay bricks info ann                          # what the registry says about one
 ```
 
 ## brick.json
@@ -80,6 +82,38 @@ whatever the repository itself is called), and every sub-brick from it shares th
 `stdlib/collections` resolves to `bricks/stdlib/collections/brick.json`. Installing fails, rather
 than mixing code, if that directory already holds a different repository.
 
+## Finding bricks
+
+[clay-registry](https://github.com/mseminatore/clay-registry) is a list of bricks, kept for
+finding them: one small entry per brick with its name, repository, description and tags. It is
+not where bricks live. `clay bricks search <words>` prints the listed bricks whose name,
+description or tags contain every word (all of them with no words), and `clay bricks info <name>`
+prints everything the list says about one, including the `clay bricks add` line to install it:
+
+```
+$ clay bricks search neural
+ann  (native: builds C code)
+    Neural networks: dense and convolutional layers, training, export and int8 quantization, ...
+    https://github.com/mseminatore/clay-ann
+```
+
+Searching only reads the list. Nothing is downloaded, built or run until you `clay bricks add` a
+URL yourself, and a listing means the entry was checked, not that the code was reviewed: read a
+brick before depending on it, and pin it (`@v1.0.0`; `brick.lock` records the commit). The list
+is treated as untrusted data: only `https` repositories on known hosts (GitHub, GitLab, Codeberg,
+Bitbucket) are shown, and text is clipped. The last list fetched is kept in `~/.clay/registry.json`
+and used when the network is unavailable. `CLAY_REGISTRY` names another list: a URL, or a local
+file for a mirror or a private registry (the format is `{"version": 1, "bricks": [...]}`, as the
+registry's `index.json`).
+
+### Native bricks
+
+A brick with a `"native"` section compiles C code with your C compiler the first time it is
+imported, and loads it. `clay bricks add` says so when it adds one, and asks before going ahead
+when run from a terminal; `--yes` skips the question (for scripts and CI, which also go ahead
+without it when there is no terminal to ask). `clay bricks install`, which installs what the
+project's own `brick.json` lists, does not ask.
+
 ## Publishing a brick
 
 Any Git repository with a `brick.json` is a valid brick. To publish:
@@ -87,6 +121,8 @@ Any Git repository with a `brick.json` is a valid brick. To publish:
 2. Push to GitHub (or any Git host)
 3. Tag releases with semver (`git tag v1.0.0`)
 4. Others install with `clay bricks add github.com/you/your-brick@v1.0.0`
+5. To let people find it, list it in [clay-registry](https://github.com/mseminatore/clay-registry):
+   one JSON file by pull request, as its README describes
 
 ## Local layout
 

@@ -497,6 +497,9 @@ extern CLAY_THREAD_LOCAL const char *clay_source_file;
  * instead of writing to stdout. Used by DAP to send output events. */
 extern void (*clay_output_fn)(const char *text);
 
+/* HTTP GET for C callers (http.c): the body as a new string, or NULL on failure */
+char *clay_http_get_text(const char *url, int *status);
+
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 

@@ -365,6 +365,28 @@ set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_e
     PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                LABELS "bricks")
 
+# The brick registry: `clay bricks search` / `info` against a local index.json
+# (CLAY_REGISTRY), which holds entries that must be shown and ones that must not
+add_test(NAME clay_bricks_search COMMAND clay_compiler bricks search neural)
+set_tests_properties(clay_bricks_search PROPERTIES
+    ENVIRONMENT "CLAY_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/test/registry/index.json"
+    PASS_REGULAR_EXPRESSION "ann  \\(native.*Neural networks over libann.*https://github.com/mseminatore/clay-ann"
+    FAIL_REGULAR_EXPRESSION "plain;evil;sneaky" LABELS "bricks")
+add_test(NAME clay_bricks_search_all COMMAND clay_compiler bricks search)
+set_tests_properties(clay_bricks_search_all PROPERTIES
+    ENVIRONMENT "CLAY_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/test/registry/index.json"
+    PASS_REGULAR_EXPRESSION "ann.*plain.*codeberg.org/someone/clay-plain.*control \\[31mchars"
+    FAIL_REGULAR_EXPRESSION "evil.example;Bad Name;unsafe name;\\x1b" LABELS "bricks")
+add_test(NAME clay_bricks_info COMMAND clay_compiler bricks info ann)
+set_tests_properties(clay_bricks_info PROPERTIES
+    ENVIRONMENT "CLAY_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/test/registry/index.json"
+    PASS_REGULAR_EXPRESSION "version:    0.2.0.*tags:       machine-learning, native.*native:     yes.*clay bricks add github.com/mseminatore/clay-ann ann"
+    LABELS "bricks")
+add_test(NAME clay_bricks_info_hidden COMMAND clay_compiler bricks info evil)
+set_tests_properties(clay_bricks_info_hidden PROPERTIES
+    ENVIRONMENT "CLAY_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/test/registry/index.json"
+    PASS_REGULAR_EXPRESSION "'evil' is not in the brick index" LABELS "bricks")
+
 # Native-backend tests: every program above also compiled with `clay --compile`
 # and run (label "native"). Programs that read files relative to the repo root
 # run from there; the rest from test/programs (for relative imports).
