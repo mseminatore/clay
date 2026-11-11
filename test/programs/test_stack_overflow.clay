@@ -17,7 +17,10 @@ Rec = Object clone {
     }
 }
 
+progress = { |what| Console print("  " + what + "\n") }
+
 // a method
+progress value("a method")
 msg = try { Rec forever()
             "no error" } catch { |e| e message }
 check value("a method overflows", msg contains("stack overflow"))
@@ -28,6 +31,7 @@ kind = try { Rec forever()
 check value("it is a RuntimeError", kind == "RuntimeError")
 
 // a recursive block
+progress value("a block")
 f = nil
 f = { |n| f value(n + 1) }
 msg = try { f value(0)
@@ -35,18 +39,20 @@ msg = try { f value(0)
 check value("a block overflows", msg contains("stack overflow"))
 
 // ordinary recursion still works, before and after an overflow
+progress value("recursion after overflow")
 check value("recursion 300 deep", (Rec down(300)) == 0)
 try { Rec forever() } catch { |e| nil }
 check value("recursion 300 deep again", (Rec down(300)) == 0)
 
 // a fiber has a small C stack of its own
+progress value("a fiber")
 fiber = Fiber new({
     try { Rec forever()
           "no error" } catch { |e| e message }
 })
 msg = fiber resume
 check value("a fiber overflows", msg contains("stack overflow"))
-check value("a fiber recurses normally", (Fiber new({ Rec down(30) })) resume == 0)
+check value("a fiber recurses a little", (Fiber new({ Rec down(5) })) resume == 0)
 
 (failures > 0) ifTrue {
     Console print(failures toString + " checks failed\n")

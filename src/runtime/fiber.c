@@ -19,6 +19,11 @@
 #include "clay.h"
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -56,11 +61,30 @@ void clay_stack_init(void) {
     size = pthread_get_stacksize_np(self);
     lo = (char *)pthread_get_stackaddr_np(self) - size;      /* the address is the top */
 #elif defined(__linux__)
-    pthread_attr_t attr;
-    if (pthread_getattr_np(pthread_self(), &attr) == 0) {
-        void *addr = NULL;
-        if (pthread_attr_getstack(&attr, &addr, &size) == 0) lo = (char *)addr;
-        pthread_attr_destroy(&attr);
+    if (syscall(SYS_gettid) == (long)getpid()) {
+        /* the main thread: its stack may grow to the soft limit. Count from
+         * where we are now rather than from the top of the mapping, which
+         * leaves out the arguments and environment above us (and a big one
+         * only makes the limit stricter, never looser) */
+        struct rlimit rl;
+        size = 8u * 1024 * 1024;
+        if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+            size = (size_t)rl.rlim_cur;
+        if (size > 1024u * 1024 * 1024) size = 1024u * 1024 * 1024;
+        size_t above = 512 * 1024;      /* what is above this call */
+        if (size > above + 64 * 1024) {
+            lo = (char *)__builtin_frame_address(0) - (size - above);
+            size -= above;
+        } else {
+            size = 0;
+        }
+    } else {
+        pthread_attr_t attr;
+        if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+            void *addr = NULL;
+            if (pthread_attr_getstack(&attr, &addr, &size) == 0) lo = (char *)addr;
+            pthread_attr_destroy(&attr);
+        }
     }
 #endif
     if (!lo || size < 64 * 1024) { clay_stack_limit = NULL; return; }
@@ -91,8 +115,8 @@ typedef struct {
     clay_fiber_regs_t fiber_regs;
     clay_fiber_regs_t caller_regs;
     char *c_stack;              /* allocated C stack */
-    char *stack_limit;          /* its clay_stack_limit while it runs (NULL: unchecked) */
 #endif
+    char *stack_limit;          /* its clay_stack_limit while it runs (NULL: unchecked) */
 } FiberContext;
 
 static CLAY_THREAD_LOCAL FiberContext *g_current_fiber = NULL;
