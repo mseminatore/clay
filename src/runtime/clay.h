@@ -76,9 +76,15 @@ void      clay_raise_overflow(void);
 extern CLAY_THREAD_LOCAL char *clay_stack_limit;
 void      clay_stack_init(void);        /* the current thread's limit (bootstrap, thread start) */
 void      clay_stack_overflow(void);    /* raises RuntimeError; does not return */
+#if defined(_MSC_VER)
+#include <intrin.h>
+#define CLAY_STACK_POINTER() ((char *)_AddressOfReturnAddress())
+#else
+/* (not the address of a local: AddressSanitizer puts locals on a fake stack) */
+#define CLAY_STACK_POINTER() ((char *)__builtin_frame_address(0))
+#endif
 #define CLAY_STACK_CHECK() \
-    do { char _clay_probe; \
-         if (clay_stack_limit && &_clay_probe < clay_stack_limit) clay_stack_overflow(); } while (0)
+    do { if (clay_stack_limit && CLAY_STACK_POINTER() < clay_stack_limit) clay_stack_overflow(); } while (0)
 
 /* Argument helpers for native methods: return argv[i] converted, or raise —
  * ArgumentError if the argument is missing, TypeError if it has the wrong
