@@ -5,12 +5,13 @@
 //   clayc --compile [-o <output>] <file.clay>   build a native executable
 //   clayc -c [-o <output.c>] <file.clay>    write the C only
 //   clayc --bytecode <file.clay>            print the bytecode (like clay --bytecode)
+//   clayc bricks <command> [args...]        the package manager (like clay bricks)
 //
 // Like `clay`: lexes and parses with the clay-lexer and clay-parser bricks,
 // then either compiles to bytecode with clay-bytecode and runs it on the VM,
 // or generates C with clay-codegen and compiles that with the C compiler and
 // Clay runtime libraries named in clay-native.cfg (written by the CMake
-// build next to the clay binary).
+// build next to the clay binary). `clayc bricks` is the clay-bricks brick.
 //
 //   -o <output>     the executable (implies --compile; default: the source
 //                   name without .clay); its C goes next to it (<output>.c)
@@ -21,11 +22,13 @@
 //
 // Running programs and the REPL need the VM, which native programs have:
 // build clayc with `clay --compile -o clayc selfhost/clayc.clay`. Building
-// native executables works in the VM too (`clay selfhost/clayc.clay -o ...`).
+// native executables and `bricks` work in the VM too
+// (`clay selfhost/clayc.clay -o ...`, `clay selfhost/clayc.clay bricks list`).
 // Compiled with itself, clayc reaches a fixpoint (CTest
 // clay_selfhost_bootstrap).
 import("clay-codegen/src/main.clay")
 import("clay-bytecode/src/main.clay")
+import("clay-bricks/src/main.clay")
 
 Clayc = Object clone {
     source = nil
@@ -44,7 +47,8 @@ Clayc = Object clone {
         Console error("usage: clayc [<file.clay> [args...]]\n" +
                       "       clayc --compile [-o <output>] [--cfg <clay-native.cfg>] [--plugin-exe <clay>] <file.clay>\n" +
                       "       clayc -c [-o <output.c>] <file.clay>\n" +
-                      "       clayc --bytecode <file.clay>\n")
+                      "       clayc --bytecode <file.clay>\n" +
+                      "       clayc bricks <command> [args...]\n")
         System exit(2)
     }
 
@@ -199,6 +203,10 @@ Clayc = Object clone {
     }
 
     run(args) {
+        // the package manager: clayc bricks <command> (as clay's main.c)
+        (args size > 0 && (args at(0)) == "bricks") ifTrue {
+            System exit(Bricks command(args slice(1, args size)))
+        }
         self parseArgs(args)
         (mode == "repl") ifTrue { return ClaycRepl run }
         program = self parse
@@ -266,8 +274,11 @@ ClaycRepl = Object clone {
         bc = BcGen new("<repl>", true)
         input = ""
         done = false
+
         { done == false } whileTrue {
+            // line = Console readLine((input == "") ifTrue { (self _c("36")) + ">>> " + (self _c("0")) } ifFalse { "... " })
             line = Console readLine((input == "") ifTrue { ">>> " } ifFalse { "... " })
+
             (line == nil) ifTrue {
                 done = true
             } ifFalse {
@@ -276,6 +287,7 @@ ClaycRepl = Object clone {
                     done = true
                 } ifFalse {
                     input = input + line + "\n"
+
                     ((self openCount(input)) <= 0) ifTrue {
                         self eval(bc, input)
                         Console saveHistory(history)

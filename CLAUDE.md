@@ -131,6 +131,11 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   configured with `-DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON` (SDL2 + ASan hangs on macOS).
 - **Fibers** live in `src/runtime/fiber.c` (C-stack switching); the VM swaps its own stacks via
   `clay_fiber_hooks` registered in `vm_bridge.c`.
+- **File scope of block assignments**: top-level variables are globals shared by every file (imports
+  are spliced into one program; each `AstNode` records its `file`), but a top-level block's `x = v`
+  writes a global only when `x` is assigned at the top level of the block's own file; otherwise `x` is
+  the block's local. `bc_is_file_global` (bc_compiler), `emit_shadow_decls` (codegen) and their
+  selfhost ports (`isFileGlobal`, `shadowDecls`) implement it — keep them in sync.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.
@@ -160,7 +165,9 @@ bricks plus the `clayc` driver. Each is a port of its C counterpart (`lexer.c`, 
 `bc_compiler.c`, `codegen.c`) and must produce identical output — tokens, AST, bytecode and C —
 checked by CTest (`ctest -L selfhost`: `clay_selfhost_<piece>[_native]`, `clay_selfhost_run`,
 `clay_selfhost_bootstrap`). A change to one of those C files usually needs the same change in its
-Clay port.
+Clay port. `clay-bricks` is the port of `bricks.c` (`clayc bricks ...`), checked by
+`clay_selfhost_bricks` (same output and files as `clay bricks`, against local git repos); a change
+to `bricks.c` needs the same change there.
 
 ## Bricks (package manager)
 

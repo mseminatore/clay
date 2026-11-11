@@ -630,6 +630,19 @@ static int is_toplevel_var(CodeGen *cg, const char *name) {
     return found;
 }
 
+/* Is `name` assigned at the top level of `file`? A top-level block's
+ * assignment writes a top-level variable only when its own file has it
+ * (bc_is_file_global in bc_compiler.c). */
+static int toplevel_in_file(CodeGen *cg, const char *name, const char *file) {
+    NodeList *stmts = &cg->program->as.program.stmts;
+    for (int i = 0; i < stmts->count; i++) {
+        AstNode *stmt = stmts->items[i];
+        if (stmt->type != NODE_ASSIGN || strcmp(stmt->as.assign.name, name) != 0) continue;
+        if (stmt->file == file || (stmt->file && file && strcmp(stmt->file, file) == 0)) return 1;
+    }
+    return 0;
+}
+
 /* A local of the function being emitted, for assignment purposes: in method
  * context (see cur_method_ctx) the top-level variables don't count */
 static int is_fn_local(CodeGen *cg, const char *name) {
@@ -1573,6 +1586,24 @@ static void emit_slot_fallback_decls(CodeGen *cg, NodeList *body) {
     }
 }
 
+/* At entry to a top-level block: an assignment to a name that is only another
+ * file's top-level variable makes a local of the block, declared here so it
+ * hides the file-scope static for the whole body (and for nested blocks,
+ * which capture it) */
+static void emit_shadow_decls(CodeGen *cg, NodeList *body) {
+    for (int i = 0; i < body->count; i++) {
+        AstNode *stmt = body->items[i];
+        if (!stmt || stmt->type != NODE_ASSIGN) continue;
+        const char *name = stmt->as.assign.name;
+        if (!is_toplevel_var(cg, name) || is_builtin_global(name) ||
+            toplevel_in_file(cg, name, stmt->file))
+            continue;
+        fprintf(cg->out, "    ClayValue %s = CLAY_NIL;\n", c_safe_name(name));
+        push_local(cg, name);
+        fn_track_var(cg, name);
+    }
+}
+
 /* Store val into variable `name` (a C local or its cell), releasing the old
  * value. `extra` retains are emitted first (see the ownership notes). */
 static void emit_var_store(CodeGen *cg, const char *name, const char *val, int extra) {
@@ -2018,6 +2049,9 @@ static void emit_method_bodies(CodeGen *cg) {
             /* Inside a method: new bare assignments may resolve to self's slots */
             if (cg->in_method && is_boxed(cg, "_method_self"))
                 emit_slot_fallback_decls(cg, &node->as.block.body);
+            /* In a top-level block: other files' variables aren't assigned */
+            if (!cur_method_ctx)
+                emit_shadow_decls(cg, &node->as.block.body);
             int saved_indent = cg->indent;
             cg->indent = 1;
             for (int i = 0; i < node->as.block.body.count; i++) {
@@ -2154,6 +2188,7 @@ static void collect_vars(AstNode *program, FILE *out) {
 
 void codegen_emit(CodeGen *cg, AstNode *program) {
     collected_methods = NULL;
+    cg->program = program;
 
     /* Pre-walk: assign stable function names to all blocks and methods */
     free_name_table();

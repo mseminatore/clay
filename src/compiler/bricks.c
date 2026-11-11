@@ -10,6 +10,7 @@
  *   clay bricks remove <name>
  */
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -610,6 +611,17 @@ static int bricks_lock_matches(const BrickManifest *m, const BrickLock *lock) {
 
 /* --- Subcommands --- */
 
+/* snprintf for a name, URL or path that is clipped to its buffer when it is
+ * too long, as strncpy clips them elsewhere in this file. (Formatting through
+ * vsnprintf also says so to GCC, whose -Wformat-truncation reports a plain
+ * snprintf that may clip.) */
+static void clip_fmt(char *buf, size_t sz, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sz, fmt, ap);
+    va_end(ap);
+}
+
 /* The entries of bricks/, to undo a failed `bricks add` */
 #define BRICK_SNAP_MAX 512
 typedef struct {
@@ -625,7 +637,7 @@ static void brick_snap(BrickDirSnap *s) {
     if (h == INVALID_HANDLE_VALUE) return;
     do {
         if (strcmp(fd.cFileName, ".") && strcmp(fd.cFileName, "..") && s->count < BRICK_SNAP_MAX)
-            snprintf(s->names[s->count++], BRICK_MAX_NAME, "%s", fd.cFileName);
+            clip_fmt(s->names[s->count++], BRICK_MAX_NAME, "%s", fd.cFileName);
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
@@ -634,7 +646,7 @@ static void brick_snap(BrickDirSnap *s) {
     struct dirent *e;
     while ((e = readdir(d)) != NULL)
         if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..") && s->count < BRICK_SNAP_MAX)
-            snprintf(s->names[s->count++], BRICK_MAX_NAME, "%s", e->d_name);
+            clip_fmt(s->names[s->count++], BRICK_MAX_NAME, "%s", e->d_name);
     closedir(d);
 #endif
 }
@@ -751,7 +763,7 @@ static void split_url_parts(const char *url,
         }
     } else {
         /* No subpath — simple repo URL */
-        snprintf(clone_url, url_sz, "%s%s", prefix, path_start);
+        clip_fmt(clone_url, url_sz, "%s%s", prefix, path_start);
     }
 }
 
@@ -805,7 +817,7 @@ static void url_to_name(const char *url, char *name, size_t sz) {
         /* Monorepo: name = repo-name/subpath */
         char repo[BRICK_MAX_NAME];
         url_to_repo_name(url, repo, sizeof(repo));
-        snprintf(name, sz, "%s/%s", repo, subpath);
+        clip_fmt(name, sz, "%s/%s", repo, subpath);
     } else {
         /* Simple: last segment of URL */
         char tmp[BRICK_MAX_PATH];
@@ -973,7 +985,7 @@ static int install_dep(const char *url, const char *name) {
         struct stat st;
         if (stat(repo_dest, &st) != 0) {
             /* Clone the repo (first sub-brick from this repo) */
-            char cmd[2048];
+            char cmd[BRICK_MAX_PATH * 2 + 64];
             snprintf(cmd, sizeof(cmd), "git clone --quiet --recurse-submodules \"%s\" \"%s\"",
                      clone_url, repo_dest);
             printf("  Cloning %s into %s...\n", clone_url, repo_dest);
@@ -1019,7 +1031,7 @@ static int install_dep(const char *url, const char *name) {
         return install_subdeps(dest, name);
     }
 
-    char cmd[2048];
+    char cmd[BRICK_MAX_PATH * 2 + 64];
     snprintf(cmd, sizeof(cmd), "git clone --quiet --recurse-submodules \"%s\" \"%s\"", clone_url, dest);
     printf("  Installing %s from %s...\n", name, clone_url);
     if (system(cmd) != 0) {
@@ -1037,7 +1049,7 @@ static void brick_install_dir(const char *url, const char *name, char *out, size
                     subpath, sizeof(subpath), ref, sizeof(ref));
     char repo_dir[BRICK_MAX_PATH];
     dep_repo_dir(url, name, repo_dir, sizeof(repo_dir));
-    if (subpath[0]) snprintf(out, sz, "%.*s/%s", (int)(sz / 2), repo_dir, subpath);
+    if (subpath[0]) clip_fmt(out, sz, "%.*s/%s", (int)(sz / 2), repo_dir, subpath);
     else snprintf(out, sz, "%s", repo_dir);
 }
 
@@ -1335,7 +1347,7 @@ static int cmd_info(const char *wanted) {
  * when it's added, and ask when someone is there to answer (a terminal). Returns 1 to
  * go ahead. */
 static int native_consent(const char *url, const char *name, const char *dir, int yes) {
-    char mpath[BRICK_MAX_PATH * 2];
+    char mpath[BRICK_MAX_PATH * 2 + 16];
     snprintf(mpath, sizeof(mpath), "%s/brick.json", dir);
     static BrickManifest m;
     if (brick_parse(mpath, &m) != 0 || !m.native.plugin[0]) return 1;
@@ -1375,7 +1387,7 @@ static int cmd_add(const char *url, const char *as, int yes) {
             fprintf(stderr, "error: invalid brick name '%s'\n", as);
             return 1;
         }
-        if (subpath[0]) snprintf(name, sizeof(name), "%s/%s", as, subpath);
+        if (subpath[0]) clip_fmt(name, sizeof(name), "%s/%s", as, subpath);
         else snprintf(name, sizeof(name), "%s", as);
     }
     if (!brick_safe_path(name, 1)) {
@@ -1477,7 +1489,8 @@ static int cmd_remove(const char *name) {
 #else
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", repo_dir);
 #endif
-        system(cmd);
+        int rc = system(cmd);     /* nothing there to remove is fine too */
+        (void)rc;
     }
     bricks_write_lock(&m);
     return 0;
@@ -1537,12 +1550,13 @@ static int update_dep(const char *url, const char *name, int *changed) {
         }
         snprintf(cmd, sizeof(cmd), "git -C \"%s\" checkout --quiet \"%s\"",
                  git_dir, ref);
-        system(cmd);
+        rc = system(cmd);         /* git says so if the ref can't be checked out */
+        (void)rc;
         sync_submodules(git_dir);
     } else {
         /* fetch, then move to the remote's default branch: a checkout made
          * from brick.lock is on a detached HEAD, where `git pull` fails */
-        char cmd[2048];
+        char cmd[BRICK_MAX_PATH * 2 + 128];
         snprintf(cmd, sizeof(cmd),
                  "git -C \"%s\" fetch --quiet origin && git -C \"%s\" checkout --quiet --detach origin/HEAD",
                  git_dir, git_dir);

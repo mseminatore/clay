@@ -1,0 +1,62 @@
+// A top-level block assigns a top-level variable only when the variable is
+// assigned at the top level of the block's own file. A name that only another
+// file has at its top level is the block's own variable.
+import("scope_lib.clay")
+
+TestFails = Object clone {
+    count = 0
+    check(cond, msg) {
+        cond ifTrue { ("PASS: " + msg) println } ifFalse {
+            ("FAIL: " + msg) println
+            self count = self count + 1
+        }
+    }
+}
+
+total = 100
+counter = 1
+first = "first"
+shared = "main"
+
+// a library block that happens to use the program's names
+TestFails check((libSum value([1, 2, 3])) == 6, "library block computes with its own variable")
+TestFails check(total == 100, "library block's variable leaves the program's alone")
+TestFails check((libNested value) == 42, "nested library block has its own variable")
+TestFails check(counter == 1, "nested library block leaves the program's variable alone")
+TestFails check((libPair value) == 30, "destructuring in a library block")
+TestFails check(first == "first", "destructuring leaves the program's variable alone")
+TestFails check((LibBox fill(21)) == 42, "library setMethod block")
+TestFails check(LibBox value == 42 && total == 100, "setMethod block's variable is its own")
+
+// a library block still writes its own file's variables
+libSum value([4])
+TestFails check((libCallCount value) == 2, "library block updates its file's variable")
+TestFails check(libCalls == 2, "which the program can read")
+
+// and a block reads any file's
+readsLib = { libCalls + 1 }
+TestFails check((readsLib value) == 3, "a block reads the library's variable")
+
+// the program's blocks write the program's variables
+bump = { total = total + 1; counter = counter + 1 }
+bump value
+TestFails check(total == 101 && counter == 2, "a block updates its own file's variables")
+[1, 2, 3] each { |n| total = total + n }
+TestFails check(total == 107, "an each block updates its own file's variable")
+
+// but not the library's: libCalls is assigned only in scope_lib.clay
+shadow = { libCalls = 99; libCalls }
+TestFails check((shadow value) == 99, "a block's variable named like a library's")
+TestFails check(libCalls == 2, "leaves the library's variable alone")
+
+// a name both files assign at their top level is one variable for both
+TestFails check((libShared value) == "set by lib", "library block sets a variable both files have")
+TestFails check(shared == "set by lib", "and the program sees it")
+{ shared = "set by main" } value
+TestFails check(shared == "set by main", "the program's block sets it too")
+
+(TestFails count > 0) ifTrue {
+    ((TestFails count) toString + " failed") println
+    System exit(1)
+}
+"all file scope tests passed" println

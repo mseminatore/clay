@@ -54,8 +54,11 @@ typedef struct {
     int     chunk_count;
     int     chunk_capacity;
 
-    /* Compile-time global name tracking (for resolving user globals in methods) */
+    /* Compile-time global name tracking (for resolving user globals in methods).
+     * One entry per (name, file whose top level assigns it): a top-level
+     * block only writes the globals of its own file. */
     char **known_globals;
+    char **known_global_files;   /* parallel to known_globals; NULL = no file */
     int    known_global_count;
     int    known_global_capacity;
 

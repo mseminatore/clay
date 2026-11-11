@@ -354,6 +354,7 @@ add_test(NAME clay_test_range_slice COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE
 add_test(NAME clay_test_enum COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_enum.clay)
 add_test(NAME clay_test_op_overload COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_op_overload.clay)
 add_test(NAME clay_test_ns_import COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_ns_import.clay)
+add_test(NAME clay_test_file_scope COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_file_scope.clay)
 add_test(NAME clay_test_destructure COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_destructure.clay)
 add_test(NAME clay_test_base64 COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_base64.clay)
 add_test(NAME clay_test_url COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_url.clay)
@@ -457,6 +458,16 @@ add_test(NAME clay_selfhost_run
              -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_run.cmake)
 set_tests_properties(clay_selfhost_run PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
+# clayc bricks (selfhost/clay-bricks) does what clay bricks does, against git
+# repositories made by the test (no network)
+add_test(NAME clay_selfhost_bricks
+         COMMAND ${CMAKE_COMMAND}
+             -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/selfhost_bricks
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_bricks.cmake)
+set_tests_properties(clay_selfhost_bricks PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost")
 # Bootstrap: clayc (selfhost/clayc.clay) compiles itself to a fixpoint. Needs
 # a cc-style clay-native.cfg (clayc doesn't drive MSVC yet).
 if(NOT MSVC)

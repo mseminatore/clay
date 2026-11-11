@@ -131,7 +131,7 @@ BcGen = Object clone {
     strIdx = nil           // string constant -> its first index
     chunkList = nil        // compiled chunks (BcChunk-like arrays, see chunkRecord)
     methodList = nil       // method slots: [chunkId, paramCount, name]
-    globalsKnown = nil     // top-level variable names seen so far
+    globalsKnown = nil     // top-level variable name -> the files that assign it
     constBase = 0          // the VM's counts when this BcGen started
     chunkBase = 0
     methodBase = 0
@@ -250,7 +250,22 @@ BcGen = Object clone {
         (vmStartGlobals contains(n)) || (pluginNames contains(n))
     }
 
-    registerGlobal(n) { globalsKnown set(n, true) }
+    // a top-level variable of `file`: a top-level block's assignment writes a
+    // global only then (a global the VM alone has counts for every file)
+    isFileGlobal(n, file) {
+        files = globalsKnown get(n)
+        (files != nil) ifTrue { return files contains(file) }
+        self isUserGlobal(n)
+    }
+
+    registerGlobal(n, file) {
+        files = globalsKnown get(n)
+        (files == nil) ifTrue {
+            files = []
+            globalsKnown set(n, files)
+        }
+        (files contains(file)) ifFalse { files push(file) }
+    }
 
     resolveLocal(n) {
         i = locs size - 1
@@ -458,9 +473,10 @@ BcGen = Object clone {
     }
 
     // locals created by bare assignments in a method body (or a block): not
-    // builtins, slots of the enclosing clone body or (outside methods) globals
-    preregisterName(nm) {
-        ((self isBuiltin(nm)) == false && (inMeth || (self isUserGlobal(nm)) == false) &&
+    // builtins, slots of the enclosing clone body or (outside methods) the
+    // top-level variables of the statement's own file
+    preregisterName(nm, file) {
+        ((self isBuiltin(nm)) == false && (inMeth || (self isFileGlobal(nm, file)) == false) &&
          (self isKnownSlot(nm)) == false && (self resolveLocal(nm)) < 0) ifTrue {
             self addLocal(nm)
         }
@@ -468,9 +484,9 @@ BcGen = Object clone {
 
     preregister(body) {
         body each { |st|
-            (st != nil && st kind == "Assign") ifTrue { self preregisterName(st name) }
+            (st != nil && st kind == "Assign") ifTrue { self preregisterName(st name, st file) }
             (st != nil && st kind == "Destructure") ifTrue {
-                st items each { |t| self preregisterName(t name) }
+                st items each { |t| self preregisterName(t name, st file) }
             }
         }
     }
@@ -964,7 +980,7 @@ BcGen = Object clone {
             self expr(n)
             return self emitOp(POP)
         }
-        self registerGlobal(nm)
+        self registerGlobal(nm, n file)
         self pushString(nm)
         self expr(n value)
         self native(N_STORE_GLOBAL, 2)
@@ -993,7 +1009,7 @@ BcGen = Object clone {
         stmts = program items
         stmts each { |st|
             (st kind == "Assign" && (self isBuiltin(st name)) == false) ifTrue {
-                self registerGlobal(st name)
+                self registerGlobal(st name, st file)
             }
         }
         i = 0
