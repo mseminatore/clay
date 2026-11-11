@@ -592,9 +592,31 @@ static ClayValue system_platform(ClayObject *self, int argc, ClayValue *argv) {
 #endif
 }
 
+/* Milliseconds on a monotonic wall clock: elapsed time, not CPU time, so it
+ * keeps counting while the program waits and doesn't run fast with threads */
+static long long monotonic_ms(void) {
+#ifdef _WIN32
+    /* declared by hand: windows.h conflicts with this file (see clay_bootstrap) */
+    extern __declspec(dllimport) int __stdcall QueryPerformanceCounter(long long *);
+    extern __declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long *);
+    static long long freq = 0;
+    long long now = 0;
+    if (freq == 0) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return freq > 0 ? (long long)((double)now * 1000.0 / (double)freq) : 0;
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+#endif
+}
+
+static long long clock_start = 0;   /* set by clay_bootstrap */
+
+/* System clock: milliseconds since the program started */
 static ClayValue system_clock(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
-    return clay_int((intptr_t)(clock() * 1000 / CLOCKS_PER_SEC));
+    return clay_int((intptr_t)(monotonic_ms() - clock_start));
 }
 
 void clay_bootstrap(void) {
@@ -622,6 +644,8 @@ void clay_bootstrap(void) {
             SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
 #endif
+    if (clock_start == 0) clock_start = monotonic_ms();
+
     /* Create root Object prototype */
     clay_Object = clay_object_new();
     clay_Object->refcount = CLAY_REFCOUNT_IMMORTAL; /* never freed */

@@ -44,6 +44,15 @@ i = 0
 t2 = System clock()
 assert value(t2 >= t1, "clock should not go backwards")
 
+// Test 5b: clock measures elapsed time, not CPU time: it advances while waiting
+(System platform != "windows") ifTrue {
+    t1 = System clock()
+    System run("sleep 0.2")
+    waited = System clock() - t1
+    assert value(waited >= 150, "clock should advance while the program waits")
+    assert value(waited < 5000, "clock should be in milliseconds")
+}
+
 // Test 6: args returns an array of the arguments after the script name
 // (none here)
 a = System args()
