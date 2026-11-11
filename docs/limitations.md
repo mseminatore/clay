@@ -23,6 +23,33 @@ Sub show println               // ./local.conf
 Write `self path` to read such a slot explicitly, or redeclare it in the
 clone body.
 
+**Top-level variables are shared by every file, and a top-level block's variables can be
+among them.** `import` has no file scope: the top-level variables of a program and of
+everything it imports, bricks included, are one set of globals. A block written at the top
+level of any of those files keeps a variable to itself only if no file assigns that name at
+its top level; otherwise its assignment writes the global:
+
+```clay norun
+// lib.clay
+sum = { |list|
+    total = 0                  // meant as the block's own variable
+    list each { |n| total = total + n }
+    total
+}
+
+// main.clay
+import("lib.clay")
+total = 100
+sum value([1, 2, 3])
+total println                  // 6, not 100
+```
+
+Methods don't have this problem: an assignment in a method, or in a block inside one, never
+changes a top-level variable. So in a brick, put the code in methods of an object (a block
+installed with `setMethod` can just call one), and keep the brick's own top-level names few and
+distinctive. `import("lib.clay") as Lib` gives the importer a namespace to read, but the
+imported file's top-level variables are still created as globals.
+
 **A method takes at most 16 parameters.** A 17th parameter isn't bound: using
 it fails with `object does not understand 'a16'`. Pass a Dict or an object
 instead of a long parameter list.
