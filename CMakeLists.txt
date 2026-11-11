@@ -357,6 +357,7 @@ add_test(NAME clay_test_ns_import COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME clay_test_file_scope COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_file_scope.clay)
 add_test(NAME clay_test_stack_overflow COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_stack_overflow.clay)
 add_test(NAME clay_test_recursion_depth COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_recursion_depth.clay)
+add_test(NAME clay_test_fiber_alignment COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber_alignment.clay)
 # CLAY_STACK_MB sets the size of the program's stack: with 1 MB the same recursion overflows
 add_test(NAME clay_stack_size_env COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_recursion_depth.clay)
 set_tests_properties(clay_stack_size_env PROPERTIES

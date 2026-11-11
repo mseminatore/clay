@@ -5,8 +5,16 @@
  *   rdi = old_ctx (clay_fiber_regs_t *)
  *   rsi = new_ctx (clay_fiber_regs_t *)
  *
- * Saves callee-saved regs + rsp + return address to old_ctx,
- * restores from new_ctx, then "returns" into the new context.
+ * Saves callee-saved regs + the rsp the caller has after this call returns
+ * + the return address to old_ctx, restores from new_ctx, then "returns"
+ * into the new context.
+ *
+ * The saved rsp is the one *after* the return (the slot holding the return
+ * address popped): resuming must leave the stack exactly as a ret would,
+ * 16-byte aligned for the caller's next call. (Restoring the slot's own
+ * address left every resumed function 8 bytes off, and code that stores
+ * SSE registers to the stack with aligned moves, such as glibc's snprintf,
+ * faults on real hardware.)
  *
  * Register layout in clay_fiber_regs_t (8 bytes each):
  *   [0x00] rbx  [0x08] rbp  [0x10] r12  [0x18] r13
@@ -32,8 +40,9 @@ clay_fiber_swap:
     movq %r13,  0x18(%rdi)
     movq %r14,  0x20(%rdi)
     movq %r15,  0x28(%rdi)
-    movq %rsp,  0x30(%rdi)
-    /* Save return address (on top of stack) */
+    /* Save the stack pointer as it is after a return, and the return address */
+    leaq 8(%rsp), %rax
+    movq %rax,  0x30(%rdi)
     movq (%rsp), %rax
     movq %rax,  0x38(%rdi)
 
