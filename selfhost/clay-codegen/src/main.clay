@@ -1408,7 +1408,7 @@ CodeGen = Object clone {
 
         self methodBodies
 
-        out push("\nint main(int argc, char **argv) {\n")
+        out push("\nstatic int clay_program_main(int argc, char **argv) {\n")
         out push("    clay_bootstrap();\n")
         out push("    clay_set_args(argc - 1, argv + 1);\n")
         out push("    clay_source_file = \"" + (CNames pathBody(sourceFile)) + "\";\n")
@@ -1420,6 +1420,10 @@ CodeGen = Object clone {
         mainBody each { |c| out push(c) }
         out push("\n    clay_shutdown();\n")
         out push("    return 0;\n")
+        out push("}\n")
+        // the program runs on a thread with a big stack (CLAY_STACK_MB)
+        out push("\nint main(int argc, char **argv) {\n")
+        out push("    return clay_run_with_stack(clay_program_main, argc, argv);\n")
         out push("}\n")
         out join("")
     }

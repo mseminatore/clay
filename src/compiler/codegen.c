@@ -2270,7 +2270,7 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
     emit_method_bodies(cg);
 
     /* Emit main function */
-    fprintf(cg->out, "\nint main(int argc, char **argv) {\n");
+    fprintf(cg->out, "\nstatic int clay_program_main(int argc, char **argv) {\n");
     fprintf(cg->out, "    clay_bootstrap();\n");
     fprintf(cg->out, "    clay_set_args(argc - 1, argv + 1);\n");
     fprintf(cg->out, "    clay_source_file = \"");
@@ -2303,6 +2303,10 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
 
     fprintf(cg->out, "\n    clay_shutdown();\n");
     fprintf(cg->out, "    return 0;\n");
+    fprintf(cg->out, "}\n");
+    /* the program runs on a thread with a big stack (CLAY_STACK_MB) */
+    fprintf(cg->out, "\nint main(int argc, char **argv) {\n");
+    fprintf(cg->out, "    return clay_run_with_stack(clay_program_main, argc, argv);\n");
     fprintf(cg->out, "}\n");
 
     free_name_table();
