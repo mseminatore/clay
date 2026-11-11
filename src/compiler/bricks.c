@@ -385,6 +385,95 @@ int brick_write(const char *path, const BrickManifest *m) {
     return 0;
 }
 
+/* Update the "deps" of an existing brick.json and nothing else: the other
+ * fields (name, license, ...), the native section with its per-platform lists,
+ * the key order and the formatting stay as they are. A file without "deps"
+ * gets one added after its last field. Returns 0, or -1 if the file can't be
+ * read, isn't a JSON object or can't be written. */
+static int brick_save_deps(const char *path, const BrickManifest *m) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END);
+    long flen = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = flen < 0 ? NULL : (char *)malloc((size_t)flen + 1);
+    if (!buf) { fclose(f); return -1; }
+    size_t len = fread(buf, 1, (size_t)flen, f);
+    buf[len] = '\0';
+    fclose(f);
+
+    /* find the value of the top-level "deps", and the object's closing brace */
+    const char *p = skip_ws(buf);
+    const char *vstart = NULL, *vend = NULL, *key_at = NULL;
+    if (*p != '{') { free(buf); return -1; }
+    p = skip_ws(p + 1);
+    while (p && *p && *p != '}') {
+        const char *kstart = p;
+        char key[128] = "";
+        p = parse_string(p, key, sizeof(key));
+        if (!p) break;
+        p = skip_ws(p);
+        if (*p != ':') { p = NULL; break; }
+        p = skip_ws(p + 1);
+        const char *vs = p;
+        p = skip_value(p);
+        if (!p) break;
+        if (strcmp(key, "deps") == 0 && !vstart) { vstart = vs; vend = p; key_at = kstart; }
+        p = skip_ws(p);
+        if (*p == ',') p = skip_ws(p + 1);
+    }
+    if (!p || *p != '}') { free(buf); return -1; }
+    const char *close = p;
+
+    /* line ends and indentation as the file has them */
+    const char *nl = "\n";
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n') { if (i > 0 && buf[i - 1] == '\r') nl = "\r\n"; break; }
+    char indent[32] = "  ";
+    if (key_at) {
+        const char *ls = key_at;
+        while (ls > buf && ls[-1] != '\n' && (ls[-1] == ' ' || ls[-1] == '\t')) ls--;
+        if (ls == buf || ls[-1] == '\n') {
+            size_t n = (size_t)(key_at - ls);
+            if (n < sizeof(indent) - 3) { memcpy(indent, ls, n); indent[n] = '\0'; }
+        }
+    }
+
+    /* the new "deps" object */
+    size_t cap = 256;
+    for (int i = 0; i < m->dep_count; i++)
+        cap += strlen(m->deps[i].name) + strlen(m->deps[i].url) + 2 * strlen(indent) + 16;
+    char *deps = (char *)malloc(cap + 2 * strlen(nl));
+    if (!deps) { free(buf); return -1; }
+    size_t n = 0;
+    n += (size_t)snprintf(deps + n, cap - n, "{");
+    for (int i = 0; i < m->dep_count; i++)
+        n += (size_t)snprintf(deps + n, cap - n, "%s%s%s  \"%s\": \"%s\"",
+                              i > 0 ? "," : "", nl, indent, m->deps[i].name, m->deps[i].url);
+    if (m->dep_count > 0) n += (size_t)snprintf(deps + n, cap - n, "%s%s", nl, indent);
+    n += (size_t)snprintf(deps + n, cap - n, "}");
+
+    FILE *out = fopen(path, "wb");
+    if (!out) { free(deps); free(buf); return -1; }
+    if (vstart) {
+        fwrite(buf, 1, (size_t)(vstart - buf), out);
+        fwrite(deps, 1, n, out);
+        fputs(vend, out);
+    } else {
+        const char *q = close;
+        while (q > buf && (q[-1] == ' ' || q[-1] == '\t' || q[-1] == '\n' || q[-1] == '\r')) q--;
+        int comma = q[-1] != '{' && q[-1] != ',';
+        fwrite(buf, 1, (size_t)(q - buf), out);
+        fprintf(out, "%s%s%s\"deps\": ", comma ? "," : "", nl, indent);
+        fwrite(deps, 1, n, out);
+        fputs(q, out);
+    }
+    int rc = fclose(out) == 0 ? 0 : -1;
+    free(deps);
+    free(buf);
+    return rc;
+}
+
 /* --- Lockfile support --- */
 
 #define BRICK_LOCK_VERSION 1
@@ -1429,7 +1518,10 @@ static int cmd_add(const char *url, const char *as, int yes) {
     BrickDep *dep = &m.deps[m.dep_count++];
     strncpy(dep->name, name, sizeof(dep->name) - 1);
     strncpy(dep->url, url, sizeof(dep->url) - 1);
-    brick_write("brick.json", &m);
+    if (brick_save_deps("brick.json", &m) != 0) {
+        fprintf(stderr, "error: cannot update brick.json\n");
+        return 1;
+    }
     printf("Added '%s' to brick.json\n", name);
     bricks_write_lock(&m);
     return 0;
@@ -1468,7 +1560,10 @@ static int cmd_remove(const char *name) {
         m.deps[i] = m.deps[i + 1];
     }
     m.dep_count--;
-    brick_write("brick.json", &m);
+    if (brick_save_deps("brick.json", &m) != 0) {
+        fprintf(stderr, "error: cannot update brick.json\n");
+        return 1;
+    }
     printf("Removed '%s' from brick.json\n", name);
 
     /* Delete the checkout unless another dependency still lives in it */

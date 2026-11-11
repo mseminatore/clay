@@ -36,6 +36,11 @@ A dependency's name — its key in `deps` — is what you import and the directo
 (`bricks/some-lib`). `clay bricks add` takes the name from the repository unless you give one, so a
 repository called `clay-foo` can be imported as plain `foo`.
 
+`clay bricks add` and `remove` change only the `"deps"` object. Every other field you wrote
+(`license`, `keywords`, the `"native"` section with its per-platform lists), the order and the
+formatting stay as they are, so a hand-edited `brick.json` is safe to keep editing. Only
+`clay bricks init` writes a whole new file.
+
 A brick can also ship C code in a `"native"` section, compiled the first time it's imported: see
 [Native bricks](native-and-plugins.md#native-bricks).
 

@@ -43,6 +43,7 @@ extern int (*clayvm_dispatch_table[])(clayvm_vm_t *vm);
  */
 static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv) {
     if (!g_bc || !g_vm) return CLAY_NIL;
+    CLAY_STACK_CHECK();      /* every Clay call that recurses comes through here */
 
     /* Read chunk_id from env[0] */
     int chunk_id = (int)clay_to_int(self->as.block.env[0]);
@@ -442,6 +443,8 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     if (ms->chunk_id < 0 || ms->chunk_id >= g_bc->chunk_count) return CLAY_NIL;
 
     BcChunk *chunk = g_bc->chunks[ms->chunk_id];
+
+    CLAY_STACK_CHECK();      /* before any VM state changes: runaway recursion raises */
 
     /* Too many arguments for a method written in Clay (before any VM state
      * changes, so raising leaves the VM consistent). Fewer is fine: missing

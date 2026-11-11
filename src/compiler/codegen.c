@@ -1966,6 +1966,8 @@ static void emit_method_bodies(CodeGen *cg) {
         cg->known_slot_count = cur->clone_slot_count;
 
         if (node->type == NODE_METHOD_DEF) {
+            /* runaway recursion raises instead of overflowing the C stack */
+            fprintf(cg->out, "    CLAY_STACK_CHECK();\n");
             /* Too many arguments is an error (same as the VM); fewer is fine */
             fprintf(cg->out, "    if (argc > %d) clay_raise_arity(\"", node->as.method_def.params.count);
             for (const char *c = node->as.method_def.name; *c; c++) {
@@ -2030,6 +2032,7 @@ static void emit_method_bodies(CodeGen *cg) {
             int saved_fn_is_block = cg->fn_is_block;
             cg->fn_is_block = 1;
             cg->use_slot_recv = !capture_has(&cur->captures, "_method_self");
+            fprintf(cg->out, "    CLAY_STACK_CHECK();\n");
             if (cg->use_slot_recv)
                 fprintf(cg->out, "    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n");
             /* Declare captured variables from env as cell pointers */

@@ -11,6 +11,11 @@
  *     array, which it swaps in and out through clay_fiber_hooks (set by
  *     bc_compiler.c when the VM is created).
  */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE       /* pthread_get_stackaddr_np */
+#elif !defined(_WIN32) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE            /* pthread_getattr_np */
+#endif
 #include "clay.h"
 #include <stdlib.h>
 #include <string.h>
@@ -21,10 +26,50 @@
 #endif
 #include <windows.h>
 #else
+#include <pthread.h>
 #include "fiber_ctx.h"
 #endif
 
 #define FIBER_STACK_SIZE (256 * 1024)
+
+/* --- C stack guard (see CLAY_STACK_CHECK in clay.h) --- */
+
+CLAY_THREAD_LOCAL char *clay_stack_limit = NULL;
+
+/* the room kept below the limit for what runs after a check: natives, the
+ * error being raised, unwinding */
+static size_t stack_margin(size_t size) {
+    size_t m = size / 4;
+    return m > 128 * 1024 ? 128 * 1024 : m;
+}
+
+void clay_stack_init(void) {
+    char *lo = NULL;
+    size_t size = 0;
+#if defined(_WIN32)
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    lo = (char *)low;
+    size = (size_t)(high - low);
+#elif defined(__APPLE__)
+    pthread_t self = pthread_self();
+    size = pthread_get_stacksize_np(self);
+    lo = (char *)pthread_get_stackaddr_np(self) - size;      /* the address is the top */
+#elif defined(__linux__)
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+        void *addr = NULL;
+        if (pthread_attr_getstack(&attr, &addr, &size) == 0) lo = (char *)addr;
+        pthread_attr_destroy(&attr);
+    }
+#endif
+    if (!lo || size < 64 * 1024) { clay_stack_limit = NULL; return; }
+    clay_stack_limit = lo + stack_margin(size);
+}
+
+void clay_stack_overflow(void) {
+    clay_raise(CLAY_VAL(clay_error_new("stack overflow: recursion is too deep", "RuntimeError")));
+}
 
 const ClayFiberHooks *clay_fiber_hooks = NULL;
 
@@ -46,6 +91,7 @@ typedef struct {
     clay_fiber_regs_t fiber_regs;
     clay_fiber_regs_t caller_regs;
     char *c_stack;              /* allocated C stack */
+    char *stack_limit;          /* its clay_stack_limit while it runs (NULL: unchecked) */
 #endif
 } FiberContext;
 
@@ -63,6 +109,10 @@ static FiberContext *get_fiber_ctx(ClayObject *self) {
 
 /* --- Fiber entry functions (run on the fiber's own C stack) --- */
 static void fiber_run_block(FiberContext *ctx) {
+#ifdef _WIN32
+    clay_stack_init();                    /* this fiber's own stack */
+    ctx->stack_limit = clay_stack_limit;
+#endif
     clay_error_stack.head = NULL;  /* fiber starts with a clean error stack */
     ctx->result = ctx->block->as.block.func(ctx->block, 0, NULL);
     ctx->status = 2;
@@ -128,6 +178,7 @@ static ClayValue fiber_new(ClayObject *self, int argc, ClayValue *argv) {
     ctx->os_fiber = CreateFiber(FIBER_STACK_SIZE, fiber_entry_win, ctx);
 #else
     ctx->c_stack = (char *)malloc(FIBER_STACK_SIZE);
+    ctx->stack_limit = ctx->c_stack + stack_margin(FIBER_STACK_SIZE);
     clay_fiber_init_stack(&ctx->fiber_regs, ctx->c_stack, FIBER_STACK_SIZE,
                           fiber_entry_unix, ctx);
 #endif
@@ -155,10 +206,15 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
 
 #ifdef _WIN32
     ctx->caller_fiber = GetCurrentFiber();
+    char *caller_limit = clay_stack_limit;
+    clay_stack_limit = ctx->stack_limit;
     SwitchToFiber(ctx->os_fiber);
 #else
+    char *caller_limit = clay_stack_limit;
+    clay_stack_limit = ctx->stack_limit;
     clay_fiber_swap(&ctx->caller_regs, &ctx->fiber_regs);
 #endif
+    clay_stack_limit = caller_limit;
 
     /* Back here after yield() or completion */
     g_current_fiber = prev;

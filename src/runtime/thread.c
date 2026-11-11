@@ -75,6 +75,8 @@ static void *thread_worker(void *arg) {
 #endif
     FutureData *fd = (FutureData *)arg;
 
+    clay_stack_init();       /* this thread's own C stack */
+
     /* Each worker thread needs its own VM context */
     if (g_thread_vm_init) {
         g_thread_vm_init();
@@ -238,6 +240,7 @@ static void *pmap_chunk_worker(void *arg) {
 #endif
     PMapChunkArg *ca = (PMapChunkArg *)arg;
 
+    clay_stack_init();
     if (g_thread_vm_init) g_thread_vm_init();
 
     for (size_t i = ca->start; i < ca->end; i++) {

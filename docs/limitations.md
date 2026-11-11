@@ -45,6 +45,12 @@ distinctive, typically just the objects it provides. `import("lib.clay") as Lib`
 importer a namespace to read, but the imported file's top-level variables are still created
 as globals.
 
+**Recursion depth is limited by the C stack.** Every Clay method or block call that
+recurses uses C stack, so roughly 2,000 nested method calls (about 1,000 through blocks, and
+far fewer inside a fiber, which has a 256 KB stack) end with a `RuntimeError`, "stack
+overflow: recursion is too deep", that `try`/`catch` can handle. There is no tail-call
+elimination: loop with `whileTrue` or `each` instead of recursing for long sequences.
+
 **A method takes at most 16 parameters.** A 17th parameter isn't bound: using
 it fails with `object does not understand 'a16'`. Pass a Dict or an object
 instead of a long parameter list.

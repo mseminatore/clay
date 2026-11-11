@@ -70,6 +70,16 @@ intptr_t  clay_int_mul(intptr_t a, intptr_t b);   /* product; raises on overflow
 intptr_t  clay_float_to_int(float f);  /* truncate; raises OverflowError if out of range */
 void      clay_raise_overflow(void);
 
+/* C stack guard: the lowest address a call may reach before the stack is too
+ * full to go on (NULL: unknown, no check). Set per thread and per fiber, so a
+ * runaway recursion raises a RuntimeError instead of crashing. */
+extern CLAY_THREAD_LOCAL char *clay_stack_limit;
+void      clay_stack_init(void);        /* the current thread's limit (bootstrap, thread start) */
+void      clay_stack_overflow(void);    /* raises RuntimeError; does not return */
+#define CLAY_STACK_CHECK() \
+    do { char _clay_probe; \
+         if (clay_stack_limit && &_clay_probe < clay_stack_limit) clay_stack_overflow(); } while (0)
+
 /* Argument helpers for native methods: return argv[i] converted, or raise —
  * ArgumentError if the argument is missing, TypeError if it has the wrong
  * type. `who` names the method in the message, e.g. "Math sqrt". */

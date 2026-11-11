@@ -273,6 +273,75 @@ both(remove nope)
 both(remove mono2/text)
 same_state("after remove")
 
+# add and remove change only "deps": other fields, the native section with its
+# per-platform lists, the key order and the formatting stay as written
+macro(expect_in_file text)
+    file(READ "${WORK}/clay/proj/brick.json" json_now)
+    string(FIND "${json_now}" "${text}" at)
+    if(at LESS 0)
+        list(APPEND failed "brick.json lost: ${text}")
+        message("--- brick.json lost \"${text}\":\n${json_now}")
+    endif()
+endmacro()
+
+write_both(brick.json "{
+  \"name\": \"p\",
+  \"license\": \"MIT\",
+  \"keywords\": [\"a\", \"b\"],
+  \"deps\": {
+    \"lib-b\": \"example.test/acme/lib-b\"
+  },
+  \"native\": { \"plugin\": \"p\", \"sources\": [\"a.c\"], \"libs-linux\": [\"-lm\"], \"libs-macos\": [\"-lm\"], \"libs-windows\": [] },
+  \"x\": 1
+}
+")
+remove_both(bricks brick.lock)
+both(add example.test/acme/lib-a)
+expect("Added 'lib-a' to brick.json")
+expect_in_file("\"license\": \"MIT\",")
+expect_in_file("\"libs-linux\": [\"-lm\"], \"libs-macos\": [\"-lm\"], \"libs-windows\": []")
+expect_in_file("    \"lib-a\": \"example.test/acme/lib-a\"")
+both(remove lib-b)
+expect_in_file("\"keywords\": [\"a\", \"b\"],")
+expect_in_file("\"x\": 1")
+same_state("after add and remove in a manifest with other fields")
+# no "deps" at all, a one-line manifest, and one with Windows line ends
+write_both(brick.json "{ \"name\": \"p\", \"license\": \"MIT\" }\n")
+remove_both(bricks brick.lock)
+both(add example.test/acme/lib-b)
+expect_in_file("\"license\": \"MIT\",")
+expect_in_file("\"deps\": {")
+both(remove lib-b)
+expect_in_file("\"deps\": {}")
+same_state("after add and remove in a manifest without deps")
+write_both(brick.json "{\r\n  \"name\": \"p\",\r\n  \"license\": \"MIT\"\r\n}\r\n")
+remove_both(bricks brick.lock)
+both(add example.test/acme/lib-b)
+same_state("after add in a manifest with Windows line ends")
+# (read_state drops \r, so look at the files themselves: same bytes, and
+# every line end still \r\n)
+file(READ "${WORK}/clay/proj/brick.json" crlf_a HEX)
+file(READ "${WORK}/clayc/proj/brick.json" crlf_b HEX)
+string(REGEX REPLACE "(..)" "\\1;" crlf_bytes "${crlf_a}")
+set(crlf_ok TRUE)
+if(NOT crlf_a STREQUAL crlf_b)
+    set(crlf_ok FALSE)
+endif()
+set(prev "")
+foreach(byte ${crlf_bytes})
+    if(byte STREQUAL "0a" AND NOT prev STREQUAL "0d")
+        set(crlf_ok FALSE)          # a bare \n
+    endif()
+    set(prev "${byte}")
+endforeach()
+if(NOT crlf_a MATCHES "6c69622d62")      # "lib-b": the new dependency is in
+    set(crlf_ok FALSE)
+endif()
+if(NOT crlf_ok)
+    list(APPEND failed "Windows line ends in brick.json")
+    message("--- Windows line ends (hex): clay ---\n${crlf_a}\n--- clayc ---\n${crlf_b}")
+endif()
+
 # a brick.json as loosely written as the reader allows, then rewritten
 write_both(brick.json "{ \"name\": \"p\", \"version\": \"2\", \"deps\": { \"lib-b\": \"example.test/acme/lib-b\" \"cyc-a\": \"example.test/acme/cyc-a\", },
   \"native\": { \"plugin\": \"p\", \"sources\": [\"a.c\"], \"cflags\": [\"-O2\", \"-I@/inc\"], \"libs\": [] },

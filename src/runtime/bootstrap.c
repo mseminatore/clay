@@ -397,16 +397,35 @@ static ClayValue nil_neq(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 /* Console methods */
-/* Console readLine / readLine(prompt) — one line of input without its line
- * end, nil at end of input. With a prompt, a terminal gets line editing and
- * history (crossline). */
+/* A colour name for readLine's prompt: black, red, green, yellow, blue,
+ * magenta, cyan, white or default; -1 if it is none of them */
+static int prompt_color(const char *name) {
+    static const char *names[] = { "default", "black", "red", "green", "yellow",
+                                   "blue", "magenta", "cyan", "white" };
+    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++)
+        if (strcmp(name, names[i]) == 0) return i;      /* CROSSLINE_FGCOLOR_* in this order */
+    return -1;
+}
+
+/* Console readLine / readLine(prompt) / readLine(prompt, color) — one line of
+ * input without its line end, nil at end of input. With a prompt, a terminal
+ * gets line editing and history (crossline); color names the prompt's colour.
+ * (Escape codes inside the prompt would be counted as visible characters and
+ * put the cursor in the wrong place; this is how to colour it.) */
 static ClayValue console_readLine(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     char buf[4096];
     if (argc > 0 && CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING)) {
+        int color = CROSSLINE_FGCOLOR_DEFAULT;
+        if (argc > 1 && CLAY_IS_TYPE(argv[1], CLAY_TYPE_STRING)) {
+            color = prompt_color(clay_string_data(CLAY_OBJ(argv[1])));
+            if (color < 0) clay_raise_argument_error("Console readLine", "unknown prompt colour");
+        }
         fflush(stdout);
-        if (!crossline_readline(clay_string_data(CLAY_OBJ(argv[0])), buf, (int)sizeof(buf)))
-            return CLAY_NIL;
+        crossline_prompt_color_set((crossline_color_e)color);
+        char *line = crossline_readline(clay_string_data(CLAY_OBJ(argv[0])), buf, (int)sizeof(buf));
+        crossline_prompt_color_set(CROSSLINE_FGCOLOR_DEFAULT);
+        if (!line) return CLAY_NIL;
         return CLAY_VAL(clay_string_new(buf));
     }
     if (fgets(buf, sizeof(buf), stdin)) {
@@ -628,6 +647,7 @@ static ClayValue system_clock(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 void clay_bootstrap(void) {
+    clay_stack_init();       /* the main thread's C stack, for CLAY_STACK_CHECK */
 #ifdef _WIN32
     /* Enable UTF-8 output and ANSI color sequences on Windows console */
     {

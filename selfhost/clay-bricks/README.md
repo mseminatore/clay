@@ -20,5 +20,5 @@ change the program name used in messages.
 
 See the comment at the top of `src/main.clay` for the few differences from
 `bricks.c` (git runs without a shell, the registry JSON is read by a small
-parser) and the quirks kept (the lenient `brick.json` reader; rewriting
-`brick.json` keeps only the fields Clay knows).
+parser) and the quirk kept (the lenient `brick.json` reader). `add` and
+`remove` change only the `"deps"` of `brick.json`, as `bricks.c` does.

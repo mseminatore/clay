@@ -276,8 +276,10 @@ ClaycRepl = Object clone {
         done = false
 
         { done == false } whileTrue {
-            // line = Console readLine((input == "") ifTrue { (self _c("36")) + ">>> " + (self _c("0")) } ifFalse { "... " })
-            line = Console readLine((input == "") ifTrue { ">>> " } ifFalse { "... " })
+            // (the colour goes to readLine, not into the prompt as escape codes:
+            // line editing would count those as visible characters)
+            prompt = (input == "") ifTrue { ">>> " } ifFalse { "... " }
+            line = (self _color) ifTrue { Console readLine(prompt, "cyan") } ifFalse { Console readLine(prompt) }
 
             (line == nil) ifTrue {
                 done = true

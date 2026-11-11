@@ -1,0 +1,55 @@
+// Runaway recursion raises a RuntimeError instead of crashing the process:
+// in methods, in blocks, inside a fiber, and the program keeps working after.
+
+failures = 0
+check = { |name, ok|
+    ok ifFalse {
+        Console print("FAIL: " + name + "\n")
+        failures = failures + 1
+    }
+}
+
+Rec = Object clone {
+    forever() { self forever() + 1 }
+    down(n) {
+        (n == 0) ifTrue { return 0 }
+        self down(n - 1)
+    }
+}
+
+// a method
+msg = try { Rec forever()
+            "no error" } catch { |e| e message }
+check value("a method overflows", msg contains("stack overflow"))
+
+// the error is a RuntimeError
+kind = try { Rec forever()
+             "none" } catch { |e| e type }
+check value("it is a RuntimeError", kind == "RuntimeError")
+
+// a recursive block
+f = nil
+f = { |n| f value(n + 1) }
+msg = try { f value(0)
+            "no error" } catch { |e| e message }
+check value("a block overflows", msg contains("stack overflow"))
+
+// ordinary recursion still works, before and after an overflow
+check value("recursion 300 deep", (Rec down(300)) == 0)
+try { Rec forever() } catch { |e| nil }
+check value("recursion 300 deep again", (Rec down(300)) == 0)
+
+// a fiber has a small C stack of its own
+fiber = Fiber new({
+    try { Rec forever()
+          "no error" } catch { |e| e message }
+})
+msg = fiber resume
+check value("a fiber overflows", msg contains("stack overflow"))
+check value("a fiber recurses normally", (Fiber new({ Rec down(30) })) resume == 0)
+
+(failures > 0) ifTrue {
+    Console print(failures toString + " checks failed\n")
+    System exit(1)
+}
+Console print("stack overflow tests passed\n")

@@ -1275,6 +1275,7 @@ CodeGen = Object clone {
         (n kind == "MethodDef") ifTrue {
             pc = n params size toString
             mname = (n name replace("\\", "\\\\")) replace("\"", "\\\"")
+            out push("    CLAY_STACK_CHECK();\n")
             out push("    if (argc > " + pc + ") clay_raise_arity(\"" + mname + "\", " + pc + ", argc);\n")
             (self hasBlockReturn(n body)) ifTrue {
                 out push("    ClayValue __ret_id = clay_return_id_next();\n" +
@@ -1312,6 +1313,7 @@ CodeGen = Object clone {
             savedIsBlock = fnIsBlock
             fnIsBlock = true
             useSlotRecv = (d captures contains("_method_self")) == false
+            out push("    CLAY_STACK_CHECK();\n")
             useSlotRecv ifTrue { out push("    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n") }
             blockBoxed = boxed size
             i = 0

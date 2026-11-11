@@ -23,9 +23,9 @@
 // Quirks kept from bricks.c:
 // - brick.json is read by a lenient parser: commas are optional, a backslash
 //   in a string just keeps the next character, long strings are clipped;
-// - rewriting brick.json (add, remove) keeps only the fields Clay knows, and
-//   folds the host platform's "sources-<platform>" (cflags, libs) lists into
-//   the plain ones.
+// - `add` and `remove` change only the "deps" of brick.json: every other
+//   field, the native section, the key order and the formatting stay as they
+//   are (BrickFiles saveDeps); `init` writes a new file.
 
 import("../../clay-parser/src/main.clay")
 
@@ -547,6 +547,80 @@ BrickFiles = Object clone {
     // false if the file can't be written
     save(path, m) {
         try { File write(path, self render(m))
+              true } catch { |e| false }
+    }
+
+    // brick_save_deps: update the "deps" of an existing brick.json and
+    // nothing else (other fields, the native section, key order and
+    // formatting stay as they are); a file without "deps" gets one after its
+    // last field. False if the file can't be read, isn't a JSON object or
+    // can't be written.
+    saveDeps(path, m) {
+        text = try { File read(path) } catch { |e| nil }
+        (text == nil) ifTrue { return false }
+        r = BrickReader new(text)
+        r ws
+        ((r peek) != 123) ifTrue { return false }
+        r skip
+        r ws
+        vstart = nil
+        vend = 0
+        keyAt = 0
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            kstart = r pos
+            key = r str(128)
+            (key == nil) ifTrue { return false }
+            (r colon) ifFalse { return false }
+            vs = r pos
+            (r skipValue) ifFalse { return false }
+            ((key == "deps") && vstart == nil) ifTrue {
+                vstart = vs
+                vend = r pos
+                keyAt = kstart
+            }
+            r comma
+            c = r peek
+        }
+        (c != 125) ifTrue { return false }
+        close = r pos
+
+        // line ends and indentation as the file has them
+        nl = "\n"
+        first = text indexOf("\n")
+        ((first > 0) && (text byteAt(first - 1)) == 13) ifTrue { nl = "\r\n" }
+        indent = "  "
+        (vstart != nil) ifTrue {
+            ls = keyAt
+            { ls > 0 && ((text byteAt(ls - 1)) == 32 || (text byteAt(ls - 1)) == 9) } whileTrue { ls = ls - 1 }
+            (ls == 0 || (text byteAt(ls - 1)) == 10) ifTrue {
+                (keyAt - ls < 29) ifTrue { indent = text slice(ls, keyAt) }
+            }
+        }
+
+        // the new "deps" object
+        deps = "{"
+        sep = ""
+        m deps each { |d|
+            deps = deps + sep + nl + indent + "  \"" + (d at(0)) + "\": \"" + (d at(1)) + "\""
+            sep = ","
+        }
+        (m deps size > 0) ifTrue { deps = deps + nl + indent }
+        deps = deps + "}"
+
+        out = ""
+        (vstart != nil) ifTrue {
+            out = (text slice(0, vstart)) + deps + (text slice(vend, text length))
+        } ifFalse {
+            q = close
+            { q > 0 && ((text byteAt(q - 1)) == 32 || (text byteAt(q - 1)) == 9 ||
+                        (text byteAt(q - 1)) == 10 || (text byteAt(q - 1)) == 13) } whileTrue { q = q - 1 }
+            prev = text byteAt(q - 1)
+            lead = ""
+            (prev != 123 && prev != 44) ifTrue { lead = "," }
+            out = (text slice(0, q)) + lead + nl + indent + "\"deps\": " + deps + (text slice(q, text length))
+        }
+        try { File write(path, out)
               true } catch { |e| false }
     }
 
@@ -1479,7 +1553,10 @@ Bricks = Object clone {
         }
 
         m deps push([depName, url])
-        BrickFiles save("brick.json", m)
+        (BrickFiles saveDeps("brick.json", m)) ifFalse {
+            self _err("error: cannot update brick.json")
+            return 1
+        }
         self _say("Added '" + depName + "' to brick.json")
         self writeLock(m)
         0
@@ -1503,7 +1580,10 @@ Bricks = Object clone {
         dep = m deps at(found)
         repo = BrickUrl repoDir(dep at(1), dep at(0))
         m deps removeAt(found)
-        BrickFiles save("brick.json", m)
+        (BrickFiles saveDeps("brick.json", m)) ifFalse {
+            self _err("error: cannot update brick.json")
+            return 1
+        }
         self _say("Removed '" + depName + "' from brick.json")
 
         // delete the checkout unless another dependency still lives in it
