@@ -581,6 +581,14 @@ static ClayValue console_isTerminal(ClayObject *self, int argc, ClayValue *argv)
     return CLAY_BOOL(clay_stdout_is_terminal());
 }
 
+/* Console isInteractive - true if input comes from a terminal, so a prompt
+ * will reach someone who can answer it (false when piped or redirected) */
+static ClayValue console_isInteractive(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    extern int clay_stdin_is_terminal(void);
+    return CLAY_BOOL(clay_stdin_is_terminal());
+}
+
 static ClayValue system_platform(ClayObject *self, int argc, ClayValue *argv) {
     (void)self; (void)argc; (void)argv;
 #if defined(_WIN32)
@@ -777,6 +785,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Console, "println", console_println);
     clay_set_method(clay_Console, "error", console_error);
     clay_set_method(clay_Console, "isTerminal", console_isTerminal);
+    clay_set_method(clay_Console, "isInteractive", console_isInteractive);
 
     /* File object */
     clay_File = clay_object_new();

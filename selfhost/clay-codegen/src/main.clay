@@ -194,6 +194,7 @@ CodeGen = Object clone {
     locals = nil
     methodLocalBase = 0
     toplevelCount = 0
+    toplevelFiles = nil     // top-level variable name -> the files that assign it
     boxed = nil
     knownSlots = nil
     ownedTemps = nil
@@ -237,6 +238,7 @@ CodeGen = Object clone {
         locals = []
         methodLocalBase = 0
         toplevelCount = 0
+        toplevelFiles = #{}
         boxed = []
         knownSlots = nil
         ownedTemps = []
@@ -331,6 +333,13 @@ CodeGen = Object clone {
             i = i + 1
         }
         found
+    }
+
+    // assigned at the top level of `file`: a top-level block's assignment
+    // writes a top-level variable only when its own file has it
+    toplevelInFile(n, file) {
+        files = toplevelFiles get(n)
+        files != nil && (files contains(file))
     }
 
     isFnLocal(n) { (self isLocal(n)) && ((methodCtx && (self isToplevelVar(n))) == false) }
@@ -1012,6 +1021,22 @@ CodeGen = Object clone {
         }
     }
 
+    // at entry to a top-level block: an assignment to a name that is only
+    // another file's top-level variable makes a local, hiding the static
+    shadowDecls(body) {
+        body each { |s|
+            (s != nil && s kind == "Assign") ifTrue {
+                nm = s name
+                ((self isToplevelVar(nm)) && (self isBuiltinGlobal(nm)) == false &&
+                 (self toplevelInFile(nm, s file)) == false) ifTrue {
+                    out push("    ClayValue " + (self safe(nm)) + " = CLAY_NIL;\n")
+                    locals push(nm)
+                    self trackVar(nm)
+                }
+            }
+        }
+    }
+
     varStore(nm, v, extra) {
         self retains(v, extra)
         (self isBoxed(nm)) ifTrue {
@@ -1304,6 +1329,7 @@ CodeGen = Object clone {
             }
             out push("    ClayValue __rv = CLAY_NIL;\n")
             (inMethod && (self isBoxed("_method_self"))) ifTrue { self slotFallbackDecls(n body) }
+            methodCtx ifFalse { self shadowDecls(n body) }
             savedIndent = indent
             indent = 1
             n body each { |s| self bodyStmt(s, false) }
@@ -1333,6 +1359,14 @@ CodeGen = Object clone {
         self prewalk(program, nil)
         program items each { |s|
             ((s kind == "Assign") && (self isLocal(s name)) == false) ifTrue { locals push(s name) }
+            (s kind == "Assign") ifTrue {
+                files = toplevelFiles get(s name)
+                (files == nil) ifTrue {
+                    files = []
+                    toplevelFiles set(s name, files)
+                }
+                files push(s file)
+            }
         }
         toplevelCount = locals size
 

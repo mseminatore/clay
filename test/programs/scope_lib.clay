@@ -1,0 +1,34 @@
+// Library imported by test_file_scope.clay: its blocks use variable names
+// the importing program also has at its top level
+libCalls = 0
+shared = "lib"
+
+libSum = { |list|
+    total = 0                           // also a top-level variable of the test
+    list each { |n| total = total + n }
+    libCalls = libCalls + 1             // this file's own top-level variable
+    total
+}
+
+libNested = {
+    inner = { counter = 41; counter + 1 }   // `counter` is the test's
+    inner value
+}
+
+libPair = {
+    [first, second] = [10, 20]          // `first` is the test's
+    first + second
+}
+
+libShared = { shared = "set by lib"; shared }
+
+libCallCount = { libCalls }
+
+LibBox = Object clone {
+    value = 0
+}
+LibBox setMethod("fill", { |n|
+    total = n * 2                       // again the block's own
+    self value = total
+    total
+})

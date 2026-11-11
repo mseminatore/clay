@@ -18,7 +18,9 @@ Integers, strings, booleans, arrays, blocks — all objects. All operations are 
 A variable comes into existence when it's first assigned: `count = 0`. One
 assigned at the top level of a program is global — visible everywhere,
 including in code written above the assignment. One assigned inside a block
-belongs to that block.
+belongs to that block, unless the block is written at the top level of a file
+that has a top-level variable of that name: then the block assigns that one
+(`[1, 2, 3] each { |n| total = total + n }` adds to the file's `total`).
 
 Reading a variable that is never defined is an error, reported before the
 program runs (in the VM and with `--compile` alike), so a typo can't silently
@@ -237,7 +239,7 @@ path = "./local.conf"
 Config show println        // /etc/app.conf
 ```
 
-A slot that's only inherited from a prototype, not declared in this clone body, isn't known when the method is compiled, so there a top-level variable of the same name still wins — write `self path` to be explicit. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (top-level blocks do share the program's variables):
+A slot that's only inherited from a prototype, not declared in this clone body, isn't known when the method is compiled, so there a top-level variable of the same name still wins — write `self path` to be explicit. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (a top-level block does assign the top-level variables of its own file):
 
 ```clay
 Point = Object clone {
@@ -487,6 +489,28 @@ import("my-brick")         // brick import (see Bricks)
 ```
 
 Imports are resolved at parse time. Duplicate imports of the same file are silently skipped. Brick imports (no extension, no path separator) resolve via the `bricks/` directory.
+
+An imported file's top-level variables are globals like the program's own, so every file can read them. Assigning is narrower: a top-level block assigns a top-level variable only when its own file has one of that name. Any other name it assigns is the block's own variable, whatever the other files call theirs:
+
+```clay norun
+// lib.clay
+calls = 0
+sum = { |list|
+    total = 0                  // the block's own: lib.clay has no top-level `total`
+    list each { |n| total = total + n }
+    calls = calls + 1          // lib.clay's top-level `calls`
+    total
+}
+
+// main.clay
+import("lib.clay")
+total = 100
+sum value([1, 2, 3]) println   // 6
+total println                  // 100
+calls println                  // 1
+```
+
+So a file's blocks can't be broken by the names an importer picks, and can't change another file's variables by accident. To change one on purpose, call a block or method of the file that owns it, or keep the value in an object's slot (`Config verbose = true`).
 
 ## Namespaced imports
 

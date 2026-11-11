@@ -1,0 +1,1659 @@
+// clay-bricks -- the bricks package manager, written in Clay
+//
+// Usage:
+//   import("../clay-bricks/src/main.clay")
+//
+//   System exit(Bricks command(["add", "github.com/owner/repo"]))
+//
+// A port of src/compiler/bricks.c: `clayc bricks <command>` does what
+// `clay bricks <command>` does, with the same brick.json and brick.lock
+// files, the same checks on names, URLs and flags, and the same messages
+// (naming clayc where clay names itself). CTest clay_selfhost_bricks compares
+// the two.
+//
+// Differences from bricks.c:
+// - git and rm run without a shell (Process run / Process stream with an
+//   argument list), so nothing is quoted; the names, URLs and refs are still
+//   checked the same way before they are used;
+// - git's first line of output is read from a pipe, not a temporary file;
+// - files are written with "\n" line ends on every platform;
+// - the registry index is read by BrickJson (bricks.c uses cJSON), which
+//   gives up on JSON nested more than 100 deep (cJSON: 1000).
+//
+// Quirks kept from bricks.c:
+// - brick.json is read by a lenient parser: commas are optional, a backslash
+//   in a string just keeps the next character, long strings are clipped;
+// - rewriting brick.json (add, remove) keeps only the fields Clay knows, and
+//   folds the host platform's "sources-<platform>" (cflags, libs) lists into
+//   the plain ones.
+
+import("../../clay-parser/src/main.clay")
+
+// --- brick.json and brick.lock: a minimal JSON-subset reader ---
+
+BrickReader = Object clone {
+    src = ""
+    pos = 0
+
+    init(text) {
+        src = text
+        pos = 0
+    }
+
+    // the byte at pos (+ ahead); 0 at the end, as a C string
+    peek(ahead = 0) { (src byteAt(pos + ahead)) ?? 0 }
+
+    skip() { pos = pos + 1 }
+
+    ws() {
+        c = self peek
+        { c == 32 || c == 9 || c == 10 || c == 13 } whileTrue {
+            pos = pos + 1
+            c = self peek
+        }
+    }
+
+    // `,` between items is optional
+    comma() {
+        self ws
+        ((self peek) == 44) ifTrue {
+            pos = pos + 1
+            self ws
+        }
+    }
+
+    // `:` after a key; false if it is missing
+    colon() {
+        self ws
+        ((self peek) != 58) ifTrue { return false }
+        pos = pos + 1
+        self ws
+        true
+    }
+
+    // parse_string: nil unless at a quote. A backslash keeps the next
+    // character as it is; the text is clipped to width - 1 bytes; the closing
+    // quote may be missing at the end of the input.
+    str(width) {
+        ((self peek) != 34) ifTrue { return nil }
+        pos = pos + 1
+        parts = []
+        start = pos
+        c = self peek
+        { c != 0 && c != 34 } whileTrue {
+            (c == 92 && (self peek(1)) != 0) ifTrue {
+                parts push(src slice(start, pos))
+                pos = pos + 1
+                start = pos
+            }
+            pos = pos + 1
+            c = self peek
+        }
+        parts push(src slice(start, pos))
+        (c == 34) ifTrue { pos = pos + 1 }
+        text = parts join("")
+        (text length > width - 1) ifTrue { text = text slice(0, width - 1) }
+        text
+    }
+
+    // skip_value: any JSON value; false if a { or [ is never closed
+    skipValue() {
+        self ws
+        c = self peek
+        (c == 34) ifTrue {
+            self str(1024)
+            return true
+        }
+        (c == 123 || c == 91) ifTrue {
+            depth = 0
+            { c != 0 } whileTrue {
+                (c == 34) ifTrue {
+                    self str(1024)
+                } ifFalse {
+                    (c == 123 || c == 91) ifTrue { depth = depth + 1 }
+                    (c == 125 || c == 93) ifTrue {
+                        depth = depth - 1
+                        (depth == 0) ifTrue {
+                            pos = pos + 1
+                            return true
+                        }
+                    }
+                    pos = pos + 1
+                }
+                c = self peek
+            }
+            return false
+        }
+        self skipScalar
+        true
+    }
+
+    // a number or literal: up to the next , } (or ] when inList)
+    skipScalar(inList = true) {
+        c = self peek
+        { c != 0 && c != 44 && c != 125 && (c != 93 || inList == false) } whileTrue {
+            pos = pos + 1
+            c = self peek
+        }
+    }
+
+    // the lockfile's way to skip a value it doesn't know
+    skipLockValue() {
+        ((self peek) == 34) ifTrue { self str(1024) } ifFalse { self skipScalar(false) }
+    }
+
+    // parse_string_array: ["a", "b"] appended to out; false if it is
+    // malformed or holds more than limit strings
+    strings(out, limit, width) {
+        self ws
+        ((self peek) != 91) ifTrue { return false }
+        pos = pos + 1
+        self ws
+        c = self peek
+        { c != 0 && c != 93 } whileTrue {
+            (out size >= limit) ifTrue { return false }
+            s = self str(width)
+            (s == nil) ifTrue { return false }
+            out push(s)
+            self comma
+            c = self peek
+        }
+        (c != 93) ifTrue { return false }
+        pos = pos + 1
+        true
+    }
+
+    // strtol: an optional sign and digits; 0 (consuming nothing) without digits
+    integer() {
+        start = pos
+        self ws
+        sign = 1
+        c = self peek
+        (c == 45 || c == 43) ifTrue {
+            (c == 45) ifTrue { sign = 0 - 1 }
+            pos = pos + 1
+            c = self peek
+        }
+        n = 0
+        digits = 0
+        { c >= 48 && c <= 57 } whileTrue {
+            (n < 1000000000) ifTrue { n = n * 10 + (c - 48) }
+            digits = digits + 1
+            pos = pos + 1
+            c = self peek
+        }
+        (digits == 0) ifTrue { pos = start }
+        n * sign
+    }
+}
+
+// What brick.json says (BrickManifest in bricks.h)
+BrickManifest = Object clone {
+    name = ""
+    version = ""
+    description = ""
+    mainFile = ""
+    deps = nil         // [name, url] pairs, in file order
+    plugin = ""        // "native": the plugin's name ("" if not a native brick)
+    sources = nil
+    cflags = nil
+    libs = nil
+
+    init() {
+        deps = []
+        sources = []
+        cflags = []
+        libs = []
+    }
+
+    hasDep(depName) {
+        deps each { |d| ((d at(0)) == depName) ifTrue { return true } }
+        false
+    }
+}
+
+// --- Names and URLs ---
+//
+// Brick names, URLs and refs come from brick.json files, including those of
+// bricks installed for other bricks (other people's content), and end up as
+// git arguments and paths. They are held to a small character set, so they
+// can't be read as options or lead out of bricks/.
+
+BrickUrl = Object clone {
+    clip(s, width) {
+        (s length > width) ifTrue { return s slice(0, width) }
+        s
+    }
+
+    stripScheme(url) {
+        (url startsWith("https://")) ifTrue { return url slice(8, url length) }
+        (url startsWith("http://")) ifTrue { return url slice(7, url length) }
+        url
+    }
+
+    // without its @ref
+    dropRef(url) {
+        cut = url indexOf("@")
+        (cut >= 0) ifTrue { return url slice(0, cut) }
+        url
+    }
+
+    lastSegment(path) {
+        path slice((path lastIndexOf("/")) + 1, path length)
+    }
+
+    // where the nth "/" of s is, or -1
+    nthSlash(s, n) {
+        seen = 0
+        i = 0
+        { i < s length } whileTrue {
+            ((s byteAt(i)) == 47) ifTrue {
+                seen = seen + 1
+                (seen == n) ifTrue { return i }
+            }
+            i = i + 1
+        }
+        0 - 1
+    }
+
+    // brick_safe_url: [https://|http://]host[:port]/owner/repo[/subpath][@ref],
+    // every part a safe path
+    safe(url) {
+        (url == nil || url == "") ifTrue { return false }
+        rest = self stripScheme(url)
+        (rest length >= 1024) ifTrue { return false }
+        cut = rest indexOf("@")
+        (cut >= 0) ifTrue {
+            (NativeBricks safePath(rest slice(cut + 1, rest length), true)) ifFalse { return false }
+            rest = rest slice(0, cut)
+        }
+        slash = rest indexOf("/")
+        (slash < 0) ifTrue { return false }
+        host = rest slice(0, slash)
+        colon = host indexOf(":")
+        (colon >= 0) ifTrue {
+            port = host slice(colon + 1, host length)
+            (port == "") ifTrue { return false }
+            i = 0
+            { i < port length } whileTrue {
+                b = port byteAt(i)
+                (b < 48 || b > 57) ifTrue { return false }
+                i = i + 1
+            }
+            host = host slice(0, colon)
+        }
+        (NativeBricks safePath(host, false)) ifFalse { return false }
+        NativeBricks safePath(rest slice(slash + 1, rest length), true)
+    }
+
+    // split_url_parts: "github.com/user/repo/sub/path@v1.0" is
+    // ["https://github.com/user/repo", "sub/path", "v1.0"]; host/owner/repo
+    // is the repository, the rest a brick inside it
+    split(url) {
+        rest = self clip(url, 1023)
+        ref = ""
+        cut = rest indexOf("@")
+        (cut >= 0) ifTrue {
+            ref = self clip(rest slice(cut + 1, rest length), 255)
+            rest = rest slice(0, cut)
+        }
+        prefix = "https://"
+        (rest startsWith("http://")) ifTrue { prefix = "http://" }
+        rest = self stripScheme(rest)
+        stop = self nthSlash(rest, 3)
+        (stop < 0) ifTrue { return [prefix + rest, "", ref] }
+        [prefix + (rest slice(0, stop)), rest slice(stop + 1, rest length), ref]
+    }
+
+    // url_to_repo_name: "github.com/user/my-repo/..." is "my-repo"
+    repoName(url) {
+        whole = self dropRef(self clip(url, 1023))
+        rest = self stripScheme(whole)
+        a = self nthSlash(rest, 2)
+        (a >= 0) ifTrue {
+            b = self nthSlash(rest, 3)
+            (b < 0) ifTrue { b = rest length }
+            (b > a + 1) ifTrue { return self clip(rest slice(a + 1, b), 127) }
+        }
+        self clip(self lastSegment(whole), 127)
+    }
+
+    // url_to_name: the name a URL is added under. "github.com/user/my-lib@v1"
+    // is "my-lib"; a brick inside a repository, "github.com/user/std/json",
+    // is "std/json"
+    nameOf(url) {
+        parts = self split(url)
+        ((parts at(1)) != "") ifTrue {
+            return self clip((self repoName(url)) + "/" + (parts at(1)), 127)
+        }
+        self clip(self lastSegment(self dropRef(self clip(url, 1023))), 127)
+    }
+
+    // dep_repo_dir: the directory of a dependency's git checkout. The name is
+    // the import path, so it decides: "json" is bricks/json, and "std/json"
+    // (a brick inside a repository) is in the checkout bricks/std whatever the
+    // repository is called. Such a name without a slash uses the repository's.
+    repoDir(url, depName) {
+        slash = depName indexOf("/")
+        (((self split(url)) at(1)) == "") ifTrue { return "bricks/" + depName }
+        (slash >= 0) ifTrue { return "bricks/" + (depName slice(0, slash)) }
+        "bricks/" + (self repoName(url))
+    }
+
+    // brick_install_dir: bricks/<name>, or <checkout>/<subpath>
+    installDir(url, depName) {
+        sub = (self split(url)) at(1)
+        dir = self repoDir(url, depName)
+        (sub != "") ifTrue { return dir + "/" + sub }
+        dir
+    }
+
+    // same_repo_url: ignoring the protocol, a trailing "/" and ".git"
+    sameRepo(a, b) {
+        (self _norm(a)) == (self _norm(b))
+    }
+
+    _norm(url) {
+        s = self clip(self stripScheme(url), 1023)
+        { s endsWith("/") } whileTrue { s = s slice(0, s length - 1) }
+        ((s length > 4) && (s endsWith(".git"))) ifTrue { s = s slice(0, s length - 4) }
+        s
+    }
+}
+
+// --- brick.json and brick.lock ---
+
+BrickFiles = Object clone {
+    // parse_native: one value of "native"; false if it is malformed or unsafe
+    // (it ends up on a compiler command line)
+    _nativeValue(r, m, key) {
+        (key == "plugin") ifTrue {
+            s = r str(128)
+            (s == nil) ifTrue { return false }
+            m plugin = s
+            (NativeBricks safePath(s, false)) ifFalse {
+                Console error("error: brick.json: bad native plugin name \"" + s + "\"\n")
+                return false
+            }
+            return true
+        }
+        (key == "sources") ifTrue {
+            (r strings(m sources, 32, 1024)) ifFalse { return false }
+            m sources each { |s|
+                (NativeBricks safePath(s, true)) ifFalse {
+                    Console error("error: brick.json: bad native source \"" + s + "\"\n")
+                    return false
+                }
+            }
+            return true
+        }
+        (key == "cflags" || key == "libs") ifTrue {
+            flags = (key == "cflags") ifTrue { m cflags } ifFalse { m libs }
+            (r strings(flags, 32, 128)) ifFalse { return false }
+            flags each { |f|
+                (NativeBricks safeFlag(f)) ifFalse {
+                    Console error("error: brick.json: rejecting native flag \"" + f + "\" " +
+                                  "(a flag starts with '-' and has no spaces, quotes or shell characters)\n")
+                    return false
+                }
+            }
+            return true
+        }
+        r skipValue
+    }
+
+    _native(r, m) {
+        r ws
+        ((r peek) != 123) ifTrue { return false }
+        r skip
+        r ws
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            key = r str(64)
+            (key == nil) ifTrue { return false }
+            (r colon) ifFalse { return false }
+            // "cflags-macos", "libs-linux", "sources-windows": what a platform
+            // adds to the plain lists; other platforms' entries are skipped
+            mine = true
+            dash = key indexOf("-")
+            (dash >= 0) ifTrue {
+                ((key slice(dash + 1, key length)) == System platform) ifTrue {
+                    key = key slice(0, dash)
+                } ifFalse {
+                    mine = false
+                }
+            }
+            mine ifTrue {
+                (self _nativeValue(r, m, key)) ifFalse { return false }
+            } ifFalse {
+                (r skipValue) ifFalse { return false }
+            }
+            r comma
+            c = r peek
+        }
+        (m plugin != "" && m sources size == 0) ifTrue {
+            Console error("error: brick.json: native plugin \"" + m plugin + "\" has no sources\n")
+            return false
+        }
+        (c != 125) ifTrue { return false }
+        r skip
+        true
+    }
+
+    // "deps": { "name": "url", ... }
+    _deps(r, m) {
+        ((r peek) != 123) ifTrue { return false }
+        r skip
+        r ws
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            (m deps size >= 64) ifTrue { return false }
+            depName = r str(128)
+            (depName == nil) ifTrue { return false }
+            (r colon) ifFalse { return false }
+            url = r str(1024)
+            (url == nil) ifTrue { return false }
+            ((NativeBricks safePath(depName, true)) && (BrickUrl safe(url))) ifFalse {
+                Console error("error: brick.json: rejecting unsafe dependency \"" + depName + "\": \"" + url +
+                              "\" (names and URLs may only contain letters, digits, '.', '_', '-', '/' " +
+                              "and an optional @ref)\n")
+                return false
+            }
+            m deps push([depName, url])
+            r comma
+            c = r peek
+        }
+        (c == 125) ifTrue { r skip }
+        true
+    }
+
+    _field(r, m, key) {
+        (key == "deps") ifTrue { return self _deps(r, m) }
+        (key == "native") ifTrue { return self _native(r, m) }
+        width = 0
+        (key == "name") ifTrue { width = 128 }
+        (key == "version") ifTrue { width = 64 }
+        (key == "description") ifTrue { width = 256 }
+        (key == "main") ifTrue { width = 1024 }
+        (width == 0) ifTrue { return r skipValue }      // unknown key (any JSON value)
+        s = r str(width)
+        (s == nil) ifTrue { return false }
+        (key == "name") ifTrue { m name = s }
+        (key == "version") ifTrue { m version = s }
+        (key == "description") ifTrue { m description = s }
+        (key == "main") ifTrue { m mainFile = s }
+        true
+    }
+
+    // parse_manifest: the BrickManifest of brick.json's text, or nil if it
+    // is not valid
+    parse(text) {
+        m = BrickManifest new
+        r = BrickReader new(text)
+        r ws
+        ((r peek) != 123) ifTrue { return nil }
+        r skip
+        r ws
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            key = r str(128)
+            (key == nil) ifTrue { return nil }
+            (r colon) ifFalse { return nil }
+            (self _field(r, m, key)) ifFalse { return nil }
+            r comma
+            c = r peek
+        }
+        m
+    }
+
+    // brick_parse: the manifest at path; nil if there is no such file, false
+    // if it is not a valid brick.json
+    load(path) {
+        text = try { File read(path) } catch { |e| nil }
+        (text == nil) ifTrue { return nil }
+        m = self parse(text)
+        (m == nil) ifTrue { return false }
+        m
+    }
+
+    _quoted(list) {
+        (list map { |s| "\"" + s + "\"" }) join(", ")
+    }
+
+    // brick_write
+    render(m) {
+        out = "{\n" +
+              "  \"name\": \"" + m name + "\",\n" +
+              "  \"version\": \"" + m version + "\",\n" +
+              "  \"description\": \"" + m description + "\",\n" +
+              "  \"main\": \"" + m mainFile + "\",\n" +
+              "  \"deps\": {"
+        sep = ""
+        m deps each { |d|
+            out = out + sep + "\n    \"" + (d at(0)) + "\": \"" + (d at(1)) + "\""
+            sep = ","
+        }
+        (m deps size > 0) ifTrue { out = out + "\n  " }
+        out = out + "}"
+        (m plugin != "") ifTrue {
+            out = out + ",\n  \"native\": {\n    \"plugin\": \"" + m plugin + "\",\n" +
+                  "    \"sources\": [" + (self _quoted(m sources)) + "],\n" +
+                  "    \"cflags\": [" + (self _quoted(m cflags)) + "],\n" +
+                  "    \"libs\": [" + (self _quoted(m libs)) + "]\n  }"
+        }
+        out + "\n}\n"
+    }
+
+    // false if the file can't be written
+    save(path, m) {
+        try { File write(path, self render(m))
+              true } catch { |e| false }
+    }
+
+    // One entry of "locked": { name: { "url", "version", "resolved" } }
+    _lockEntry(r, entry) {
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            key = r str(64)
+            (key == nil) ifTrue { return false }
+            (r colon) ifFalse { return false }
+            idx = 0
+            (key == "url") ifTrue { idx = 1 }
+            (key == "version") ifTrue { idx = 2 }
+            (key == "resolved") ifTrue { idx = 3 }
+            (idx > 0) ifTrue {
+                v = r str([0, 1024, 64, 128] at(idx))
+                (v == nil) ifTrue { return false }
+                entry setAt(idx, v)
+            } ifFalse {
+                r skipLockValue
+            }
+            r comma
+            c = r peek
+        }
+        (c == 125) ifTrue { r skip }
+        true
+    }
+
+    _locked(r, entries) {
+        ((r peek) != 123) ifTrue { return false }
+        r skip
+        r ws
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            (entries size >= 64) ifTrue { return false }
+            depName = r str(128)
+            (depName == nil) ifTrue { return false }
+            (r colon) ifFalse { return false }
+            ((r peek) != 123) ifTrue { return false }
+            r skip
+            r ws
+            entry = [depName, "", "", ""]
+            (self _lockEntry(r, entry)) ifFalse { return false }
+            entries push(entry)
+            r comma
+            c = r peek
+        }
+        (c == 125) ifTrue { r skip }
+        true
+    }
+
+    // parse_lock: [lockfile_version, entries], each entry
+    // [name, url, version, resolved]; nil if the text is malformed
+    parseLock(text) {
+        r = BrickReader new(text)
+        version = 0
+        entries = []
+        r ws
+        ((r peek) != 123) ifTrue { return nil }
+        r skip
+        r ws
+        c = r peek
+        { c != 0 && c != 125 } whileTrue {
+            key = r str(128)
+            (key == nil) ifTrue { return nil }
+            (r colon) ifFalse { return nil }
+            known = false
+            (key == "lockfile_version") ifTrue {
+                version = r integer
+                known = true
+            }
+            (key == "locked") ifTrue {
+                (self _locked(r, entries)) ifFalse { return nil }
+                known = true
+            }
+            known ifFalse { r skipLockValue }
+            r comma
+            c = r peek
+        }
+        [version, entries]
+    }
+
+    // brick.lock, or nil if there is none (or it can't be understood)
+    loadLock() {
+        text = try { File read("brick.lock") } catch { |e| nil }
+        (text == nil) ifTrue { return nil }
+        self parseLock(text)
+    }
+
+    // bricks_lock_matches: the lock lists exactly the manifest's dependencies
+    lockMatches(m, lock) {
+        ((lock at(0)) != 1) ifTrue { return false }
+        entries = lock at(1)
+        (entries size != m deps size) ifTrue { return false }
+        m deps each { |d|
+            found = false
+            entries each { |e|
+                ((e at(0)) == (d at(0)) && (e at(1)) == (d at(1))) ifTrue { found = true }
+            }
+            found ifFalse { return false }
+        }
+        true
+    }
+}
+
+// --- JSON, for the registry index (bricks.c reads it with cJSON) ---
+//
+// BrickJson parse(text) is a node, [kind, value], or nil if the text is not
+// JSON: "object" (an array of [key, node] pairs), "array" (an array of
+// nodes), "string" (the text), "number", "true", "false", "null". It accepts
+// what cJSON accepts: text after the value is ignored, any byte up to 32 is
+// whitespace, and a string ends at a \u0000.
+
+BrickJson = Object clone {
+    src = ""
+    pos = 0
+    nesting = 0
+
+    init(text) {
+        src = text
+        pos = 0
+        nesting = 0
+    }
+
+    parse(text) {
+        r = BrickJson new(text)
+        ((text byteAt(0)) == 239 && (text byteAt(1)) == 187 && (text byteAt(2)) == 191) ifTrue {
+            r pos = 3                      // a UTF-8 byte order mark
+        }
+        r _value
+    }
+
+    isA(node, kind) { node != nil && (node at(0)) == kind }
+
+    // an object's value for key (the first, if it is repeated), or nil
+    field(node, key) {
+        (self isA(node, "object")) ifFalse { return nil }
+        (node at(1)) each { |pair|
+            ((pair at(0)) == key) ifTrue { return pair at(1) }
+        }
+        nil
+    }
+
+    // the nodes in an array (or the values of an object); [] for anything else
+    children(node) {
+        (self isA(node, "array")) ifTrue { return node at(1) }
+        (self isA(node, "object")) ifTrue { return (node at(1)) map { |pair| pair at(1) } }
+        []
+    }
+
+    _peek() { (src byteAt(pos)) ?? 0 }
+
+    _ws() {
+        c = self _peek
+        { c != 0 && c <= 32 } whileTrue {
+            pos = pos + 1
+            c = self _peek
+        }
+    }
+
+    _value() {
+        self _ws
+        c = self _peek
+        (c == 110 && (src slice(pos, pos + 4)) == "null") ifTrue {
+            pos = pos + 4
+            return ["null", nil]
+        }
+        (c == 102 && (src slice(pos, pos + 5)) == "false") ifTrue {
+            pos = pos + 5
+            return ["false", nil]
+        }
+        (c == 116 && (src slice(pos, pos + 4)) == "true") ifTrue {
+            pos = pos + 4
+            return ["true", nil]
+        }
+        (c == 34) ifTrue {
+            s = self _string
+            (s == nil) ifTrue { return nil }
+            return ["string", s]
+        }
+        (c == 45 || (c >= 48 && c <= 57)) ifTrue { return self _number }
+        (c == 91) ifTrue { return self _array }
+        (c == 123) ifTrue { return self _object }
+        nil
+    }
+
+    _digits() {
+        n = 0
+        c = self _peek
+        { c >= 48 && c <= 57 } whileTrue {
+            n = n + 1
+            pos = pos + 1
+            c = self _peek
+        }
+        n
+    }
+
+    // as much as strtod would read: -digits.digits, then e+digits if complete
+    _number() {
+        ((self _peek) == 45) ifTrue { pos = pos + 1 }
+        digits = self _digits
+        ((self _peek) == 46) ifTrue {
+            pos = pos + 1
+            digits = digits + self _digits
+        }
+        (digits == 0) ifTrue { return nil }
+        c = self _peek
+        (c == 101 || c == 69) ifTrue {
+            mark = pos
+            pos = pos + 1
+            c = self _peek
+            (c == 43 || c == 45) ifTrue { pos = pos + 1 }
+            ((self _digits) == 0) ifTrue { pos = mark }
+        }
+        ["number", nil]
+    }
+
+    _hex4(i) {
+        h = 0
+        k = 0
+        { k < 4 } whileTrue {
+            b = (src byteAt(i + k)) ?? 0
+            d = 0 - 1
+            (b >= 48 && b <= 57) ifTrue { d = b - 48 }
+            (b >= 65 && b <= 70) ifTrue { d = b - 55 }
+            (b >= 97 && b <= 102) ifTrue { d = b - 87 }
+            (d < 0) ifTrue { return 0 }
+            h = h * 16 + d
+            k = k + 1
+        }
+        h
+    }
+
+    // "" for 0: the C string ends there
+    _utf8(code) {
+        (code == 0) ifTrue { return "" }
+        (code < 128) ifTrue { return String chr(code) }
+        (code < 2048) ifTrue {
+            return (String chr(192 + (code / 64))) + (String chr(128 + (code % 64)))
+        }
+        (code < 65536) ifTrue {
+            return (String chr(224 + (code / 4096))) + (String chr(128 + ((code / 64) % 64))) +
+                   (String chr(128 + (code % 64)))
+        }
+        (String chr(240 + (code / 262144))) + (String chr(128 + ((code / 4096) % 64))) +
+            (String chr(128 + ((code / 64) % 64))) + (String chr(128 + (code % 64)))
+    }
+
+    // the text of the escape at pos (a backslash) in a string that ends at
+    // stop, moving past it; nil if it is not a JSON escape
+    _escape(stop) {
+        e = (src byteAt(pos + 1)) ?? 0
+        simple = nil
+        (e == 98) ifTrue { simple = String chr(8) }
+        (e == 102) ifTrue { simple = String chr(12) }
+        (e == 110) ifTrue { simple = "\n" }
+        (e == 114) ifTrue { simple = "\r" }
+        (e == 116) ifTrue { simple = "\t" }
+        (e == 34 || e == 92 || e == 47) ifTrue { simple = String chr(e) }
+        (simple != nil) ifTrue {
+            pos = pos + 2
+            return simple
+        }
+        (e != 117) ifTrue { return nil }
+        (stop - pos < 6) ifTrue { return nil }
+        code = self _hex4(pos + 2)
+        (code >= 56320 && code <= 57343) ifTrue { return nil }      // a low surrogate first
+        span = 6
+        (code >= 55296 && code <= 56319) ifTrue {                    // a surrogate pair
+            (stop - pos < 12) ifTrue { return nil }
+            ((src byteAt(pos + 6)) != 92 || (src byteAt(pos + 7)) != 117) ifTrue { return nil }
+            low = self _hex4(pos + 8)
+            (low < 56320 || low > 57343) ifTrue { return nil }
+            code = 65536 + ((code - 55296) * 1024) + (low - 56320)
+            span = 12
+        }
+        pos = pos + span
+        self _utf8(code)
+    }
+
+    _string() {
+        ((self _peek) != 34) ifTrue { return nil }
+        pos = pos + 1
+        stop = pos
+        c = (src byteAt(stop)) ?? 0
+        { c != 0 && c != 34 } whileTrue {
+            (c == 92) ifTrue { stop = stop + 1 }
+            stop = stop + 1
+            c = (src byteAt(stop)) ?? 0
+        }
+        (c != 34) ifTrue { return nil }
+
+        parts = []
+        start = pos
+        live = true        // false once a \u0000 has ended the text
+        { pos < stop } whileTrue {
+            ((src byteAt(pos)) == 92) ifTrue {
+                live ifTrue { parts push(src slice(start, pos)) }
+                piece = self _escape(stop)
+                (piece == nil) ifTrue { return nil }
+                (piece == "") ifTrue { live = false }
+                live ifTrue { parts push(piece) }
+                start = pos
+            } ifFalse {
+                pos = pos + 1
+            }
+        }
+        live ifTrue { parts push(src slice(start, stop)) }
+        pos = stop + 1
+        parts join("")
+    }
+
+    _array() {
+        (nesting >= 100) ifTrue { return nil }
+        nesting = nesting + 1
+        items = []
+        pos = pos + 1
+        self _ws
+        ((self _peek) != 93) ifTrue {
+            more = true
+            { more } whileTrue {
+                v = self _value
+                (v == nil) ifTrue { return nil }
+                items push(v)
+                self _ws
+                ((self _peek) == 44) ifTrue { pos = pos + 1 } ifFalse { more = false }
+            }
+            ((self _peek) != 93) ifTrue { return nil }
+        }
+        pos = pos + 1
+        nesting = nesting - 1
+        ["array", items]
+    }
+
+    _object() {
+        (nesting >= 100) ifTrue { return nil }
+        nesting = nesting + 1
+        items = []
+        pos = pos + 1
+        self _ws
+        ((self _peek) != 125) ifTrue {
+            more = true
+            { more } whileTrue {
+                self _ws
+                key = self _string
+                (key == nil) ifTrue { return nil }
+                self _ws
+                ((self _peek) != 58) ifTrue { return nil }
+                pos = pos + 1
+                v = self _value
+                (v == nil) ifTrue { return nil }
+                items push([key, v])
+                self _ws
+                ((self _peek) == 44) ifTrue { pos = pos + 1 } ifFalse { more = false }
+            }
+            ((self _peek) != 125) ifTrue { return nil }
+        }
+        pos = pos + 1
+        nesting = nesting - 1
+        ["object", items]
+    }
+}
+
+// --- The registry: a list of bricks, for finding them ---
+//
+// clay-registry (github.com/mseminatore/clay-registry) publishes index.json,
+// one entry per listed brick. `search` and `info` only print what they find;
+// installing is still `bricks add <url>`, by hand, so the registry can't make
+// anything run. The index is data from strangers: entries are checked and
+// clipped before they're shown. CLAY_REGISTRY names another index (a URL, or
+// a local file).
+
+BrickRegistry = Object clone {
+    _indexUrl = "https://raw.githubusercontent.com/mseminatore/clay-registry/index/index.json"
+    _maxIndex = 4194304
+    _hosts = ["github.com/", "gitlab.com/", "codeberg.org/", "bitbucket.org/"]
+
+    // ~/.clay/registry.json: the last index fetched, used when the network
+    // isn't there; nil without a home directory
+    cachePath() {
+        home = (System env("HOME")) ?? (System env("USERPROFILE"))
+        (home == nil || home == "") ifTrue { return nil }
+        try { File mkdir(home + "/.clay") } catch { |e| nil }
+        home + "/.clay/registry.json"
+    }
+
+    _readFile(path) {
+        found = try { File read(path) } catch { |e| nil }
+        (found == nil) ifTrue { return nil }
+        BrickUrl clip(found, self _maxIndex)
+    }
+
+    // registry_fetch: the index text from CLAY_REGISTRY (a file or URL), else
+    // the registry, else the cache; nil (reported) if there is none
+    fetch() {
+        from = (System env("CLAY_REGISTRY")) ?? ""
+        (from != "" && (from startsWith("http://")) == false && (from startsWith("https://")) == false) ifTrue {
+            local = self _readFile(from)
+            (local == nil) ifTrue { Console error("error: cannot read CLAY_REGISTRY file '" + from + "'\n") }
+            return local
+        }
+        addr = (from != "") ifTrue { from } ifFalse { self _indexUrl }
+        status = 0
+        text = nil
+        resp = try { Http get(addr) } catch { |e| nil }
+        (resp != nil) ifTrue {
+            status = resp status
+            (status >= 200 && status < 300) ifTrue { text = resp body }
+        }
+        cache = self cachePath
+        (text != nil && text length <= self _maxIndex) ifTrue {
+            (cache != nil) ifTrue {
+                try { File write(cache, text) } catch { |e| nil }
+            }
+            return text
+        }
+        (cache != nil) ifTrue {
+            text = self _readFile(cache)
+            (text != nil) ifTrue {
+                Console error("(cannot reach " + addr + "; using the copy from the last search)\n")
+                return text
+            }
+        }
+        Console error("error: cannot fetch the brick index from " + addr + " (HTTP " + status toString + ")\n")
+        nil
+    }
+
+    // registry_load: the index's entries, or nil (reported)
+    load() {
+        text = self fetch
+        (text == nil) ifTrue { return nil }
+        bricks = BrickJson field(BrickJson parse(text), "bricks")
+        (BrickJson isA(bricks, "array")) ifFalse {
+            Console error("error: the brick index is not in the expected format\n")
+            return nil
+        }
+        bricks at(1)
+    }
+
+    // registry_text: the entry's string field without control characters,
+    // clipped to width - 1 bytes; "" when absent or not a string
+    field(entry, key, width) {
+        v = BrickJson field(entry, key)
+        (BrickJson isA(v, "string")) ifFalse { return "" }
+        s = v at(1)
+        parts = []
+        kept = 0
+        start = 0
+        i = 0
+        { i < s length && kept < width - 1 } whileTrue {
+            b = s byteAt(i)
+            (b >= 32 && b != 127) ifTrue {
+                kept = kept + 1
+            } ifFalse {
+                parts push(s slice(start, i))
+                start = i + 1
+            }
+            i = i + 1
+        }
+        parts push(s slice(start, i))
+        parts join("")
+    }
+
+    // registry_entry_ok: [name, repo] of a listed brick worth showing (a safe
+    // name and a repository on a known host), else nil
+    entry(e) {
+        (BrickJson isA(e, "object")) ifFalse { return nil }
+        brick = self field(e, "name", 128)
+        repo = self field(e, "repo", 1024)
+        (brick == "" || (NativeBricks safePath(brick, false)) == false) ifTrue { return nil }
+        (repo == "" || (repo contains("..")) || (BrickUrl safe(repo)) == false || (repo startsWith("http"))) ifTrue {
+            return nil
+        }
+        self _hosts each { |h|
+            ((repo startsWith(h)) && repo length > h length) ifTrue { return [brick, repo] }
+        }
+        nil
+    }
+
+    isNative(e) { BrickJson isA(BrickJson field(e, "native"), "true") }
+
+    // registry_tags: the first 8 tags, each only its a-z 0-9 - characters
+    tagList(e, width) {
+        out = []
+        seen = 0
+        (BrickJson children(BrickJson field(e, "tags"))) each { |t|
+            (seen < 8 && (BrickJson isA(t, "string"))) ifTrue {
+                tag = ""
+                s = t at(1)
+                i = 0
+                { i < s length && tag length < 39 } whileTrue {
+                    b = s byteAt(i)
+                    ((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45) ifTrue { tag = tag + String chr(b) }
+                    i = i + 1
+                }
+                (tag != "") ifTrue { out push(tag) }
+            }
+            seen = seen + 1
+        }
+        BrickUrl clip(out join(", "), width - 1)
+    }
+
+    // str_contains_nocase
+    matches(hay, needle) {
+        needle == "" || ((hay lower) contains(needle lower))
+    }
+
+    // bricks search [words]: the listed bricks whose name, description or
+    // tags contain every word (all of them with no words)
+    search(words, prog) {
+        bricks = self load
+        (bricks == nil) ifTrue { return 1 }
+        shown = 0
+        bricks each { |e|
+            ok = self entry(e)
+            (ok != nil) ifTrue {
+                desc = self field(e, "description", 256)
+                labels = self tagList(e, 256)
+                hit = true
+                words each { |w|
+                    ((self matches(ok at(0), w)) || (self matches(desc, w)) || (self matches(labels, w))) ifFalse {
+                        hit = false
+                    }
+                }
+                hit ifTrue {
+                    note = (self isNative(e)) ifTrue { "  (native: builds C code)" } ifFalse { "" }
+                    Console print((ok at(0)) + note + "\n    " + desc + "\n    https://" + (ok at(1)) + "\n")
+                    shown = shown + 1
+                }
+            }
+        }
+        (shown == 0) ifTrue {
+            Console print("no bricks match\n")
+        } ifFalse {
+            Console print("\nInstall one with: " + prog + " bricks add <url>\n")
+        }
+        0
+    }
+
+    // bricks info <name>: everything the index says about one brick
+    info(wanted, prog) {
+        bricks = self load
+        (bricks == nil) ifTrue { return 1 }
+        bricks each { |e|
+            ok = self entry(e)
+            (ok != nil && (ok at(0)) == wanted) ifTrue {
+                Console print((ok at(0)) + "\n")
+                Console print("  " + (self field(e, "description", 256)) + "\n")
+                Console print("  repository: https://" + (ok at(1)) + "\n")
+                text = self field(e, "version", 40)
+                (text != "") ifTrue { Console print("  version:    " + text + "\n") }
+                text = self field(e, "license", 40)
+                (text != "") ifTrue { Console print("  license:    " + text + "\n") }
+                text = self tagList(e, 256)
+                (text != "") ifTrue { Console print("  tags:       " + text + "\n") }
+                text = self field(e, "homepage", 256)
+                (text startsWith("https://")) ifTrue { Console print("  homepage:   " + text + "\n") }
+                native = (self isNative(e)) ifTrue { "yes: its C code is built on first import" } ifFalse { "no" }
+                Console print("  native:     " + native + "\n")
+                Console print("\nInstall with: " + prog + " bricks add " + (ok at(1)) + " " + (ok at(0)) + "\n")
+                return 0
+            }
+        }
+        Console print("'" + wanted + "' is not in the brick index (try: " + prog + " bricks search " + wanted + ")\n")
+        1
+    }
+}
+
+// --- The commands ---
+
+Bricks = Object clone {
+    prog = "clayc"         // how the messages name the program
+    _pins = nil            // brick.lock's entries while installing from it
+    _visited = nil         // names already installed in this run (cycles)
+
+    _say(text) { Console print(text + "\n") }
+    _err(text) { Console error(text + "\n") }
+
+    // Run git with these arguments, its output going to the terminal; the
+    // exit code
+    _git(args) {
+        cmd = ["git"]
+        args each { |a| cmd push(a) }
+        try { Process stream(cmd) { |line| Console print(line + "\n") } } catch { |e|
+            Console error("  error: cannot run git (" + e message + ")\n")
+            127
+        }
+    }
+
+    // git_output: the first line `git -C dir args` prints, clipped to
+    // width - 1 bytes; "" if git fails or prints nothing
+    _gitLine(dir, args, width) {
+        cmd = ["git", "-C", dir]
+        args each { |a| cmd push(a) }
+        res = try { Process run(cmd) } catch { |e| nil }
+        (res == nil || res ok == false) ifTrue { return "" }
+        line = ((res stdout) split("\n")) at(0)
+        (line == nil) ifTrue { return "" }
+        { (line endsWith("\r")) } whileTrue { line = line slice(0, line length - 1) }
+        BrickUrl clip(line, width - 1)
+    }
+
+    // the commit a dependency's checkout is at ("" if it can't be told)
+    _head(dir) { self _gitLine(dir, ["rev-parse", "HEAD"], 128) }
+
+    // Delete bricks/<entry> and everything in it; true if it went
+    _removeDir(entry) {
+        res = try {
+            (System platform == "windows") ifTrue {
+                Process run("rmdir /s /q \"bricks\\" + entry + "\" 2>nul", #{"shell": true})
+            } ifFalse {
+                Process run(["rm", "-rf", "bricks/" + entry])
+            }
+        } catch { |e| nil }
+        res != nil && res ok
+    }
+
+    _mkdir(path) {
+        try { File mkdir(path) } catch { |e| nil }
+    }
+
+    // the entries of bricks/, to undo a failed `bricks add`
+    _snapshot() {
+        try { File listDir("bricks") } catch { |e| [] }
+    }
+
+    // brick_undo_install: remove what a failed install added to bricks/
+    _undoInstall(before) {
+        (self _snapshot) each { |entry|
+            ((before contains(entry)) == false && (NativeBricks safePath(entry, false))) ifTrue {
+                (self _removeDir(entry)) ifTrue { self _err("  removed the partial install bricks/" + entry) }
+            }
+        }
+    }
+
+    // brick.json of the current directory, or nil (reported)
+    _project(hint) {
+        m = BrickFiles load("brick.json")
+        (m == nil) ifTrue {
+            self _err("error: no brick.json found" + hint)
+            return nil
+        }
+        (m == false) ifTrue {
+            self _err("error: brick.json is invalid")
+            return nil
+        }
+        m
+    }
+
+    _initHint() { " (run '" + prog + " bricks init' first)" }
+
+    // bricks_write_lock: brick.lock from the manifest and what is installed
+    writeLock(m) {
+        out = "{\n  \"lockfile_version\": 1,\n  \"locked\": {"
+        sep = ""
+        m deps each { |d|
+            ref = (BrickUrl split(d at(1))) at(2)
+            (ref == "") ifTrue { ref = "latest" }
+            sha = self _head(BrickUrl repoDir(d at(1), d at(0)))
+            out = out + sep + "\n    \"" + (d at(0)) + "\": {\n" +
+                  "      \"url\": \"" + (d at(1)) + "\",\n" +
+                  "      \"version\": \"" + ref + "\",\n" +
+                  "      \"resolved\": \"" + sha + "\"\n" +
+                  "    }"
+            sep = ","
+        }
+        (m deps size > 0) ifTrue { out = out + "\n  " }
+        out = out + "}\n}\n"
+        wrote = try { File write("brick.lock", out)
+                      true } catch { |e| false }
+        wrote ifFalse {
+            self _err("warning: could not write brick.lock")
+            return nil
+        }
+        self _say("Wrote brick.lock")
+    }
+
+    // check_repo_origin: an existing checkout at dir must come from cloneUrl
+    // (two repositories installed under one name would otherwise share it).
+    // True if it does, or its origin can't be read.
+    _sameOrigin(dir, cloneUrl) {
+        origin = self _gitLine(dir, ["config", "--get", "remote.origin.url"], 1024)
+        (origin == "" || (BrickUrl sameRepo(origin, cloneUrl))) ifTrue { return true }
+        self _err("  error: " + dir + " is already installed from " + origin + ", not " + cloneUrl + "\n" +
+                  "         (give one of them another name: " + prog + " bricks add <url> <name>)")
+        false
+    }
+
+    // brick_mark_visited: false if the name was seen before in this run
+    _visit(depName) {
+        (_visited contains(depName)) ifTrue { return false }
+        _visited push(depName)
+        true
+    }
+
+    // brick_locked_sha: the commit brick.lock records for (name, url), or nil
+    _lockedSha(depName, url) {
+        (_pins == nil) ifTrue { return nil }
+        _pins each { |e|
+            ((e at(0)) == depName && (e at(1)) == url) ifTrue {
+                sha = e at(3)
+                (sha length < 7 || sha length > 64) ifTrue { return nil }
+                i = 0
+                { i < sha length } whileTrue {
+                    b = sha byteAt(i)
+                    ((b >= 48 && b <= 57) || (b >= 97 && b <= 102)) ifFalse { return nil }
+                    i = i + 1
+                }
+                return sha
+            }
+        }
+        nil
+    }
+
+    // install_subdeps: the dependencies listed in <dir>/brick.json, if any
+    _installSubdeps(dir, depName) {
+        sub = BrickFiles load(dir + "/brick.json")
+        (sub == nil) ifTrue { return true }             // no manifest: nothing to do
+        (sub == false) ifTrue {
+            self _err("  error: invalid brick.json in " + depName)
+            return false
+        }
+        failed = 0
+        (sub deps size > 0) ifTrue {
+            self _say("  Installing dependencies of " + depName + "...")
+            sub deps each { |d|
+                (self _installDep(d at(1), d at(0))) ifFalse { failed = failed + 1 }
+            }
+        }
+        failed == 0
+    }
+
+    // Bring a brick's git submodules (a native brick's C library, say) to the
+    // commits the checked-out revision records
+    _syncSubmodules(dir) {
+        ((self _git(["-C", dir, "submodule", "update", "--init", "--recursive", "--quiet"])) != 0) ifTrue {
+            self _err("  warning: could not update the submodules of " + dir)
+        }
+    }
+
+    // brick_checkout: the locked commit, else the URL's @ref
+    _checkout(dir, depName, url, ref) {
+        target = self _lockedSha(depName, url)
+        (target == nil && ref != "") ifTrue { target = ref }
+        (target == nil) ifTrue { return nil }
+        ((self _git(["-C", dir, "checkout", "--quiet", target])) != 0) ifTrue {
+            self _err("  warning: could not checkout '" + target + "' for " + depName)
+        }
+        self _syncSubmodules(dir)
+    }
+
+    _clone(cloneUrl, dest) {
+        ((self _git(["clone", "--quiet", "--recurse-submodules", cloneUrl, dest])) != 0) ifTrue {
+            self _err("  error: failed to clone " + cloneUrl)
+            return false
+        }
+        true
+    }
+
+    // install_dep: one dependency and, in turn, its dependencies; true if
+    // they are all there
+    _installDep(url, depName) {
+        (self _visit(depName)) ifFalse { return true }   // a cycle or diamond: done already
+        parts = BrickUrl split(url)
+        cloneUrl = parts at(0)
+        subpath = parts at(1)
+        ref = parts at(2)
+
+        (subpath != "") ifTrue {
+            // a repository of bricks: one checkout (named by the dependency,
+            // see BrickUrl repoDir) shared by its bricks, each at its subpath
+            repo = BrickUrl repoDir(url, depName)
+            (File exists(repo)) ifTrue {
+                (self _sameOrigin(repo, cloneUrl)) ifFalse { return false }
+            } ifFalse {
+                self _say("  Cloning " + cloneUrl + " into " + repo + "...")
+                (self _clone(cloneUrl, repo)) ifFalse { return false }
+                self _checkout(repo, depName, url, ref)
+            }
+            dir = repo + "/" + subpath
+            (File exists(dir)) ifFalse {
+                self _err("  error: sub-brick '" + subpath + "' not found in " + cloneUrl)
+                return false
+            }
+            // the import path is the directory under bricks/
+            slash = depName indexOf("/")
+            (slash >= 0 && (depName slice(slash + 1, depName length)) != subpath) ifTrue {
+                self _err("  warning: '" + depName + "' is installed at " + dir + "; import it as \"" +
+                          (dir slice(7, dir length)) + "\"")
+            }
+            self _say("  Installed " + depName)
+            return self _installSubdeps(dir, depName)
+        }
+
+        dest = "bricks/" + depName
+        (File exists(dest)) ifTrue {
+            (self _sameOrigin(dest, cloneUrl)) ifFalse { return false }
+            self _say("  " + depName + ": already installed")
+            // still check its dependencies: an interrupted install can leave
+            // the checkout without them
+            return self _installSubdeps(dest, depName)
+        }
+        self _say("  Installing " + depName + " from " + cloneUrl + "...")
+        (self _clone(cloneUrl, dest)) ifFalse { return false }
+        self _checkout(dest, depName, url, ref)
+        self _installSubdeps(dest, depName)
+    }
+
+    cmdInit() {
+        (File exists("brick.json")) ifTrue {
+            self _err("brick.json already exists")
+            return 1
+        }
+        // named after the current directory
+        cwd = try { File cwd } catch { |e| "my-project" }
+        cut = cwd lastIndexOf("/")
+        (cut < 0) ifTrue { cut = cwd lastIndexOf("\\") }
+        m = BrickManifest new
+        m name = BrickUrl clip(cwd slice(cut + 1, cwd length), 127)
+        m version = "0.1.0"
+        m mainFile = "src/main.clay"
+        BrickFiles save("brick.json", m)
+        self _say("Created brick.json for '" + m name + "'")
+        0
+    }
+
+    cmdInstall() {
+        m = self _project(self _initHint)
+        (m == nil) ifTrue { return 1 }
+        (m deps size == 0) ifTrue {
+            self _say("No dependencies to install.")
+            return 0
+        }
+
+        // With a matching lockfile, install exactly the locked commits. If
+        // every dependency is also there already, there is nothing to do.
+        lock = BrickFiles loadLock
+        locked = lock != nil && (BrickFiles lockMatches(m, lock))
+        _pins = nil
+        locked ifTrue {
+            missing = m deps filter { |d| (File exists(BrickUrl installDir(d at(1), d at(0)))) == false }
+            (missing size == 0) ifTrue {
+                self _say("Dependencies already locked and up to date.")
+                return 0
+            }
+            _pins = lock at(1)
+        }
+
+        self _mkdir("bricks")
+        self _say("Installing " + m deps size toString + " dependencies" +
+                  (locked ifTrue { " (from brick.lock)" } ifFalse { "" }) + "...")
+        failed = 0
+        _visited = []
+        m deps each { |d|
+            (self _installDep(d at(1), d at(0))) ifFalse { failed = failed + 1 }
+        }
+        _pins = nil
+        (failed > 0) ifTrue {
+            self _err(failed toString + " dependencies failed to install.")
+            return 1
+        }
+        self writeLock(m)
+        self _say("Done.")
+        0
+    }
+
+    // native_consent: a brick that compiles C code is a bigger step than one
+    // that's only Clay: say so when it's added, and ask when someone is there
+    // to answer (a terminal). True to go ahead.
+    _nativeConsent(url, depName, dir, yes) {
+        m = BrickFiles load(dir + "/brick.json")
+        (m == nil || m == false) ifTrue { return true }
+        (m plugin == "") ifTrue { return true }
+        count = m sources size
+        self _say("note: '" + depName + "' is a native brick: when it's first imported, Clay compiles the C code in\n" +
+                  "      " + url + " (" + count toString + " source file" + ((count == 1) ifTrue { "" } ifFalse { "s" }) +
+                  ") with your C compiler and loads it.")
+        (yes || Console isInteractive == false) ifTrue { return true }
+        answer = Console prompt("Add it? [y/N] ")
+        answer != nil && ((answer startsWith("y")) || (answer startsWith("Y")))
+    }
+
+    // Add a dependency. `alias` (optional) names it, which is also its import
+    // path and install directory: "stdlib" for a repository, or the part
+    // before the brick's path inside one ("stdlib" + ".../markdown" is
+    // "stdlib/markdown").
+    cmdAdd(url, alias, yes) {
+        m = self _project(self _initHint)
+        (m == nil) ifTrue { return 1 }
+        (BrickUrl safe(url)) ifFalse {
+            self _err("error: invalid brick URL '" + url + "'")
+            return 1
+        }
+
+        depName = BrickUrl nameOf(url)
+        (alias != nil) ifTrue {
+            (NativeBricks safePath(alias, false)) ifFalse {
+                self _err("error: invalid brick name '" + alias + "'")
+                return 1
+            }
+            subpath = (BrickUrl split(url)) at(1)
+            depName = BrickUrl clip((subpath != "") ifTrue { alias + "/" + subpath } ifFalse { alias }, 127)
+        }
+        (NativeBricks safePath(depName, true)) ifFalse {
+            self _err("error: invalid brick name '" + depName + "' derived from URL")
+            return 1
+        }
+        (m hasDep(depName)) ifTrue {
+            self _err("'" + depName + "' is already a dependency")
+            return 1
+        }
+        (m deps size >= 64) ifTrue {
+            self _err("error: too many dependencies")
+            return 1
+        }
+
+        // install it; on failure, take away whatever it left in bricks/
+        self _mkdir("bricks")
+        before = self _snapshot
+        _visited = []
+        (self _installDep(url, depName)) ifFalse {
+            self _undoInstall(before)
+            self _err("'" + depName + "' was not added")
+            return 1
+        }
+        (self _nativeConsent(url, depName, BrickUrl installDir(url, depName), yes)) ifFalse {
+            self _undoInstall(before)
+            self _say("'" + depName + "' was not added")
+            return 1
+        }
+
+        m deps push([depName, url])
+        BrickFiles save("brick.json", m)
+        self _say("Added '" + depName + "' to brick.json")
+        self writeLock(m)
+        0
+    }
+
+    cmdRemove(depName) {
+        m = self _project("")
+        (m == nil) ifTrue { return 1 }
+        found = 0 - 1
+        i = 0
+        { i < m deps size && found < 0 } whileTrue {
+            (((m deps at(i)) at(0)) == depName) ifTrue { found = i }
+            i = i + 1
+        }
+        (found < 0) ifTrue {
+            self _err("'" + depName + "' is not a dependency")
+            return 1
+        }
+
+        // the checkout this dependency lives in, worked out before it goes
+        dep = m deps at(found)
+        repo = BrickUrl repoDir(dep at(1), dep at(0))
+        m deps removeAt(found)
+        BrickFiles save("brick.json", m)
+        self _say("Removed '" + depName + "' from brick.json")
+
+        // delete the checkout unless another dependency still lives in it
+        shared = false
+        m deps each { |d|
+            ((BrickUrl repoDir(d at(1), d at(0))) == repo) ifTrue { shared = true }
+        }
+        shared ifFalse { self _removeDir(repo slice(7, repo length)) }
+        self writeLock(m)
+        0
+    }
+
+    cmdList() {
+        m = self _project("")
+        (m == nil) ifTrue { return 1 }
+        self _say(m name + " v" + m version)
+        (m deps size == 0) ifTrue {
+            self _say("  (no dependencies)")
+        } ifFalse {
+            self _say("  Dependencies:")
+            m deps each { |d| self _say("    " + (d at(0)) + " -> " + (d at(1))) }
+        }
+        0
+    }
+
+    // update_dep: [ok, changed]; changed when the checkout moved to another
+    // commit (or had to be installed)
+    _updateDep(url, depName) {
+        ref = (BrickUrl split(url)) at(2)
+        dir = BrickUrl repoDir(url, depName)     // git works on the repository
+        (File exists(dir)) ifFalse {
+            self _say("  " + depName + ": not installed, installing...")
+            return [self _installDep(url, depName), true]
+        }
+
+        before = self _head(dir)
+        (ref != "") ifTrue {
+            ((self _git(["-C", dir, "fetch", "--quiet", "origin"])) != 0) ifTrue {
+                self _err("  warning: fetch failed for " + depName)
+                return [false, false]
+            }
+            self _git(["-C", dir, "checkout", "--quiet", ref])
+        } ifFalse {
+            // fetch, then move to the remote's default branch: a checkout
+            // made from brick.lock is on a detached HEAD, where `git pull`
+            // fails
+            rc = self _git(["-C", dir, "fetch", "--quiet", "origin"])
+            (rc == 0) ifTrue { rc = self _git(["-C", dir, "checkout", "--quiet", "--detach", "origin/HEAD"]) }
+            (rc != 0) ifTrue {
+                self _err("  warning: update failed for " + depName)
+                return [false, false]
+            }
+        }
+        self _syncSubmodules(dir)
+        after = self _head(dir)
+        (before != after) ifTrue {
+            self _say("  " + depName + ": " + (self _short(before)) + " -> " + (self _short(after)))
+            return [true, true]
+        }
+        self _say("  " + depName + ": up to date (" + (BrickUrl clip(after, 7)) + ")")
+        [true, false]
+    }
+
+    _short(sha) {
+        (sha == "") ifTrue { return "?" }
+        BrickUrl clip(sha, 7)
+    }
+
+    cmdUpdate() {
+        m = self _project("")
+        (m == nil) ifTrue { return 1 }
+        count = m deps size
+        (count == 0) ifTrue {
+            self _say("No dependencies to update.")
+            return 0
+        }
+        noun = (count == 1) ifTrue { "dependency" } ifFalse { "dependencies" }
+        self _say("Updating " + count toString + " " + noun + "...")
+        failures = 0
+        updated = 0
+        _visited = []
+        m deps each { |d|
+            res = self _updateDep(d at(1), d at(0))
+            (res at(0)) ifTrue {
+                (res at(1)) ifTrue { updated = updated + 1 }
+            } ifFalse {
+                failures = failures + 1
+            }
+        }
+        (failures > 0) ifTrue {
+            self _say("Done with " + failures toString + " failure(s).")
+            return 1
+        }
+        self writeLock(m)
+        (updated == 0) ifTrue {
+            self _say("Everything was already up to date.")
+        } ifFalse {
+            self _say("Updated " + updated toString + " of " + count toString + " " + noun + ".")
+        }
+        0
+    }
+
+    usage() {
+        self _err("Usage: " + prog + " bricks <command>\n\n" +
+                  "Commands:\n" +
+                  "  init              Create a new brick.json\n" +
+                  "  install           Install dependencies from brick.json\n" +
+                  "  update            Update installed dependencies\n" +
+                  "  add <url> [name]  Add a dependency (name = its import path)\n" +
+                  "                    --yes: add a native brick without asking\n" +
+                  "  remove <name>     Remove a dependency\n" +
+                  "  list              Show project info and dependencies\n" +
+                  "  search [words]    Find bricks in the registry (clay-registry on GitHub)\n" +
+                  "  info <name>       What the registry says about a brick")
+        1
+    }
+
+    // brick_command: run `bricks <args>`; the exit code
+    command(args) {
+        (args size < 1) ifTrue { return self usage }
+        cmd = args at(0)
+        (cmd == "init") ifTrue { return self cmdInit }
+        (cmd == "install") ifTrue { return self cmdInstall }
+        (cmd == "update") ifTrue { return self cmdUpdate }
+        (cmd == "list") ifTrue { return self cmdList }
+        (cmd == "search") ifTrue { return BrickRegistry search(args slice(1, args size), prog) }
+        (cmd == "add") ifTrue {
+            given = []
+            yes = false
+            i = 1
+            { i < args size } whileTrue {
+                a = args at(i)
+                (a == "--yes" || a == "-y") ifTrue { yes = true } ifFalse { given push(a) }
+                i = i + 1
+            }
+            (given size < 1 || given size > 2) ifTrue {
+                self _err("Usage: " + prog + " bricks add <url> [name] [--yes]")
+                return 1
+            }
+            return self cmdAdd(given at(0), given at(1), yes)
+        }
+        (cmd == "info" || cmd == "remove") ifTrue {
+            (args size < 2) ifTrue {
+                self _err("Usage: " + prog + " bricks " + cmd + " <name>")
+                return 1
+            }
+            (cmd == "info") ifTrue { return BrickRegistry info(args at(1), prog) }
+            return self cmdRemove(args at(1))
+        }
+        self _err("Unknown bricks command: " + cmd)
+        1
+    }
+}

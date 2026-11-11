@@ -128,17 +128,39 @@ static int bc_is_user_global(BcCompiler *bc, const char *name) {
     return 0;
 }
 
-/* Register a name as a known global at compile time */
-static void bc_register_global(BcCompiler *bc, const char *name) {
+static int bc_same_file(const char *a, const char *b) {
+    return a == b || (a && b && strcmp(a, b) == 0);
+}
+
+/* Is `name` a top-level variable of `file`? An assignment in a top-level
+ * block writes a global only then: a variable that some other file happens to
+ * assign at its top level stays the block's own. (A global that exists only
+ * at run time has no known file and counts for every file.) */
+static int bc_is_file_global(BcCompiler *bc, const char *name, const char *file) {
+    int known = 0;
+    for (int i = 0; i < bc->known_global_count; i++) {
+        if (strcmp(bc->known_globals[i], name) != 0) continue;
+        if (bc_same_file(bc->known_global_files[i], file)) return 1;
+        known = 1;
+    }
+    return !known && bc_is_user_global(bc, name);
+}
+
+/* Register a name as a known global, assigned at the top level of `file` */
+static void bc_register_global(BcCompiler *bc, const char *name, const char *file) {
     /* Skip if already known */
     for (int i = 0; i < bc->known_global_count; i++) {
-        if (strcmp(bc->known_globals[i], name) == 0) return;
+        if (strcmp(bc->known_globals[i], name) == 0 &&
+            bc_same_file(bc->known_global_files[i], file)) return;
     }
     if (bc->known_global_count >= bc->known_global_capacity) {
         bc->known_global_capacity = bc->known_global_capacity ? bc->known_global_capacity * 2 : 32;
         bc->known_globals = (char **)realloc(bc->known_globals,
             (size_t)bc->known_global_capacity * sizeof(char *));
+        bc->known_global_files = (char **)realloc(bc->known_global_files,
+            (size_t)bc->known_global_capacity * sizeof(char *));
     }
+    bc->known_global_files[bc->known_global_count] = file ? strdup(file) : NULL;
     bc->known_globals[bc->known_global_count++] = strdup(name);
 }
 
@@ -539,10 +561,21 @@ static int bc_is_known_slot(BcCompiler *bc, const char *name) {
     return 0;
 }
 
+/* Does a bare assignment to `name` (in a statement of `file`) make a local of
+ * the method or block being compiled? */
+static int bc_assign_makes_local(BcCompiler *bc, const char *name, const char *file) {
+    return !is_builtin_global(name) &&
+           (bc->in_method || !bc_is_file_global(bc, name, file)) &&
+           !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0;
+}
+
 /* Pre-register method-local variables: walk the body for bare NODE_ASSIGN
  * names that aren't already locals or builtins, and register them as locals.
  * In a method (or a block inside one) this includes names of top-level
- * variables: assignment there never changes the program's variables.
+ * variables: assignment there never changes the program's variables. A
+ * top-level block writes the top-level variables of its own file; any other
+ * name it assigns is its local, even if another file has a top-level variable
+ * of that name.
  * Skip names that are known slots — those should be slot writes to self.
  * This ensures prescan can correctly identify which locals nested blocks capture. */
 static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
@@ -550,17 +583,13 @@ static void bc_preregister_method_locals(BcCompiler *bc, NodeList *body) {
         AstNode *stmt = body->items[i];
         if (stmt && stmt->type == NODE_ASSIGN) {
             const char *name = stmt->as.assign.name;
-            if (!is_builtin_global(name) && (bc->in_method || !bc_is_user_global(bc, name)) &&
-                !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
+            if (bc_assign_makes_local(bc, name, stmt->file))
                 bc_add_local(bc, name);
-            }
         } else if (stmt && stmt->type == NODE_DESTRUCTURE) {
             for (int j = 0; j < stmt->as.destructure.targets.count; j++) {
                 const char *name = stmt->as.destructure.targets.items[j]->as.ident.name;
-                if (!is_builtin_global(name) && (bc->in_method || !bc_is_user_global(bc, name)) &&
-                    !bc_is_known_slot(bc, name) && bc_resolve_local(bc, name) < 0) {
+                if (bc_assign_makes_local(bc, name, stmt->file))
                     bc_add_local(bc, name);
-                }
             }
         }
     }
@@ -1330,7 +1359,7 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
             emit_op(bc, CLAYVM_OP_POP);
         } else {
             /* Global: register name, push name, then compile value */
-            bc_register_global(bc, node->as.assign.name);
+            bc_register_global(bc, node->as.assign.name, node->file);
             int name_idx = add_constant_string(bc, node->as.assign.name);
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)name_idx);
             bc_emit_expr(bc, node->as.assign.value);
@@ -1442,7 +1471,7 @@ int bc_compile(BcCompiler *bc, AstNode *program) {
     for (int i = 0; i < program->as.program.stmts.count; i++) {
         AstNode *stmt = program->as.program.stmts.items[i];
         if (stmt->type == NODE_ASSIGN && !is_builtin_global(stmt->as.assign.name))
-            bc_register_global(bc, stmt->as.assign.name);
+            bc_register_global(bc, stmt->as.assign.name, stmt->file);
     }
 
     for (int i = 0; i < program->as.program.stmts.count; i++) {

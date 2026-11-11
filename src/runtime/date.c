@@ -89,7 +89,7 @@ static ClayValue date_timestamp(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue date_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     struct tm t = date_to_tm(self);
-    char buf[32];
+    char buf[80];       /* room for six ints of any size: nothing is cut */
     snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
              t.tm_hour, t.tm_min, t.tm_sec);

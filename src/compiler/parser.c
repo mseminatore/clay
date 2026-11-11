@@ -39,9 +39,13 @@ static char *read_file(const char *path) {
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     rewind(f);
-    char *buf = (char *)malloc((size_t)len + 1);
-    fread(buf, 1, (size_t)len, f);
-    buf[len] = '\0';
+    char *buf = len < 0 ? NULL : (char *)malloc((size_t)len + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    size_t got = fread(buf, 1, (size_t)len, f);
+    buf[got] = '\0';
     fclose(f);
     return buf;
 }
@@ -1179,9 +1183,11 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
             snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "%s", g_lib_dir);
 
         for (int d = 0; d < ndirs && !resolved; d++) {
-            char manifest_path[BRICK_MAX_PATH * 2];
-            snprintf(manifest_path, sizeof(manifest_path), "%s/%s/brick.json",
-                     try_dirs[d], import_path);
+            char brick_dir[BRICK_MAX_PATH * 2];
+            int dlen = snprintf(brick_dir, sizeof(brick_dir), "%s/%s", try_dirs[d], import_path);
+            if (dlen < 0 || (size_t)dlen >= sizeof(brick_dir)) continue;   /* too long to be there */
+            char manifest_path[BRICK_MAX_PATH * 2 + 16];
+            snprintf(manifest_path, sizeof(manifest_path), "%s/brick.json", brick_dir);
             static BrickManifest bm;      /* large: keep it off the stack */
             int prc = brick_parse(manifest_path, &bm);
             if (prc == -2) {
@@ -1192,26 +1198,20 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
                 return NULL;
             }
             if (prc == 0 && bm.main_file[0]) {
-                char brick_main[BRICK_MAX_PATH * 2];
-                snprintf(brick_main, sizeof(brick_main), "%s/%s/%s",
-                         try_dirs[d], import_path, bm.main_file);
+                char brick_main[BRICK_MAX_PATH * 3 + 2];
+                snprintf(brick_main, sizeof(brick_main), "%s/%s", brick_dir, bm.main_file);
                 struct stat st;
                 if (stat(brick_main, &st) == 0) {
                     resolved = strdup(brick_main);
                     /* a native brick: its plugin is built and loaded before
                      * the program is compiled (native_bricks.c) */
-                    if (bm.native.plugin[0]) {
-                        char brick_dir[BRICK_MAX_PATH * 2];
-                        snprintf(brick_dir, sizeof(brick_dir), "%s/%s", try_dirs[d], import_path);
-                        native_bricks_note(brick_dir, &bm.native);
-                    }
+                    if (bm.native.plugin[0]) native_bricks_note(brick_dir, &bm.native);
                 }
             }
             /* Fallback: bricks/<path>/src/main.clay */
             if (!resolved) {
-                char fallback[BRICK_MAX_PATH * 2];
-                snprintf(fallback, sizeof(fallback), "%s/%s/src/main.clay",
-                         try_dirs[d], import_path);
+                char fallback[BRICK_MAX_PATH * 2 + 16];
+                snprintf(fallback, sizeof(fallback), "%s/src/main.clay", brick_dir);
                 struct stat st;
                 if (stat(fallback, &st) == 0) {
                     resolved = strdup(fallback);

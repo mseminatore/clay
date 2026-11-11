@@ -83,7 +83,7 @@ static int build_plugin(const NativeBrick *b, const NativeToolchain *tc,
 #endif
     /* build to a temporary name, then rename: parallel builds never see a
      * half-written library */
-    char tmp[BRICK_MAX_PATH * 2];
+    char tmp[BRICK_MAX_PATH * 2 + 32];
     snprintf(tmp, sizeof(tmp), "%s.%d.tmp", lib, (int)getpid());
 
     static char cmd[32768];

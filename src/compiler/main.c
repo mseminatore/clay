@@ -72,9 +72,13 @@ static char *read_file(const char *path) {
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     rewind(f);
-    char *buf = (char *)malloc((size_t)len + 1);
-    fread(buf, 1, (size_t)len, f);
-    buf[len] = '\0';
+    char *buf = len < 0 ? NULL : (char *)malloc((size_t)len + 1);
+    if (!buf) {
+        fprintf(stderr, "clay: cannot read '%s'\n", path);
+        exit(1);
+    }
+    size_t got = fread(buf, 1, (size_t)len, f);
+    buf[got] = '\0';
     fclose(f);
     return buf;
 }
@@ -647,7 +651,8 @@ static int run_repl(const char *argv0) {
         char run_cmd[2048];
         snprintf(run_cmd, sizeof(run_cmd), "\"%s\"", exe_path);
         fflush(stdout);  /* keep our output ordered before the child's */
-        system(run_cmd);
+        int run_rc = system(run_cmd);   /* the program reports its own errors */
+        (void)run_rc;
 
         /* Success! Accumulate only assignments (state-preserving statements) */
         for (int i = 0; i < new_count; i++) {

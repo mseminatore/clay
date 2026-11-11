@@ -1,0 +1,6 @@
+{
+    "name": "clay-bricks",
+    "version": "0.1.0",
+    "description": "The Clay package manager (clay bricks), written in Clay",
+    "main": "src/main.clay"
+}

@@ -555,8 +555,8 @@ void clay_plugin_auto_load(const char *exe_path) {
         while ((ent = readdir(dp))) {
             if (has_plugin_ext(ent->d_name)) {
                 char path[1024];
-                snprintf(path, sizeof(path), "%s/%s", plugins_dir, ent->d_name);
-                load_plugin_lib(path);
+                int n = snprintf(path, sizeof(path), "%s/%s", plugins_dir, ent->d_name);
+                if (n > 0 && (size_t)n < sizeof(path)) load_plugin_lib(path);
             }
         }
         closedir(dp);

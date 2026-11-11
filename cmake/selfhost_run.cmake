@@ -2,7 +2,8 @@
 # programs on the VM with bytecode from the Clay compiler; every program in
 # test/programs must behave exactly as under `clay` (stdout, stderr, exit
 # status). Programs whose bricks aren't installed (`clay bricks install`;
-# CTest label "bricks") are skipped.
+# CTest label "bricks") are skipped. Compile errors and `clayc bricks` are
+# compared with clay's too.
 #
 #   cmake -DCLAY=<clay binary> -DROOT=<source dir> -DCLAYC=<clayc to build>
 #         -P selfhost_run.cmake
@@ -74,6 +75,34 @@ foreach(f ${errfiles})
         message("--- ${f}: clay (exit ${rc_a}) ---\n${out_a}--- clayc (exit ${rc_b}) ---\n${out_b}")
     endif()
 endforeach()
+
+# The package manager: `clayc bricks` (selfhost/clay-bricks) answers like
+# `clay bricks`, here for the commands that need neither git nor the network
+# (cmake/selfhost_bricks.cmake runs the rest, with clayc on the VM)
+get_filename_component(bw "${CLAYC}" DIRECTORY)
+set(bw "${bw}/clayc_bricks")
+file(REMOVE_RECURSE "${bw}")
+file(MAKE_DIRECTORY "${bw}/clay/proj" "${bw}/clayc/proj")
+file(WRITE "${bw}/empty" "")
+set(ENV{CLAY_REGISTRY} "${ROOT}/test/registry/index.json")
+foreach(cmd "" "bogus" "info" "add" "remove" "search" "search neural" "info ann" "info evil"
+            "list" "init" "init" "list" "install" "update" "remove nope")
+    separate_arguments(args UNIX_COMMAND "${cmd}")
+    execute_process(COMMAND "${CLAY}" bricks ${args}
+                    WORKING_DIRECTORY "${bw}/clay/proj" INPUT_FILE "${bw}/empty" TIMEOUT 120
+                    RESULT_VARIABLE rc_a OUTPUT_VARIABLE out_a ERROR_VARIABLE out_a)
+    execute_process(COMMAND "${CLAYC}" bricks ${args}
+                    WORKING_DIRECTORY "${bw}/clayc/proj" INPUT_FILE "${bw}/empty" TIMEOUT 120
+                    RESULT_VARIABLE rc_b OUTPUT_VARIABLE out_b ERROR_VARIABLE out_b)
+    string(REPLACE "\r" "" out_a "${out_a}")
+    string(REPLACE "\r" "" out_b "${out_b}")
+    string(REPLACE "clayc bricks" "clay bricks" out_b "${out_b}")
+    if(NOT rc_a STREQUAL rc_b OR NOT out_a STREQUAL out_b)
+        list(APPEND failed "bricks ${cmd}")
+        message("--- bricks ${cmd}: clay (exit ${rc_a}) ---\n${out_a}--- clayc (exit ${rc_b}) ---\n${out_b}")
+    endif()
+endforeach()
+unset(ENV{CLAY_REGISTRY})
 
 list(LENGTH files count)
 list(LENGTH skipped nskip)

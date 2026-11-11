@@ -488,6 +488,15 @@ int clay_stdout_is_terminal(void) {
 #endif
 }
 
+/* Is stdin an interactive terminal (so someone is there to answer a prompt)? */
+int clay_stdin_is_terminal(void) {
+#ifdef _WIN32
+    return _isatty(_fileno(stdin)) != 0;
+#else
+    return isatty(fileno(stdin));
+#endif
+}
+
 void clay_file_init(ClayObject *proto) {
     clay_set_method(proto, "read", file_read);
     clay_set_method(proto, "readLines", file_readLines);

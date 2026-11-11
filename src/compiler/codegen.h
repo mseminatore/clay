@@ -16,6 +16,7 @@ typedef struct {
     int local_capacity;
     int method_local_base; /* index where method-specific locals start */
     int toplevel_local_count; /* locals [0, n) are the program's top-level variables */
+    AstNode *program;         /* the program being emitted (who assigns which top-level variable) */
     char **boxed_names;  /* variables boxed into cells (by-reference capture) */
     int boxed_count;
     int boxed_capacity;

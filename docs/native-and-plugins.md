@@ -59,7 +59,7 @@ The generated C includes `#line` directives mapping back to the `.clay` source, 
 ## A Clay compiler in Clay
 
 `selfhost/` holds a Clay compiler written in Clay — lexer, parser, bytecode
-compiler and C code generator as bricks, plus the `clayc` driver. Like
+compiler and C code generator as bricks, a port of the package manager, plus the `clayc` driver. Like
 `clay`, `clayc` runs programs in the bytecode VM (which stays in C), has a
 REPL, and builds native executables. Its bytecode and C are exactly what the
 C compiler produces, and it compiles itself: built by `clay --compile`, then
@@ -70,6 +70,7 @@ clay --compile -o clayc selfhost/clayc.clay    # build the Clay compiler
 ./clayc examples/hello.clay                    # run a program in the VM
 ./clayc                                        # the REPL
 ./clayc -o hello examples/hello.clay           # a native executable
+./clayc bricks list                            # the package manager, as clay bricks
 ```
 
 Native programs reach the VM through the `VM` prototype: `VM run(unit)` loads
