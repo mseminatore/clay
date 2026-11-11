@@ -1,0 +1,8 @@
+// An error nothing catches ends the program with a traceback: the error and
+// where it was raised, then the calls that led to it, newest first.
+Calc = Object clone {
+    run() { self step() }
+    step() { [1, 2, 3] each { |x| self check(x) } }
+    check(x) { (x == 2) ifTrue { raise("bad value ${x}") } }
+}
+Calc run()

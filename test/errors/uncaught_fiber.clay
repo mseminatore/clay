@@ -1,0 +1,8 @@
+// An error inside a fiber comes out of resume, where a try can catch it...
+fiber = Fiber new({ raise("first") })
+caught = try { fiber resume
+               "no error" } catch { |e| e message }
+Console error(caught + "\n")
+// ...and an uncaught one ends the program like any other.
+other = Fiber new({ raise("second") })
+other resume

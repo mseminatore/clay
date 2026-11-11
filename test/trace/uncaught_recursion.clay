@@ -1,0 +1,6 @@
+// A runaway recursion is a RuntimeError, and its traceback shows the
+// repeated call once, with a count, and still ends at the program's start.
+Loop = Object clone {
+    forever(n) { self forever(n + 1) + 1 }
+}
+Loop forever(0)

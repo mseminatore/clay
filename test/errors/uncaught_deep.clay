@@ -1,0 +1,12 @@
+// A long traceback keeps its newest and its oldest lines.
+Deep = Object clone {
+    a0() { self a1() }   a1() { self a2() }   a2() { self a3() }   a3() { self a4() }
+    a4() { self a5() }   a5() { self a6() }   a6() { self a7() }   a7() { self a8() }
+    a8() { self a9() }   a9() { self b0() }   b0() { self b1() }   b1() { self b2() }
+    b2() { self b3() }   b3() { self b4() }   b4() { self b5() }   b5() { self b6() }
+    b6() { self b7() }   b7() { self b8() }   b8() { self b9() }   b9() { self c0() }
+    c0() { self c1() }   c1() { self c2() }   c2() { self c3() }   c3() { self c4() }
+    c4() { self c5() }   c5() { self c6() }   c6() { self c7() }   c7() { self c8() }
+    c8() { self c9() }   c9() { raise("deep failure") }
+}
+Deep a0()

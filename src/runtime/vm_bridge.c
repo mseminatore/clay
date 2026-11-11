@@ -965,7 +965,9 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         ic->methods_key == target_methods &&
         ic->selector == selector &&
         !clay_selector_shadowed(selector)) {
-        /* Method IC hit — invoke directly, skip dispatch */
+        /* Method IC hit — invoke directly, skip dispatch (but keep the call in
+         * stack traces, as clay_send_val does) */
+        clay_trace_push(clay_source_file, clay_source_line, selector);
         if (CLAY_IS_INT(receiver) || CLAY_IS_TAGGED_FLOAT(receiver)) {
             ClayObject *wrapper = clay_clone(clay_Number);
             clay_set_slot(wrapper, "_value", receiver);
@@ -981,6 +983,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         } else {
             result = clay_invoke(ic->method, target_obj, msg_argc, args);
         }
+        clay_trace_pop();
         ic_handled = 1;
     }
 

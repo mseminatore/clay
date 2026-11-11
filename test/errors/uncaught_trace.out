@@ -1,0 +1,5 @@
+test/errors/uncaught_trace.clay:6: Error: bad value 2
+  at test/errors/uncaught_trace.clay:5 in check()
+  at test/errors/uncaught_trace.clay:5 in each()
+  at test/errors/uncaught_trace.clay:4 in step()
+  at test/errors/uncaught_trace.clay:8 in run()

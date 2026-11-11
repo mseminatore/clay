@@ -933,6 +933,8 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
                 fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
                         clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
                 clay_release(CLAY_OBJ(msg));
+                char *tb = clay_error_traceback(err);
+                if (tb) { fputs(tb, stderr); free(tb); }
             } else {
                 fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
             }
@@ -1164,6 +1166,8 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
             fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
                     clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
             clay_release(CLAY_OBJ(msg));
+            char *tb = clay_error_traceback(err);
+            if (tb) { fputs(tb, stderr); free(tb); }
             if (!CLAY_IS_NIL(file)) clay_release(CLAY_OBJ(file));
         } else {
             fprintf(stderr, "%s%sError: unknown%s\n", C(C_BOLD), C(C_RED), C(C_RESET));

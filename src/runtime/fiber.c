@@ -78,6 +78,8 @@ typedef struct {
     ClayValue yield_value;      /* last yielded value (owned until resume returns it) */
     ClayValue result;           /* final return value (owned until resume returns it) */
     int status;                 /* 0=created, 1=suspended, 2=done */
+    int failed;                 /* done because an error was raised in it... */
+    ClayValue error;            /* ...this one: resume() raises it in its caller */
     void *engine;               /* execution-engine state (VM stacks), or NULL */
 
     /* Saved error stack head — isolate try frames per fiber */
@@ -114,7 +116,16 @@ static void fiber_run_block(FiberContext *ctx) {
     ctx->stack_limit = clay_stack_limit;
 #endif
     clay_error_stack.head = NULL;  /* fiber starts with a clean error stack */
-    ctx->result = ctx->block->as.block.func(ctx->block, 0, NULL);
+    /* An error nothing in the fiber catches ends the fiber; resume() raises
+     * it in whoever resumed it, where a try can catch it */
+    ClayTryFrame tf;
+    if (clay_try_push(&tf) == 0) {
+        ctx->result = ctx->block->as.block.func(ctx->block, 0, NULL);
+        clay_try_pop();
+    } else {
+        ctx->failed = 1;
+        ctx->error = clay_error_stack.current_error;
+    }
     ctx->status = 2;
     ctx->saved_error_head = clay_error_stack.head;
 }
@@ -228,6 +239,8 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
     ClayValue retval;
     if (done) { retval = ctx->result;      ctx->result = CLAY_NIL; }
     else      { retval = ctx->yield_value; ctx->yield_value = CLAY_NIL; }
+    ClayValue failure = CLAY_NIL;
+    if (ctx->failed) { failure = ctx->error; ctx->error = CLAY_NIL; ctx->failed = 0; }
 
     /* Free the C stack once the fiber has finished */
     if (done) {
@@ -237,6 +250,7 @@ static ClayValue fiber_resume(ClayObject *self, int argc, ClayValue *argv) {
         free(ctx->c_stack); ctx->c_stack = NULL;
 #endif
     }
+    if (!CLAY_IS_NIL(failure)) clay_raise(failure);    /* the fiber's error, in the caller */
     return retval;
 }
 
