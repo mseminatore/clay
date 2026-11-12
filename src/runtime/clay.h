@@ -12,6 +12,12 @@ extern "C" {
 #include <string.h>
 #include "hash.h"
 
+#ifdef _MSC_VER
+#ifndef strdup
+#define strdup _strdup
+#endif
+#endif
+
 /* ------------------------------------------------------------------ */
 /*  Thread-safety support (opt-in via -DCLAY_THREAD_SAFE)              */
 /* ------------------------------------------------------------------ */
