@@ -1435,6 +1435,10 @@ BrickScaffold = Object clone {
             "clay tests/test_@PLUGIN@.clay       # a brick can import itself by name",
             "```",
             "",
+            "`.github/workflows/test.yml` runs the tests on Linux, macOS and Windows for every push and",
+            "pull request on GitHub (it builds Clay from source; pin `CLAY_REF` to a release once you",
+            "depend on one). On another Git host, delete it.",
+            "",
             "## Publish",
             "",
             "1. Choose a license and add a `LICENSE` file.",
@@ -1477,6 +1481,11 @@ BrickScaffold = Object clone {
             "| `src/main.clay` | the Clay API that wraps it |",
             "| `tests/test_@PLUGIN@.clay` | tests |",
             "",
+            "`.github/workflows/test.yml` runs the tests on Linux, macOS and Windows for every push and",
+            "pull request on GitHub, which is where a native brick's platform differences show up. It",
+            "builds Clay from source; pin `CLAY_REF` to a release once you depend on one. On another Git",
+            "host, delete it.",
+            "",
             "Per-platform flags go in `cflags-macos`, `libs-linux`, `sources-windows` and so on;",
             "`-I@/dir` names a directory inside the brick. See \"Native bricks\" in the Clay guide.",
             "",
@@ -1501,6 +1510,64 @@ BrickScaffold = Object clone {
         ] join("\n") + "\n"
     }
 
+    _ci_workflow() {
+        [
+            "name: Test",
+            "",
+            "# Runs the brick's tests with Clay on Linux, macOS and Windows. This is for GitHub;",
+            "# on another host, delete this folder (or make bricks with `clay bricks new --no-ci`).",
+            "on:",
+            "  push:",
+            "    branches: [main]",
+            "  pull_request:",
+            "  workflow_dispatch:",
+            "",
+            "env:",
+            "  # The Clay to test with: a branch, or a release tag such as v0.2.0",
+            "  CLAY_REF: main",
+            "",
+            "jobs:",
+            "  test:",
+            "    strategy:",
+            "      fail-fast: false",
+            "      matrix:",
+            "        os: [ubuntu-latest, macos-latest, windows-latest]",
+            "    runs-on: @D@{{ matrix.os }}",
+            "    defaults:",
+            "      run:",
+            "        shell: bash",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "",
+            "      - name: Get Clay",
+            "        uses: actions/checkout@v4",
+            "        with:",
+            "          repository: mseminatore/clay",
+            "          ref: @D@{{ env.CLAY_REF }}",
+            "          submodules: recursive",
+            "          path: clay",
+            "",
+            "      - name: Build Clay",
+            "        run: |",
+            "          cmake -S clay -B clay/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON",
+            "          cmake --build clay/build --config Release --target clay_compiler -j4",
+            "",
+            "      - name: Test",
+            "        run: |",
+            "          if [ \"@D@{{ runner.os }}\" = \"Windows\" ]; then",
+            "            CLAY=\"$PWD/clay/build/Release/clay.exe\"",
+            "          else",
+            "            CLAY=\"$PWD/clay/build/clay\"",
+            "          fi",
+            "          status=0",
+            "          for t in tests/test_*.clay; do",
+            "            echo \"== $t\"",
+            "            \"$CLAY\" \"$t\" || status=1",
+            "          done",
+            "          exit $status"
+        ] join("\n") + "\n"
+    }
+
     _pure_gitignore() {
         [
             "# bricks installed by `clay bricks install`",
@@ -1517,16 +1584,19 @@ BrickScaffold = Object clone {
         ] join("\n") + "\n"
     }
 
-    // [path, body] of each file, in the order they are created
+    // [path, body] of each file, in the order they are created (the CI workflow is
+    // last, so --no-ci leaves it out); @D@ stands for a dollar sign, which a Clay
+    // string can't hold before a {
     files(native) {
         native ifTrue {
             return [["brick.json", self _native_json], ["src/main.clay", self _native_main],
                     ["native/@PLUGIN@.c", self _native_c], ["tests/test_@PLUGIN@.clay", self _native_test],
-                    ["README.md", self _native_readme], [".gitignore", self _native_gitignore]]
+                    ["README.md", self _native_readme], [".gitignore", self _native_gitignore],
+                    [".github/workflows/test.yml", self _ci_workflow]]
         }
         [["brick.json", self _pure_json], ["src/main.clay", self _pure_main],
          ["tests/test_@PLUGIN@.clay", self _pure_test], ["README.md", self _pure_readme],
-         [".gitignore", self _pure_gitignore]]
+         [".gitignore", self _pure_gitignore], [".github/workflows/test.yml", self _ci_workflow]]
     }
 
     // what the registry accepts: a lowercase letter, then lowercase letters,
@@ -1558,7 +1628,7 @@ BrickScaffold = Object clone {
     cName(text) { text replace("-", "_") }
 
     fill(tpl, name, cm, pl) {
-        ((tpl replace("@NAME@", name)) replace("@CAMEL@", cm)) replace("@PLUGIN@", pl)
+        (((tpl replace("@NAME@", name)) replace("@CAMEL@", cm)) replace("@PLUGIN@", pl)) replace("@D@", "$")
     }
 }
 
@@ -1819,7 +1889,7 @@ Bricks = Object clone {
     }
 
     // `bricks new`: a brick in a new folder
-    cmdNew(given, native) {
+    cmdNew(given, native, ci) {
         (BrickScaffold nameOk(given)) ifFalse {
             self _err("error: invalid brick name '" + given + "' (use lowercase letters, digits and '-', " +
                       "starting with a letter; at most 64 characters)")
@@ -1837,7 +1907,9 @@ Bricks = Object clone {
             return 1
         }
         made = []
-        (BrickScaffold files(native)) each { |entry|
+        fileList = BrickScaffold files(native)
+        (ci == false) ifTrue { fileList = fileList slice(0, fileList size - 1) }
+        fileList each { |entry|
             rel = BrickScaffold fill(entry at(0), given, cm, pl)
             path = given + "/" + rel
             // the folders on the way
@@ -2105,20 +2177,28 @@ Bricks = Object clone {
         0
     }
 
+    // the command list: `text` for the error stream when asked for nothing, for
+    // the output when the user asked (help)
+    _usageText() {
+        "Usage: " + prog + " bricks <command>\n\n" +
+        "Commands:\n" +
+        "  init              Create a new brick.json\n" +
+        "  new <name> [--native] [--no-ci]\n" +
+        "                    Create a brick in a new folder (--native: with a C plugin;\n" +
+        "                    --no-ci: without the GitHub Actions workflow)\n" +
+        "  install           Install dependencies from brick.json\n" +
+        "  update            Update installed dependencies\n" +
+        "  add <url> [name]  Add a dependency (name = its import path)\n" +
+        "                    --yes: add a native brick without asking\n" +
+        "  remove <name>     Remove a dependency\n" +
+        "  list              Show project info and dependencies\n" +
+        "  search [words]    Find bricks in the registry (clay-registry on GitHub)\n" +
+        "  info <name>       What the registry says about a brick\n" +
+        "  help              This list (also --help)"
+    }
+
     usage() {
-        self _err("Usage: " + prog + " bricks <command>\n\n" +
-                  "Commands:\n" +
-                  "  init              Create a new brick.json\n" +
-                  "  new <name> [--native]\n" +
-                  "                    Create a brick in a new folder (--native: with a C plugin)\n" +
-                  "  install           Install dependencies from brick.json\n" +
-                  "  update            Update installed dependencies\n" +
-                  "  add <url> [name]  Add a dependency (name = its import path)\n" +
-                  "                    --yes: add a native brick without asking\n" +
-                  "  remove <name>     Remove a dependency\n" +
-                  "  list              Show project info and dependencies\n" +
-                  "  search [words]    Find bricks in the registry (clay-registry on GitHub)\n" +
-                  "  info <name>       What the registry says about a brick")
+        self _err(self _usageText)
         1
     }
 
@@ -2126,25 +2206,32 @@ Bricks = Object clone {
     command(args) {
         (args size < 1) ifTrue { return self usage }
         cmd = args at(0)
+        (cmd == "help" || cmd == "--help" || cmd == "-h") ifTrue {
+            self _say(self _usageText)       // asked for, so it is output and a success
+            return 0
+        }
         (cmd == "init") ifTrue { return self cmdInit }
         (cmd == "new") ifTrue {
             given = nil
             count = 0
             native = false
+            ci = true
             i = 1
             { i < args size } whileTrue {
                 a = args at(i)
                 (a == "--native") ifTrue { native = true } ifFalse {
-                    (count == 0) ifTrue { given = a }
-                    count = count + 1
+                    (a == "--no-ci") ifTrue { ci = false } ifFalse {
+                        (count == 0) ifTrue { given = a }
+                        count = count + 1
+                    }
                 }
                 i = i + 1
             }
             (count != 1) ifTrue {
-                self _err("Usage: " + prog + " bricks new <name> [--native]")
+                self _err("Usage: " + prog + " bricks new <name> [--native] [--no-ci]")
                 return 1
             }
-            return self cmdNew(given, native)
+            return self cmdNew(given, native, ci)
         }
         (cmd == "install") ifTrue { return self cmdInstall }
         (cmd == "update") ifTrue { return self cmdUpdate }
@@ -2173,7 +2260,7 @@ Bricks = Object clone {
             (cmd == "info") ifTrue { return BrickRegistry info(args at(1), prog) }
             return self cmdRemove(args at(1))
         }
-        self _err("Unknown bricks command: " + cmd)
+        self _err("Unknown bricks command: " + cmd + " (" + prog + " bricks --help lists them)")
         1
     }
 }

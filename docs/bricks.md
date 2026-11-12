@@ -6,6 +6,7 @@ Bricks is Clay's built-in package manager. Packages ("bricks") are Git repositor
 
 ```sh
 clay bricks new my-brick                      # a new brick in a new folder (--native: with C)
+clay bricks --help                            # the commands
 clay bricks init                              # create brick.json in this folder
 clay bricks add github.com/user/some-lib      # add + install a dependency
 clay bricks add github.com/user/clay-foo foo  # ...named (and imported as) "foo"
@@ -127,12 +128,18 @@ clay bricks new my-brick --native     # with a C plugin
 cd my-brick && clay tests/test_my_brick.clay
 ```
 
-This makes a folder with a `brick.json`, a `src/main.clay` to fill in, a test, a README
-and a `.gitignore`; `--native` adds `native/my_brick.c`, a small working plugin (a counter
+This makes a folder with a `brick.json`, a `src/main.clay` to fill in, a test, a README, a
+`.gitignore` and a GitHub Actions workflow; `--native` adds `native/my_brick.c`, a small working plugin (a counter
 object with a C struct, a method that raises, and the `<name>_plugin_init` entry point),
 and the matching `native` section in `brick.json`. The tests pass as generated, so you
 start from something that works. A name is lowercase letters, digits and `-` and starts
 with a letter, as the registry requires; the C identifier is the name with `-` as `_`.
+
+The workflow, `.github/workflows/test.yml`, runs the brick's `tests/test_*.clay` on Linux, macOS
+and Windows for every push and pull request, building Clay from source (set `CLAY_REF` in it to
+a release tag once you depend on one). It is only a file: a brick on another Git host can ignore
+it, or leave it out with `clay bricks new my-brick --no-ci`. For a native brick it is how you find out
+that your C builds with the other platforms' compilers.
 
 A brick can import itself by name from inside its own folder, so its tests and examples
 say `import("my-brick")` just as its users will, with nothing installed or symlinked. For

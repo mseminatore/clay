@@ -24,9 +24,17 @@ endfunction()
 
 # a pure Clay brick
 run_ok("bricks new" "${WORK}" "${CLAY}" bricks new demo-kit)
-foreach(f brick.json src/main.clay tests/test_demo_kit.clay README.md .gitignore)
+foreach(f brick.json src/main.clay tests/test_demo_kit.clay README.md .gitignore .github/workflows/test.yml)
     if(NOT EXISTS "${WORK}/demo-kit/${f}")
         message(FATAL_ERROR "bricks new did not create demo-kit/${f}")
+    endif()
+endforeach()
+# the workflow keeps GitHub's ${{ }} expressions (they pass through the Clay strings the port builds)
+file(READ "${WORK}/demo-kit/.github/workflows/test.yml" workflow)
+foreach(want "runs-on: \${{ matrix.os }}" "ref: \${{ env.CLAY_REF }}" "CLAY_REF: main" "tests/test_*.clay")
+    string(FIND "${workflow}" "${want}" at)
+    if(at LESS 0)
+        message(FATAL_ERROR "the workflow lacks '${want}':\n${workflow}")
     endif()
 endforeach()
 run_ok("the tests of demo-kit" "${WORK}/demo-kit" "${CLAY}" tests/test_demo_kit.clay)
@@ -36,7 +44,7 @@ endif()
 
 # a native brick, imported by its own name: the VM builds the plugin on first use
 run_ok("bricks new --native" "${WORK}" "${CLAY}" bricks new nat-kit --native)
-foreach(f brick.json src/main.clay native/nat_kit.c tests/test_nat_kit.clay README.md .gitignore)
+foreach(f brick.json src/main.clay native/nat_kit.c tests/test_nat_kit.clay README.md .gitignore .github/workflows/test.yml)
     if(NOT EXISTS "${WORK}/nat-kit/${f}")
         message(FATAL_ERROR "bricks new --native did not create nat-kit/${f}")
     endif()
@@ -53,6 +61,31 @@ run_ok("clay --compile of the nat-kit tests" "${WORK}/nat-kit"
 run_ok("the compiled nat-kit tests" "${WORK}/nat-kit" "${exe}")
 if(NOT last_output MATCHES "nat-kit tests passed")
     message(FATAL_ERROR "compiled nat-kit tests did not report success:\n${last_output}")
+endif()
+
+# --no-ci leaves the workflow out, and nothing else
+run_ok("bricks new --no-ci" "${WORK}" "${CLAY}" bricks new bare-kit --no-ci)
+if(EXISTS "${WORK}/bare-kit/.github")
+    message(FATAL_ERROR "bricks new --no-ci made a .github folder")
+endif()
+foreach(f brick.json src/main.clay tests/test_bare_kit.clay README.md .gitignore)
+    if(NOT EXISTS "${WORK}/bare-kit/${f}")
+        message(FATAL_ERROR "bricks new --no-ci did not create bare-kit/${f}")
+    endif()
+endforeach()
+
+# help is output and a success; asking for nothing is an error
+run_ok("bricks --help" "${WORK}" "${CLAY}" bricks --help)
+if(NOT last_output MATCHES "Commands:" OR NOT last_output MATCHES "new <name> \\[--native\\] \\[--no-ci\\]")
+    message(FATAL_ERROR "bricks --help did not list the commands:\n${last_output}")
+endif()
+foreach(spelling help -h)
+    run_ok("bricks ${spelling}" "${WORK}" "${CLAY}" bricks ${spelling})
+endforeach()
+execute_process(COMMAND "${CLAY}" bricks WORKING_DIRECTORY "${WORK}"
+                RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out)
+if(rc EQUAL 0 OR NOT out MATCHES "Commands:")
+    message(FATAL_ERROR "bricks with no command should print the usage and fail:\n${out}")
 endif()
 
 # mistakes are refused

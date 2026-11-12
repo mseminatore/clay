@@ -1178,7 +1178,9 @@ static int cmd_init(void) {
  * The files below are the same as the ones selfhost/clay-bricks writes (kept
  * in step by CTest clay_selfhost_bricks, which compares what both create).
  * @NAME@, @CAMEL@ and @PLUGIN@ stand for the brick's name (foo-bar), its
- * prototype name (FooBar) and its C identifier (foo_bar). */
+ * prototype name (FooBar) and its C identifier (foo_bar); @D@ is a dollar sign
+ * (written this way because a Clay string can't contain ${). The CI workflow
+ * is the last file of each list, so --no-ci leaves it out. */
 typedef struct { const char *path; const char *body; } BrickTemplate;
 
 static const char TPL_PURE_JSON[] =
@@ -1396,6 +1398,10 @@ static const char TPL_PURE_README[] =
     "clay tests/test_@PLUGIN@.clay       # a brick can import itself by name\n"
     "```\n"
     "\n"
+    "`.github/workflows/test.yml` runs the tests on Linux, macOS and Windows for every push and\n"
+    "pull request on GitHub (it builds Clay from source; pin `CLAY_REF` to a release once you\n"
+    "depend on one). On another Git host, delete it.\n"
+    "\n"
     "## Publish\n"
     "\n"
     "1. Choose a license and add a `LICENSE` file.\n"
@@ -1435,6 +1441,11 @@ static const char TPL_NATIVE_README[] =
     "| `src/main.clay` | the Clay API that wraps it |\n"
     "| `tests/test_@PLUGIN@.clay` | tests |\n"
     "\n"
+    "`.github/workflows/test.yml` runs the tests on Linux, macOS and Windows for every push and\n"
+    "pull request on GitHub, which is where a native brick's platform differences show up. It\n"
+    "builds Clay from source; pin `CLAY_REF` to a release once you depend on one. On another Git\n"
+    "host, delete it.\n"
+    "\n"
     "Per-platform flags go in `cflags-macos`, `libs-linux`, `sources-windows` and so on;\n"
     "`-I@/dir` names a directory inside the brick. See \"Native bricks\" in the Clay guide.\n"
     "\n"
@@ -1457,6 +1468,61 @@ static const char TPL_NATIVE_README[] =
     "4. Check it on Linux, macOS and Windows (C differs between them), then list it in the\n"
     "   [clay-registry](https://github.com/mseminatore/clay-registry) with a pull request.\n";
 
+static const char TPL_CI_WORKFLOW[] =
+    "name: Test\n"
+    "\n"
+    "# Runs the brick's tests with Clay on Linux, macOS and Windows. This is for GitHub;\n"
+    "# on another host, delete this folder (or make bricks with `clay bricks new --no-ci`).\n"
+    "on:\n"
+    "  push:\n"
+    "    branches: [main]\n"
+    "  pull_request:\n"
+    "  workflow_dispatch:\n"
+    "\n"
+    "env:\n"
+    "  # The Clay to test with: a branch, or a release tag such as v0.2.0\n"
+    "  CLAY_REF: main\n"
+    "\n"
+    "jobs:\n"
+    "  test:\n"
+    "    strategy:\n"
+    "      fail-fast: false\n"
+    "      matrix:\n"
+    "        os: [ubuntu-latest, macos-latest, windows-latest]\n"
+    "    runs-on: @D@{{ matrix.os }}\n"
+    "    defaults:\n"
+    "      run:\n"
+    "        shell: bash\n"
+    "    steps:\n"
+    "      - uses: actions/checkout@v4\n"
+    "\n"
+    "      - name: Get Clay\n"
+    "        uses: actions/checkout@v4\n"
+    "        with:\n"
+    "          repository: mseminatore/clay\n"
+    "          ref: @D@{{ env.CLAY_REF }}\n"
+    "          submodules: recursive\n"
+    "          path: clay\n"
+    "\n"
+    "      - name: Build Clay\n"
+    "        run: |\n"
+    "          cmake -S clay -B clay/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON\n"
+    "          cmake --build clay/build --config Release --target clay_compiler -j4\n"
+    "\n"
+    "      - name: Test\n"
+    "        run: |\n"
+    "          if [ \"@D@{{ runner.os }}\" = \"Windows\" ]; then\n"
+    "            CLAY=\"$PWD/clay/build/Release/clay.exe\"\n"
+    "          else\n"
+    "            CLAY=\"$PWD/clay/build/clay\"\n"
+    "          fi\n"
+    "          status=0\n"
+    "          for t in tests/test_*.clay; do\n"
+    "            echo \"== $t\"\n"
+    "            \"$CLAY\" \"$t\" || status=1\n"
+    "          done\n"
+    "          exit $status\n";
+
 static const char TPL_PURE_GITIGNORE[] =
     "# bricks installed by `clay bricks install`\n"
     "bricks/\n";
@@ -1473,7 +1539,8 @@ static const BrickTemplate brick_tpl_pure[] = {
     { "src/main.clay", TPL_PURE_MAIN },
     { "tests/test_@PLUGIN@.clay", TPL_PURE_TEST },
     { "README.md", TPL_PURE_README },
-    { ".gitignore", TPL_PURE_GITIGNORE }
+    { ".gitignore", TPL_PURE_GITIGNORE },
+    { ".github/workflows/test.yml", TPL_CI_WORKFLOW }
 };
 
 static const BrickTemplate brick_tpl_native[] = {
@@ -1482,7 +1549,8 @@ static const BrickTemplate brick_tpl_native[] = {
     { "native/@PLUGIN@.c", TPL_NATIVE_C },
     { "tests/test_@PLUGIN@.clay", TPL_NATIVE_TEST },
     { "README.md", TPL_NATIVE_README },
-    { ".gitignore", TPL_NATIVE_GITIGNORE }
+    { ".gitignore", TPL_NATIVE_GITIGNORE },
+    { ".github/workflows/test.yml", TPL_CI_WORKFLOW }
 };
 
 /* "foo-bar" -> "FooBar" */
@@ -1526,6 +1594,7 @@ static char *brick_fill(const char *tpl, const char *name, const char *camel, co
         if (strncmp(c, "@NAME@", 6) == 0) { with = name; skip = 6; }
         else if (strncmp(c, "@CAMEL@", 7) == 0) { with = camel; skip = 7; }
         else if (strncmp(c, "@PLUGIN@", 8) == 0) { with = plugin; skip = 8; }
+        else if (strncmp(c, "@D@", 3) == 0) { with = "$"; skip = 3; }      /* a dollar: Clay strings can't hold ${ */
         if (with) {
             size_t len = strlen(with);
             if (n + len + 1 >= cap) { free(out); return NULL; }
@@ -1541,7 +1610,7 @@ static char *brick_fill(const char *tpl, const char *name, const char *camel, co
     return out;
 }
 
-static int cmd_new(const char *name, int native) {
+static int cmd_new(const char *name, int native, int ci) {
     if (!brick_new_name_ok(name)) {
         fprintf(stderr, "error: invalid brick name '%s' (use lowercase letters, digits and '-', "
                         "starting with a letter; at most 64 characters)\n", name);
@@ -1559,12 +1628,13 @@ static int cmd_new(const char *name, int native) {
     const BrickTemplate *files = native ? brick_tpl_native : brick_tpl_pure;
     int count = native ? (int)(sizeof(brick_tpl_native) / sizeof(brick_tpl_native[0]))
                        : (int)(sizeof(brick_tpl_pure) / sizeof(brick_tpl_pure[0]));
+    if (!ci) count--;                   /* the workflow is the last file */
     make_dir(name);
     if (stat(name, &st) != 0) {
         fprintf(stderr, "error: cannot create %s\n", name);
         return 1;
     }
-    char shown[16][BRICK_MAX_PATH];
+    char shown[16][BRICK_MAX_PATH];     /* (at most 16 files) */
     for (int i = 0; i < count; i++) {
         char *rel = brick_fill(files[i].path, name, camel, plugin);
         char *body = brick_fill(files[i].body, name, camel, plugin);
@@ -2131,42 +2201,52 @@ static int cmd_update(void) {
     return failures ? 1 : 0;
 }
 
+static void bricks_usage(FILE *out) {
+    fprintf(out, "Usage: clay bricks <command>\n\n");
+    fprintf(out, "Commands:\n");
+    fprintf(out, "  init              Create a new brick.json\n");
+    fprintf(out, "  new <name> [--native] [--no-ci]\n");
+    fprintf(out, "                    Create a brick in a new folder (--native: with a C plugin;\n");
+    fprintf(out, "                    --no-ci: without the GitHub Actions workflow)\n");
+    fprintf(out, "  install           Install dependencies from brick.json\n");
+    fprintf(out, "  update            Update installed dependencies\n");
+    fprintf(out, "  add <url> [name]  Add a dependency (name = its import path)\n");
+    fprintf(out, "                    --yes: add a native brick without asking\n");
+    fprintf(out, "  remove <name>     Remove a dependency\n");
+    fprintf(out, "  list              Show project info and dependencies\n");
+    fprintf(out, "  search [words]    Find bricks in the registry (clay-registry on GitHub)\n");
+    fprintf(out, "  info <name>       What the registry says about a brick\n");
+    fprintf(out, "  help              This list (also --help)\n");
+}
+
 int brick_command(int argc, char **argv) {
     /* unbuffered, so progress and errors (stderr) interleave in order even
      * when piped; these commands print little */
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 1) {
-        fprintf(stderr, "Usage: clay bricks <command>\n\n");
-        fprintf(stderr, "Commands:\n");
-        fprintf(stderr, "  init              Create a new brick.json\n");
-        fprintf(stderr, "  new <name> [--native]\n");
-        fprintf(stderr, "                    Create a brick in a new folder (--native: with a C plugin)\n");
-        fprintf(stderr, "  install           Install dependencies from brick.json\n");
-        fprintf(stderr, "  update            Update installed dependencies\n");
-        fprintf(stderr, "  add <url> [name]  Add a dependency (name = its import path)\n");
-        fprintf(stderr, "                    --yes: add a native brick without asking\n");
-        fprintf(stderr, "  remove <name>     Remove a dependency\n");
-        fprintf(stderr, "  list              Show project info and dependencies\n");
-        fprintf(stderr, "  search [words]    Find bricks in the registry (clay-registry on GitHub)\n");
-        fprintf(stderr, "  info <name>       What the registry says about a brick\n");
+        bricks_usage(stderr);
         return 1;
     }
 
     const char *cmd = argv[0];
-    if (strcmp(cmd, "init") == 0) {
+    if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
+        bricks_usage(stdout);               /* asked for, so it is output and a success */
+        return 0;
+    } else if (strcmp(cmd, "init") == 0) {
         return cmd_init();
     } else if (strcmp(cmd, "new") == 0) {
         const char *given = NULL;
-        int nargs = 0, native = 0;
+        int nargs = 0, native = 0, ci = 1;
         for (int i = 1; i < argc; i++) {
             if (strcmp(argv[i], "--native") == 0) native = 1;
+            else if (strcmp(argv[i], "--no-ci") == 0) ci = 0;
             else if (nargs++ == 0) given = argv[i];
         }
         if (nargs != 1) {
-            fprintf(stderr, "Usage: clay bricks new <name> [--native]\n");
+            fprintf(stderr, "Usage: clay bricks new <name> [--native] [--no-ci]\n");
             return 1;
         }
-        return cmd_new(given, native);
+        return cmd_new(given, native, ci);
     } else if (strcmp(cmd, "install") == 0) {
         return cmd_install();
     } else if (strcmp(cmd, "update") == 0) {
@@ -2201,7 +2281,7 @@ int brick_command(int argc, char **argv) {
     } else if (strcmp(cmd, "list") == 0) {
         return cmd_list();
     } else {
-        fprintf(stderr, "Unknown bricks command: %s\n", cmd);
+        fprintf(stderr, "Unknown bricks command: %s (clay bricks --help lists them)\n", cmd);
         return 1;
     }
 }
