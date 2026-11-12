@@ -1714,6 +1714,7 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
         {"Graphics", clay_Graphics},
         {"Vec3", clay_Vec3},
         {"Thread", clay_Thread},
+        {"Socket", clay_Socket},
         {"BreakSignal", clay_BreakSignal},
         {"ContinueSignal", clay_ContinueSignal},
         {"VM", clay_VM},

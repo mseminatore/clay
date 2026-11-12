@@ -17,7 +17,7 @@ static const char *k_builtins[] = {
     "Object", "Number", "String", "Array", "Block", "Nil", "Boolean", "Error",
     "Dict", "Math", "Console", "File", "System", "FFI", "Date", "Http",
     "Regex", "Crypto", "Process", "Range", "Fiber", "Db", "Graphics", "Vec3",
-    "Thread", "VM", "BreakSignal", "ContinueSignal", "true", "false", "nil",
+    "Thread", "Socket", "VM", "BreakSignal", "ContinueSignal", "true", "false", "nil",
     NULL
 };
 

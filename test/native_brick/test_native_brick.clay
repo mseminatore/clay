@@ -5,7 +5,7 @@ check = { |what, got, want|
     (got == want) ifFalse { raise("FAIL: " + what + ": " + got toString + " != " + want toString) }
 }
 
-check value("plugin API version", StatsNative apiVersion, 3)
+check value("plugin API version", StatsNative apiVersion, 4)
 check value("cflags for this platform only", StatsNative os, ((System platform) == "macos") ifTrue { 1 } ifFalse { ((System platform) == "linux") ifTrue { 2 } ifFalse { 3 } })
 check value("-I@/ is a directory in the brick", StatsNative extra, 7)
 check value("sum", Stats sum([1, 2, 3.5]), 6.5)
@@ -20,4 +20,11 @@ b = Stats accumulator
 check value("separate instances", b mean, 0)
 check value("TypeError on a non-number", (try { Stats sum([1, "x"]) } catch { |e| e type }), "TypeError")
 check value("ArgumentError", (try { StatsNative sum(5) } catch { |e| e type }), "ArgumentError")
+// API version 4: binary strings cross with their length
+zeros = (String chr(0)) + "ab" + (String chr(0))
+check value("to_bytes counts NUL bytes", StatsNative byteCount(zeros), 4)
+check value("make_bytes keeps NUL bytes", StatsNative reverseBytes(zeros), (String chr(0)) + "ba" + (String chr(0)))
+check value("every byte value crosses", (StatsNative counting(256)) bytes, (0..255) toArray)
+check value("an empty string crosses", StatsNative byteCount(""), 0)
+check value("to_bytes refuses a non-string", (try { StatsNative byteCount(5) } catch { |e| e type }), "ArgumentError")
 "native brick ok" println

@@ -120,7 +120,7 @@ BcGen = Object clone {
     vmStartGlobals = ["Object", "Number", "String", "Array", "Block", "Nil", "Boolean",
                       "Error", "Dict", "Math", "Console", "File", "System", "FFI", "Date",
                       "Http", "Regex", "Crypto", "Process", "Range", "Fiber", "Db", "Graphics", "Vec3", "Thread",
-                      "BreakSignal", "ContinueSignal", "VM", "true", "false", "nil"]
+                      "Socket", "BreakSignal", "ContinueSignal", "VM", "true", "false", "nil"]
 
     // --- state kept across compiles (the VM's, mirrored) ---
     srcFile = "<input>"

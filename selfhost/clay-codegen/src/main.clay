@@ -222,7 +222,7 @@ CodeGen = Object clone {
         "Regex": "CLAY_VAL(clay_Regex)", "Fiber": "CLAY_VAL(clay_Fiber)",
         "Db": "CLAY_VAL(clay_Db)", "Graphics": "CLAY_VAL(clay_Graphics)",
         "Range": "CLAY_VAL(clay_Range)", "Vec3": "CLAY_VAL(clay_Vec3)",
-        "Thread": "CLAY_VAL(clay_Thread)", "VM": "CLAY_VAL(clay_VM)",
+        "Thread": "CLAY_VAL(clay_Thread)", "Socket": "CLAY_VAL(clay_Socket)", "VM": "CLAY_VAL(clay_VM)",
         "Crypto": "CLAY_VAL(clay_Crypto)", "Process": "CLAY_VAL(clay_Process)",
         "true": "CLAY_TRUE", "false": "CLAY_FALSE", "nil": "CLAY_NIL"
     }

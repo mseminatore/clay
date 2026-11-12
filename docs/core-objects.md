@@ -8,7 +8,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 |-----------|---------|
 | Object | `clone()`, `new(args...)`, `toString()`, `println()`, `type()`, `methods()`, `slots()`, `inspect()`, `parent()`, `hasSlot(name)`, `getSlot(name)`, `setSlot(name, val)`, `hasMethod(name)`, `setMethod(name, block)`, `doesNotUnderstand(name, args)` |
 | Number | `+`, `-`, `*`, `/`, `%`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `abs()`, `clamp(lo, hi)`, `lerp(to, t)`, `sign()`, `negated()`, `toFloat()`, `toInt()`, `toString()`, `println()`, `times(block)` |
-| String | `+`, `==`, `length()`, `at(i)`, `byteAt(i)` (byte value, nil out of range), `chr(code)`, `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `indexOf(sub)`, `lastIndexOf(sub)`, `repeat(n)`, `padLeft(n, ch)`, `padRight(n, ch)`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
+| String | `+`, `==`, `length()`, `at(i)`, `byteAt(i)` (byte value, nil out of range), `bytes()` (Array of byte values), `chr(code)`, `fromBytes(array)` (`String fromBytes([72, 105])`), `contains(sub)`, `slice(start, end)`, `split(delim)`, `replace(old, new)`, `toInt()`, `toFloat()`, `trim()`, `upper()`, `lower()`, `startsWith(s)`, `endsWith(s)`, `reverse()`, `indexOf(sub)`, `lastIndexOf(sub)`, `repeat(n)`, `padLeft(n, ch)`, `padRight(n, ch)`, `match(pattern)`, `test(pattern)`, `print()`, `println()`, `toString()` |
 | Array | `at(i)`, `setAt(i, val)`, `append(val)`, `push(val)`, `pop()`, `shift()`, `insert(i, val)`, `size()`, `length()`, `each(block)`, `map(block)`, `parallelMap(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `slice(start, end)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue { block }`, `whileFalse { block }` |
 | Boolean | `ifTrue { block }`, `ifFalse { block }`, `not()`, `toString()` |
@@ -29,6 +29,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Range | `each(block)`, `map(block)`, `filter(block)`, `contains(val)`, `toArray()`, `size()`, `step(n)`, `reverse()`, `start()`, `end()`, `toString()` |
 | Vec3 | `new(x,y,z)`, `x`, `y`, `z`, `+`, `-`, `*`, `/`, `dot(v)`, `cross(v)`, `length`, `lengthSquared`, `normalize`, `mul(v)`, `reflect(n)`, `nearZero`, `negated`, `==`, `!=`, `toString()` |
 | Thread | `spawn(block)`, `await()`, `done()`, `available` |
+| Socket | `connect(host, port)`, `listen(port)`, `udp()`, `resolve(host)`, `select(sockets)`; on a socket: `read(max)`, `readExactly(n)`, `write(data)`, `accept()`, `sendTo(host, port, data)`, `receiveFrom()`, `setTimeout(ms)`, `close()`, `localPort`, `remoteAddress` — see [Sockets](#sockets) |
 | VM | `run(unit)`, `run(unit, args)`, `hasGlobal(name)`, `counts()` — run bytecode from the [Clay compiler in Clay](native-and-plugins.md#a-clay-compiler-in-clay) (native programs only) |
 | Graphics | `window(w,h,title)`, `close`, `clear`, `color(r,g,b)`, `setPixel(x,y,r,g,b)`, `drawLine(x1,y1,x2,y2)`, `drawRect(x,y,w,h)`, `fillRect(x,y,w,h)`, `drawCircle(x,y,r)`, `fillCircle(x,y,r)`, `drawText(x,y,text)`, `fontSize(n)`, `loadPPM(path)`, `drawImage(img,x,y)`, `drawImageEx(img,x,y,scale)`, `createSprite(img,x,y,w,h)`, `drawSprite(s,x,y)`, `createBuffer(w,h)`, `bufferPixel(buf,x,y,r,g,b)`, `drawBuffer(buf,x,y)`, `pollEvent`, `waitEvent`, `isKeyDown(key)`, `mouseX`, `mouseY`, `mouseDown`, `ticks`, `delay(ms)`, `fps`, `refresh`, `resize(w,h)`, `fullscreen`, `windowed`, `width`, `height` |
 
@@ -345,6 +346,55 @@ incoming = Vec3 new(1, -1, 0) normalize
 normal = Vec3 new(0, 1, 0)
 incoming reflect(normal)   // reflected direction
 ```
+
+## Sockets
+
+`Socket` is TCP and UDP networking, enough to write clients, servers and protocols in Clay
+(HTTP has its own, easier [client](#http-client) and [server](#http-server)). Data is a
+String; strings are byte strings, so they can hold any byte, NULs included.
+
+```clay norun
+// a TCP client
+s = Socket connect("example.com", 80)
+s write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n")
+reply = ""
+{ chunk = s read(4096)
+  chunk != nil } whileTrue { reply = reply + chunk }       // read gives nil when the peer closes
+s close
+reply println
+
+// a TCP server (one connection at a time)
+srv = Socket listen(8080)                // loopback only; Socket listen(8080, "0.0.0.0") for everyone
+{ true } whileTrue {
+    conn = srv accept
+    request = conn read(4096)
+    conn write("echo: " + request)
+    conn close
+}
+```
+
+- `Socket connect(host, port, timeoutMs)` — the timeout is optional. `Socket listen(port, host, backlog)`
+  binds `host` (default `"127.0.0.1"`, so a server isn't reachable from other machines unless you
+  ask: pass `"0.0.0.0"` or `"::"`); port 0 picks a free one, which `localPort` tells you.
+  `Socket udp(port)` makes a UDP socket, bound if you give a port. `Socket resolve("host")` is an
+  Array of its addresses.
+- `read(max)` returns up to `max` bytes (at least one; default 4096) or `nil` once the peer has
+  closed. `readExactly(n)` returns exactly `n` or raises. `write(data)` sends all of it and returns the
+  byte count. `shutdownWrite` closes only your sending side; `close` ends the socket (also done when
+  an unclosed socket is freed).
+- `accept` waits for a connection; `accept(ms)` returns `nil` if none comes within `ms` (`accept(0)`
+  just looks). `Socket select([a, b], ms)` returns the sockets that can be read now (or, for a
+  listening socket, have a connection waiting), so one loop can serve several: with `ms` omitted it
+  waits, with 0 it just looks.
+- `setTimeout(ms)` limits how long `read`, `readExactly`, `write` and `receiveFrom` wait (0: forever); it
+  returns the socket, so it chains. An expired timeout raises `TimeoutError`, any other failure
+  `SocketError` (type `e type`), and a bad argument `ArgumentError` or `TypeError`.
+- UDP: `sendTo(host, port, data)` and `receiveFrom(max)`, which gives `[data, host, port]`.
+- `localPort`, `localAddress`, `remotePort` and `remoteAddress` describe the two ends; `noDelay(true)`
+  turns off Nagle's algorithm.
+
+Calls block the whole program until they finish or time out, fibers and `parallelMap` included;
+use timeouts and `select` to keep a loop responsive. There is no TLS (use `Http` for HTTPS).
 
 ## Threads
 

@@ -1,0 +1,128 @@
+// Socket: TCP and UDP over the loopback interface (no network needed). Calls
+// block the whole program, so every exchange here is small enough to sit in
+// the kernel's buffers while this one thread plays both ends.
+
+failures = 0
+check = { |name, ok|
+    ok ifFalse {
+        Console print("FAIL: " + name + "\n")
+        failures = failures + 1
+    }
+}
+raises = { |block| try { block value
+                         "no error" } catch { |e| e type } }
+
+// --- a TCP connection, both ends in this program ---
+srv = Socket listen(0)
+port = srv localPort
+check value("listen picks a port", port > 0 && port < 65536)
+check value("listens on loopback by default", srv localAddress == "127.0.0.1")
+check value("accept(0) with nobody there is nil", (srv accept(0)) == nil)
+check value("accept with a timeout and nobody there is nil", (srv accept(30)) == nil)
+
+cli = Socket connect("127.0.0.1", port)
+check value("select sees a pending connection", (Socket select([srv], 1000)) size == 1)
+conn = srv accept(1000)
+check value("accept gives a socket", conn != nil && conn isOpen)
+check value("client's remote port is the server's", cli remotePort == port)
+check value("server's remote port is the client's", conn remotePort == cli localPort)
+check value("addresses are loopback", cli remoteAddress == "127.0.0.1" && conn remoteAddress == "127.0.0.1")
+check value("a socket describes itself", cli toString == "Socket(tcp, open)")
+
+// data: text, then bytes with NULs, in both directions
+check value("write returns the count", (cli write("hello")) == 5)
+check value("read gets it", (conn read(100)) == "hello")
+all = []
+256 times { |i| all push(i) }
+blob = String fromBytes(all)
+check value("write counts every byte", (conn write(blob)) == 256)
+got = cli readExactly(256)
+check value("every byte value crosses a socket", got == blob)
+check value("select: nothing to read", (Socket select([cli, conn], 20)) size == 0)
+cli write("ping")
+ready = Socket select([cli, conn], 1000)
+check value("select: the one with data", ready size == 1 && (ready at(0)) == conn)
+check value("read(2) gives at most 2", (conn read(2)) == "pi")
+check value("the rest is still there", (conn readExactly(2)) == "ng")
+
+// a bigger payload, written and read in pieces
+chunk = "0123456789abcdef" repeat(512)          // 8 KB
+conn write(chunk)
+conn write(chunk)
+total = ""
+{ total length < 16384 } whileTrue { total = total + (cli read(4096)) }
+check value("16 KB arrives intact", total == chunk + chunk)
+
+// timeouts
+cli setTimeout(50)
+check value("read times out", (raises value({ cli read(10) })) == "TimeoutError")
+check value("readExactly times out", (raises value({ cli readExactly(10) })) == "TimeoutError")
+check value("setTimeout returns the socket", (cli setTimeout(0)) == cli)
+
+// the peer closes
+conn write("bye")
+conn shutdownWrite
+check value("data before the close", (cli read(100)) == "bye")
+check value("read after the peer's shutdown is nil", (cli read(100)) == nil)
+conn close
+check value("readExactly past the close raises", (raises value({ cli readExactly(5) })) == "SocketError")
+check value("a closed socket says so", conn isOpen == false && conn toString == "Socket(tcp, closed)")
+check value("using a closed socket raises", (raises value({ conn read(1) })) == "SocketError")
+check value("close twice is fine", (conn close) == nil)
+cli close
+srv close
+
+// several clients, one after another
+srv = Socket listen(0)
+port = srv localPort
+3 times { |i|
+    c = Socket connect("127.0.0.1", port)
+    s = srv accept(1000)
+    c write("client ${i}")
+    check value("client ${i} reaches the server", (s read(100)) == "client ${i}")
+    s close
+    c close
+}
+srv close
+
+// failures
+check value("a refused connection raises", (raises value({ Socket connect("127.0.0.1", port) })) == "SocketError")
+check value("a port out of range", (raises value({ Socket connect("127.0.0.1", 70000) })) == "ArgumentError")
+check value("listen port out of range", (raises value({ Socket listen(-1) })) == "ArgumentError")
+check value("a port must be a number", (raises value({ Socket connect("127.0.0.1", "80") })) == "TypeError")
+check value("write wants a string", (raises value({ Socket udp(0) write(5) })) == "TypeError")
+check value("read max must be positive", (raises value({ Socket udp(0) read(0) })) == "ArgumentError")
+check value("a non-socket is refused", (raises value({ Socket read(1) })) == "TypeError")
+
+// a listening socket that is dropped is closed: its port can be used again
+srv = Socket listen(0)
+port = srv localPort
+srv = nil
+again = Socket listen(port)
+check value("a freed socket closes its descriptor", again localPort == port)
+again close
+
+// --- UDP ---
+a = Socket udp(0)
+b = Socket udp(0)
+check value("udp sockets have ports", a localPort > 0 && b localPort > 0 && a localPort != b localPort)
+check value("sendTo returns the count", (a sendTo("127.0.0.1", b localPort, "x" + (String chr(0)) + "y")) == 3)
+msg = b receiveFrom(100)
+check value("receiveFrom: the data", (msg at(0)) == ("x" + (String chr(0)) + "y"))
+check value("receiveFrom: who sent it", (msg at(1)) == "127.0.0.1" && (msg at(2)) == a localPort)
+b setTimeout(50)
+check value("receiveFrom times out", (raises value({ b receiveFrom(100) })) == "TimeoutError")
+check value("an unbound udp socket can send", (Socket udp() sendTo("127.0.0.1", a localPort, "hi")) == 2)
+check value("...and the other end gets it", ((a receiveFrom(100)) at(0)) == "hi")
+a close
+b close
+
+// --- names ---
+check value("resolve a numeric address", (Socket resolve("127.0.0.1")) == ["127.0.0.1"])
+check value("resolve gives strings", (Socket resolve("localhost")) size > 0)
+
+(failures > 0) ifTrue {
+    Console print(failures toString + " checks failed\n")
+    System exit(1)
+}
+Console print("socket tests passed\n")

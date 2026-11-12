@@ -41,6 +41,15 @@ static void clay_dealloc(ClayObject *obj) {
         }
     }
 
+    /* Close a socket nobody closed (its descriptor is in the _sock slot, -1 once closed) */
+    if (obj->slots) {
+        ht_value_t sock_val = ht_find(obj->slots, (ht_key_t)"_sock");
+        if (sock_val) {
+            ClayValue cv = (ClayValue)(uintptr_t)sock_val;
+            if (CLAY_IS_INT(cv)) clay_socket_free((intptr_t)clay_to_int(cv));
+        }
+    }
+
     /* Release parent */
     if (obj->parent) {
         clay_release(obj->parent);

@@ -144,9 +144,23 @@ typedef struct ClayPluginAPI {
      * output the user should see (progress, logs): C stdout is the debug
      * protocol channel when Clay runs as a debug adapter. */
     void            (*write_output)(const char *text);
+
+    /* ---- version 4 ---- */
+
+    /* Binary data. A Clay String is a sequence of bytes of known length and may
+     * hold NUL bytes, but make_string / to_string work with C strings and stop
+     * at the first NUL. These carry the length:
+     *   make_bytes copies len bytes into a new String (a new reference);
+     *   to_bytes returns a String's bytes and sets *len to their count; the
+     *     pointer is valid while v is alive (NUL-terminated, so it is also a C
+     *     string when the data has no NUL). It returns NULL, with *len 0, if v
+     *     is not a String.
+     * Use them for anything that is not text: socket data, files, images. */
+    ClayPluginValue (*make_bytes)(const void *data, size_t len);
+    const char *    (*to_bytes)(ClayPluginValue v, size_t *len);
 } ClayPluginAPI;
 
-#define CLAY_PLUGIN_API_VERSION 3
+#define CLAY_PLUGIN_API_VERSION 4
 
 /* Plugin entry point signature */
 typedef void (*ClayPluginInitFunc)(const ClayPluginAPI *api);

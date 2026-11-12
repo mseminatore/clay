@@ -175,11 +175,26 @@ static ClayValue string_at(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(clay_string_new_len(self->as.string.data + idx, 1));
 }
 
+/* The first place needle (nlen bytes) occurs in hay (hlen bytes), or NULL.
+ * Strings are byte strings that may hold NUL bytes, so this is not strstr. */
+static const char *mem_find(const char *hay, size_t hlen, const char *needle, size_t nlen) {
+    if (nlen == 0) return hay;
+    if (nlen > hlen) return NULL;
+    const char *last = hay + (hlen - nlen);
+    for (const char *p = hay; p <= last; p++) {
+        p = (const char *)memchr(p, (unsigned char)needle[0], (size_t)(last - p) + 1);
+        if (!p) return NULL;
+        if (memcmp(p, needle, nlen) == 0) return p;
+    }
+    return NULL;
+}
+
 static ClayValue string_contains(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_FALSE;
     ClayObject *sub = CLAY_OBJ(argv[0]);
     if (sub->type != CLAY_TYPE_STRING) return CLAY_FALSE;
-    return CLAY_BOOL(strstr(self->as.string.data, sub->as.string.data) != NULL);
+    return CLAY_BOOL(mem_find(self->as.string.data, self->as.string.length,
+                              sub->as.string.data, sub->as.string.length) != NULL);
 }
 
 static ClayValue string_slice(ClayObject *self, int argc, ClayValue *argv) {
@@ -197,8 +212,12 @@ static ClayValue string_slice(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *arr = clay_array_new();
     /* No argument splits on spaces; anything else must be a String */
-    const char *delim = argc > 0 ? clay_arg_string(argc, argv, 0, "String split") : " ";
-    size_t delim_len = strlen(delim);
+    const char *delim = " ";
+    size_t delim_len = 1;
+    if (argc > 0) {
+        delim = clay_arg_string(argc, argv, 0, "String split");
+        delim_len = CLAY_OBJ(argv[0])->as.string.length;     /* may hold NUL bytes */
+    }
     if (delim_len == 0) {
         /* Split into individual characters */
         for (size_t i = 0; i < self->as.string.length; i++) {
@@ -211,7 +230,7 @@ static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
     const char *p = self->as.string.data;
     const char *end = p + self->as.string.length;
     while (p <= end) {
-        const char *found = strstr(p, delim);
+        const char *found = mem_find(p, (size_t)(end - p), delim, delim_len);
         if (!found) found = end;
         ClayObject *s = clay_string_new_len(p, (size_t)(found - p));
         clay_array_append(arr, CLAY_VAL(s));
@@ -236,7 +255,9 @@ static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
     /* Count occurrences to pre-allocate */
     size_t count = 0;
     const char *p = self->as.string.data;
-    while ((p = strstr(p, old_str->as.string.data)) != NULL) {
+    const char *hay_end = self->as.string.data + self->as.string.length;
+    while ((p = mem_find(p, (size_t)(hay_end - p), old_str->as.string.data,
+                         old_str->as.string.length)) != NULL) {
         count++;
         p += old_str->as.string.length;
     }
@@ -249,7 +270,8 @@ static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
     p = self->as.string.data;
     const char *end = self->as.string.data + self->as.string.length;
     while (1) {
-        const char *found = strstr(p, old_str->as.string.data);
+        const char *found = mem_find(p, (size_t)(end - p), old_str->as.string.data,
+                                     old_str->as.string.length);
         if (!found) {
             size_t tail = (size_t)(end - p);
             memcpy(out, p, tail);
@@ -373,7 +395,8 @@ static ClayValue string_indexOf(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return clay_int(-1);
     ClayObject *sub = CLAY_OBJ(argv[0]);
     if (sub->type != CLAY_TYPE_STRING) return clay_int(-1);
-    const char *found = strstr(self->as.string.data, sub->as.string.data);
+    const char *found = mem_find(self->as.string.data, self->as.string.length,
+                                 sub->as.string.data, sub->as.string.length);
     if (!found) return clay_int(-1);
     return clay_int((intptr_t)(found - self->as.string.data));
 }
@@ -385,7 +408,8 @@ static ClayValue string_lastIndexOf(ClayObject *self, int argc, ClayValue *argv)
     if (sub->as.string.length == 0) return clay_int((intptr_t)self->as.string.length);
     const char *last = NULL;
     const char *p = self->as.string.data;
-    while ((p = strstr(p, sub->as.string.data)) != NULL) {
+    const char *hay_end = self->as.string.data + self->as.string.length;
+    while ((p = mem_find(p, (size_t)(hay_end - p), sub->as.string.data, sub->as.string.length)) != NULL) {
         last = p;
         p += sub->as.string.length;
     }
@@ -443,6 +467,37 @@ static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
 
 /* chr(code) — return a single-character string from an ASCII/Unicode code point */
 /* "abc" byteAt(1) → 98: the byte at an index (0..255), or nil out of range */
+/* String bytes -> an Array of the byte values (0..255) */
+static ClayValue string_bytes(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    ClayObject *arr = clay_array_new();
+    for (size_t i = 0; i < self->as.string.length; i++)
+        clay_array_append(arr, clay_int((unsigned char)self->as.string.data[i]));
+    return CLAY_VAL(arr);
+}
+
+/* String fromBytes(array) -> a string of those byte values (each 0..255) */
+static ClayValue string_fromBytes(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_ARRAY))
+        clay_raise_argument_error("String fromBytes", "expects an Array of byte values");
+    ClayObject *arr = CLAY_OBJ(argv[0]);
+    size_t n = clay_array_size(arr);
+    char *buf = (char *)malloc(n + 1);
+    if (!buf) clay_raise(CLAY_VAL(clay_error_new("String fromBytes: out of memory", "RuntimeError")));
+    for (size_t i = 0; i < n; i++) {
+        ClayValue v = clay_array_at(arr, i);
+        if (!CLAY_IS_INT(v) || clay_to_int(v) < 0 || clay_to_int(v) > 255) {
+            free(buf);
+            clay_raise_argument_error("String fromBytes", "every element must be an integer from 0 to 255");
+        }
+        buf[i] = (char)clay_to_int(v);
+    }
+    ClayObject *result = clay_string_new_len(buf, n);
+    free(buf);
+    return CLAY_VAL(result);
+}
+
 static ClayValue string_byteAt(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1 || !CLAY_IS_INT(argv[0])) clay_raise_argument_error("byteAt", "expects an integer index");
     intptr_t i = clay_to_int(argv[0]);
@@ -489,4 +544,6 @@ void clay_string_init_methods(ClayObject *proto) {
     clay_set_method(proto, "padRight", string_padRight);
     clay_set_method(proto, "chr", string_chr);
     clay_set_method(proto, "byteAt", string_byteAt);
+    clay_set_method(proto, "bytes", string_bytes);
+    clay_set_method(proto, "fromBytes", string_fromBytes);
 }

@@ -1,0 +1,77 @@
+// Strings are byte strings: they can hold NUL bytes and any byte value, and
+// the searching methods count every byte. (Sockets, files and hashes hand such
+// strings around.)
+
+failures = 0
+check = { |name, ok|
+    ok ifFalse {
+        Console print("FAIL: " + name + "\n")
+        failures = failures + 1
+    }
+}
+raises = { |block| try { block value
+                         "no error" } catch { |e| e type } }
+
+z = String chr(0)
+a = "ab" + z + "cd" + z + "cd"        // ab\0cd\0cd, 8 bytes
+
+check value("length counts NULs", a length == 8)
+check value("byteAt sees a NUL", (a byteAt(2)) == 0)
+check value("byteAt past the end is nil", (a byteAt(8)) == nil)
+check value("slice across a NUL", (a slice(1, 5)) == ("b" + z + "cd"))
+check value("== compares every byte", a == ("ab" + z + "cd" + z + "cd") && (a == ("ab" + z + "cd" + z + "ce")) == false)
+
+check value("contains after a NUL", a contains("cd"))
+check value("contains a NUL", a contains(z))
+check value("contains across a NUL", a contains("b" + z + "c"))
+check value("does not contain", (a contains("cx")) == false)
+check value("contains the empty string", a contains(""))
+
+check value("indexOf after a NUL", (a indexOf("cd")) == 3)
+check value("indexOf a NUL", (a indexOf(z)) == 2)
+check value("indexOf missing", (a indexOf("xy")) == -1)
+check value("lastIndexOf after NULs", (a lastIndexOf("cd")) == 6)
+check value("lastIndexOf a NUL", (a lastIndexOf(z)) == 5)
+
+parts = a split(z)
+check value("split on a NUL", parts size == 3 && (parts at(0)) == "ab" && (parts at(1)) == "cd" && (parts at(2)) == "cd")
+parts = a split("cd")
+check value("split on text across NULs", parts size == 3 && (parts at(0)) == ("ab" + z) && (parts at(1)) == z && (parts at(2)) == "")
+check value("split a string with no delimiter", ("a,b" split(";") size) == 1)
+
+check value("replace after a NUL", (a replace("cd", "XY")) == ("ab" + z + "XY" + z + "XY"))
+check value("replace a NUL", (a replace(z, "-")) == "ab-cd-cd")
+check value("replace with a NUL", ("a-b" replace("-", z)) == ("a" + z + "b"))
+check value("replace changing the length", (a replace("cd", "")) == ("ab" + z + z))
+
+check value("startsWith", a startsWith("ab" + z))
+check value("endsWith", a endsWith(z + "cd"))
+check value("an HTTP-style header split in binary data",
+            (("HTTP" + z + "\r\n\r\nbody" + z) indexOf("\r\n\r\n")) == 5)
+
+// bytes and fromBytes
+all = []
+256 times { |i| all push(i) }
+s = String fromBytes(all)
+check value("fromBytes makes 256 bytes", s length == 256)
+check value("bytes gives the values back", (s bytes) == all)
+check value("a byte string round trip", (String fromBytes(a bytes)) == a)
+check value("bytes of the empty string", ("" bytes) size == 0)
+check value("fromBytes of nothing", (String fromBytes([])) == "")
+check value("fromBytes rejects 256", (raises value({ String fromBytes([1, 256]) })) == "ArgumentError")
+check value("fromBytes rejects negatives", (raises value({ String fromBytes([-1]) })) == "ArgumentError")
+check value("fromBytes rejects text", (raises value({ String fromBytes(["a"]) })) == "ArgumentError")
+check value("fromBytes wants an array", (raises value({ String fromBytes(65) })) == "ArgumentError")
+
+// files and hashes keep every byte
+path = File tempDir + "/clay_string_bytes_test.bin"
+File write(path, s)
+check value("a file round trip keeps 256 bytes", (File read(path)) == s && (File size(path)) == 256)
+File delete(path)
+check value("sha256 counts every byte", (Crypto sha256("ab" + z + "cd")) != (Crypto sha256("ab")))
+
+(failures > 0) ifTrue {
+    Console print(failures toString + " checks failed\n")
+    System exit(1)
+}
+Console print("string byte tests passed\n")

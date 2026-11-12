@@ -317,6 +317,21 @@ static ClayPluginValue api_from_floats(const float *data, size_t n, size_t cols)
     return (ClayPluginValue)CLAY_VAL(arr);
 }
 
+static ClayPluginValue api_make_bytes(const void *data, size_t len) {
+    return (ClayPluginValue)CLAY_VAL(clay_string_new_len((const char *)data, len));
+}
+
+static const char *api_to_bytes(ClayPluginValue v, size_t *len) {
+    ClayValue cv = (ClayValue)v;
+    if (CLAY_IS_TYPE(cv, CLAY_TYPE_STRING)) {
+        ClayObject *s = CLAY_OBJ(cv);
+        if (len) *len = s->as.string.length;
+        return s->as.string.data;
+    }
+    if (len) *len = 0;
+    return NULL;
+}
+
 /* The global API vtable — single instance */
 static const ClayPluginAPI g_plugin_api = {
     .register_type    = api_register_type,
@@ -351,6 +366,8 @@ static const ClayPluginAPI g_plugin_api = {
     .to_floats        = api_to_floats,
     .from_floats      = api_from_floats,
     .write_output     = api_write_output,
+    .make_bytes       = api_make_bytes,
+    .to_bytes         = api_to_bytes,
 };
 
 /* ------------------------------------------------------------------ */

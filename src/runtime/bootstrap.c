@@ -41,6 +41,7 @@ ClayObject *clay_Range  = NULL;
 ClayObject *clay_Graphics = NULL;
 ClayObject *clay_Vec3 = NULL;
 ClayObject *clay_Thread = NULL;
+ClayObject *clay_Socket = NULL;
 ClayObject *clay_VM = NULL;
 ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
@@ -888,6 +889,16 @@ void clay_bootstrap(void) {
     clay_Fiber->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_slot_take(clay_Fiber, "_name", CLAY_VAL(clay_string_new("Fiber")));
     clay_fiber_init_methods(clay_Fiber);
+
+    /* Socket prototype — TCP and UDP (socket.c) */
+    clay_Socket = clay_object_new();
+    clay_Socket->parent = clay_Object;
+    clay_Socket->refcount = CLAY_REFCOUNT_IMMORTAL;
+    clay_set_slot_take(clay_Socket, "_name", CLAY_VAL(clay_string_new("Socket")));
+    {
+        extern void clay_socket_init(ClayObject *proto);
+        clay_socket_init(clay_Socket);
+    }
 
     /* Db prototype */
     clay_Db = clay_object_new();

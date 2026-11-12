@@ -26,7 +26,7 @@ RUNTIME_SRCS = src/runtime/object.c src/runtime/memory.c src/runtime/dispatch.c 
                src/runtime/block.c src/runtime/array.c src/runtime/error.c \
                src/runtime/clay_dict.c src/runtime/range.c src/runtime/math.c src/runtime/file.c \
                src/runtime/ffi.c src/runtime/date.c src/runtime/http.c \
-               src/runtime/regex.c src/runtime/crypto.c src/runtime/process.c src/runtime/db.c \
+               src/runtime/regex.c src/runtime/crypto.c src/runtime/process.c src/runtime/db.c src/runtime/socket.c \
                src/runtime/bootstrap.c src/runtime/intern.c \
                src/runtime/graphics.c src/runtime/vec3.c src/runtime/thread.c \
                src/runtime/plugin.c src/runtime/fiber.c src/runtime/vm_bridge.c

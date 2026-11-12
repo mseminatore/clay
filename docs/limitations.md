@@ -58,6 +58,10 @@ system's own stack size (8 MB on Linux and macOS, 1 MB on Windows). Only the pag
 uses are committed, so a big stack costs address space, not memory, until recursion reaches it.
 It applies to `clay`, to compiled programs and to `clayc`.
 
+**Socket calls block everything.** `Socket` reads, writes and accepts stop the whole
+program (the VM, fibers and all) until they finish or time out. Give sockets a timeout
+(`setTimeout`) and use `Socket select` to serve several at once. There is no TLS on raw sockets.
+
 **A method takes at most 16 parameters.** A 17th parameter isn't bound: using
 it fails with `object does not understand 'a16'`. Pass a Dict or an object
 instead of a long parameter list.

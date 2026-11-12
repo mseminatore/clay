@@ -159,6 +159,18 @@ Use it for output the user should see (progress, logs) instead of `printf` or
 `fputs(stdout)`, because in a debug session C's stdout is the protocol channel
 and such text is lost. Check `api->api_version >= 3` before using it.
 
+### Plugin API version 4
+
+Version 4 adds binary data. A Clay String is a sequence of bytes of known length and can hold
+NUL bytes, but `make_string` and `to_string` work with C strings and stop at the first NUL. Use
+
+- `make_bytes(data, len)` to make a String of exactly `len` bytes, and
+- `to_bytes(v, &len)` to read a String's bytes and its length (it returns `NULL`, with `len` 0,
+  if `v` is not a String; the pointer is valid while `v` is alive)
+
+for anything that isn't text: socket data, files, images, compressed data. Check
+`api->api_version >= 4` first.
+
 A C struct per object: register the type with a `free_fn`, `clone` the
 prototype in a constructor method, `set_data` the struct on the clone, and
 `get_data` it in the other methods; `free_fn` runs when the object is freed.

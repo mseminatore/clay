@@ -363,6 +363,8 @@ extern ClayObject *clay_Graphics;
 extern ClayObject *clay_Vec3;
 
 extern ClayObject *clay_Thread;
+extern ClayObject *clay_Socket;
+void clay_socket_free(intptr_t fd);   /* closes a socket descriptor (memory.c, when its object is freed) */
 extern ClayObject *clay_VM;
 
 /* Thread VM initialization callback (set by compiler) */
