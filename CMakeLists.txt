@@ -590,6 +590,18 @@ set_tests_properties(clay_error_uncaught_recursion PROPERTIES
 set_tests_properties(clay_error_uncaught_recursion clay_error_uncaught_recursion_native PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+# A brick can be imported by its own name from inside itself (its tests, examples)
+add_test(NAME clay_brick_self_import COMMAND clay_compiler test/brick_self/tests/use_self.clay)
+set_tests_properties(clay_brick_self_import PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    PASS_REGULAR_EXPRESSION "selfdemo imported itself")
+# `clay bricks new` makes bricks (Clay and native) whose own tests pass
+add_test(NAME clay_bricks_new
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bricks_new
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/bricks_new_test.cmake)
+set_tests_properties(clay_bricks_new PROPERTIES LABELS "native")
+
 # stack_trace asserts on its own trace (the frames' wording differs by backend)
 add_test(NAME clay_smoke_stack_trace COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/stack_trace.clay)
 set_tests_properties(clay_smoke_stack_trace PROPERTIES

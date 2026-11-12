@@ -1016,6 +1016,21 @@ Parser = Object clone {
         main
     }
 
+    // A brick.json that names the brick `wanted`: [main, native spec or nil],
+    // or nil if it is missing, names another brick, has no main or is invalid
+    // (read like brickMain: top-level fields found by pattern)
+    brickSelf(manifestPath, wanted) {
+        main = self brickMain(manifestPath)
+        (main == nil) ifTrue { return nil }
+        text = File read(manifestPath)
+        m = text match("\"name\"[ \t\r\n]*:[ \t\r\n]*\"[^\"]*\"")
+        (m == nil) ifTrue { return nil }
+        ((m split("\"")) at(3) == wanted) ifFalse { return nil }
+        sp = NativeBricks spec(text)
+        (sp == false) ifTrue { return nil }
+        [main, sp]
+    }
+
     // The bundled bricks directory, as main.c's resolve_lib_dir: $CLAY_LIB,
     // else the lib/ of the Clay checkout holding the running clay (its
     // directory or up to three parents, the first with src/runtime/clay.h).
@@ -1067,6 +1082,27 @@ Parser = Object clone {
                     up = up + 1
                 }
             }
+            // a brick imported by its own name from inside itself (its tests and
+            // examples) is that brick: the folder that holds a bricks/ folder on
+            // the way up is the project, and if its brick.json names this brick,
+            // the import means it. Installed copies don't get a say.
+            selfMain = nil
+            dirs each { |d|
+                (selfMain == nil) ifTrue {
+                    root = (d == "bricks") ifTrue { "." } ifFalse { d slice(0, d length - 7) }
+                    smpath = root + "/brick.json"
+                    sm = self brickSelf(smpath, path)
+                    (sm != nil) ifTrue {
+                        smain = root + "/" + (sm at(0))
+                        (File exists(smain)) ifTrue {
+                            selfMain = smain
+                            // a native brick: built and loaded before compiling
+                            (sm at(1) != nil) ifTrue { NativeBricks note(root, sm at(1)) }
+                        }
+                    }
+                }
+            }
+            (selfMain != nil) ifTrue { return selfMain }
             // last, the bricks bundled with Clay: a project's own bricks/ wins
             lib = self libDir
             (lib != nil) ifTrue { dirs push(lib) }

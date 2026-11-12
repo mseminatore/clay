@@ -1178,6 +1178,30 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
             }
         }
 
+        /* A brick imported by its own name from inside itself (its tests and
+         * examples) is that brick: the folder that holds a bricks/ folder on
+         * the way up is the project, and if its brick.json names this brick,
+         * the import means it. Installed copies don't get a say. */
+        for (int d = 0; d < ndirs && !resolved; d++) {
+            char root[BRICK_MAX_PATH];
+            size_t len = strlen(try_dirs[d]);
+            if (len == 6) snprintf(root, sizeof(root), ".");                         /* "bricks" */
+            else snprintf(root, sizeof(root), "%.*s", (int)(len - 7), try_dirs[d]);  /* "<dir>/bricks" */
+            char self_manifest[BRICK_MAX_PATH * 2];
+            snprintf(self_manifest, sizeof(self_manifest), "%s/brick.json", root);
+            static BrickManifest self_bm;
+            if (brick_parse(self_manifest, &self_bm) == 0 && strcmp(self_bm.name, import_path) == 0 &&
+                self_bm.main_file[0]) {
+                char self_main[BRICK_MAX_PATH * 2];
+                snprintf(self_main, sizeof(self_main), "%s/%s", root, self_bm.main_file);
+                struct stat self_st;
+                if (stat(self_main, &self_st) == 0) {
+                    resolved = strdup(self_main);
+                    if (self_bm.native.plugin[0]) native_bricks_note(root, &self_bm.native);
+                }
+            }
+        }
+
         /* Last, the bricks bundled with Clay: a project's own bricks/ wins */
         if (g_lib_dir[0])
             snprintf(try_dirs[ndirs++], BRICK_MAX_PATH, "%s", g_lib_dir);

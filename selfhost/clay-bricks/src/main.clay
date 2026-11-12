@@ -1191,6 +1191,377 @@ BrickRegistry = Object clone {
 
 // --- The commands ---
 
+// --- `bricks new`: the files of a new brick ---
+// The same files src/compiler/bricks.c writes (CTest clay_selfhost_bricks
+// compares what both create). @NAME@, @CAMEL@ and @PLUGIN@ stand for the
+// brick's name (foo-bar), its prototype name (FooBar) and its C identifier
+// (foo_bar).
+
+BrickScaffold = Object clone {
+    _pure_json() {
+        [
+            "{",
+            "  \"name\": \"@NAME@\",",
+            "  \"version\": \"0.1.0\",",
+            "  \"description\": \"TODO: what @NAME@ does, in one line\",",
+            "  \"main\": \"src/main.clay\",",
+            "  \"deps\": {}",
+            "}"
+        ] join("\n") + "\n"
+    }
+
+    _native_json() {
+        [
+            "{",
+            "  \"name\": \"@NAME@\",",
+            "  \"version\": \"0.1.0\",",
+            "  \"description\": \"TODO: what @NAME@ does, in one line\",",
+            "  \"main\": \"src/main.clay\",",
+            "  \"deps\": {},",
+            "  \"native\": {",
+            "    \"plugin\": \"@PLUGIN@\",",
+            "    \"sources\": [",
+            "      \"native/@PLUGIN@.c\"",
+            "    ],",
+            "    \"cflags\": [],",
+            "    \"libs\": []",
+            "  }",
+            "}"
+        ] join("\n") + "\n"
+    }
+
+    _pure_main() {
+        [
+            "// @NAME@ -- TODO: what this brick does, in one line",
+            "//",
+            "// Usage:",
+            "//   import(\"@NAME@\")",
+            "//",
+            "//   @CAMEL@ greet(\"world\") println      // Hello, world!",
+            "//",
+            "// Every brick shares one set of top-level names with the program that imports",
+            "// it, so keep yours few and distinctive: typically just the objects you provide.",
+            "",
+            "@CAMEL@ = Object clone {",
+            "    greet(who) { \"Hello, \" + who + \"!\" }",
+            "}"
+        ] join("\n") + "\n"
+    }
+
+    _native_main() {
+        [
+            "// @NAME@ -- TODO: what this brick does, in one line",
+            "//",
+            "// Usage:",
+            "//   import(\"@NAME@\")",
+            "//",
+            "//   c = @CAMEL@ counter(10)",
+            "//   c add(5)",
+            "//   c value println          // 15",
+            "//",
+            "// How it fits together: `@CAMEL@` (below) is Clay and only makes counters. Each",
+            "// counter is a clone of `@CAMEL@Core`, the prototype the C plugin registers",
+            "// (native/@PLUGIN@.c), so its methods are written in C. Put the friendly API",
+            "// here and the heavy work in C.",
+            "//",
+            "// Every brick shares one set of top-level names with the program that imports",
+            "// it, so keep yours few and distinctive.",
+            "",
+            "@CAMEL@ = Object clone {",
+            "    counter(start = 0) { @CAMEL@Core create(start) }",
+            "}"
+        ] join("\n") + "\n"
+    }
+
+    _pure_test() {
+        [
+            "// Tests for the @NAME@ brick. Run them from the brick's directory:",
+            "//   clay tests/test_@PLUGIN@.clay",
+            "// (a brick can be imported by its own name from inside its own directory)",
+            "import(\"@NAME@\")",
+            "",
+            "failures = 0",
+            "check = { |what, ok|",
+            "    ok ifFalse { (\"FAIL: \" + what) println; failures = failures + 1 }",
+            "}",
+            "",
+            "check value(\"greet\", (@CAMEL@ greet(\"world\")) == \"Hello, world!\")",
+            "",
+            "(failures > 0) ifTrue {",
+            "    (failures toString + \" checks failed\") println",
+            "    System exit(1)",
+            "}",
+            "\"@NAME@ tests passed\" println"
+        ] join("\n") + "\n"
+    }
+
+    _native_test() {
+        [
+            "// Tests for the @NAME@ brick. Run them from the brick's directory:",
+            "//   clay tests/test_@PLUGIN@.clay",
+            "// The first run builds the C plugin (into build/, which is not committed); a",
+            "// brick can be imported by its own name from inside its own directory.",
+            "import(\"@NAME@\")",
+            "",
+            "failures = 0",
+            "check = { |what, ok|",
+            "    ok ifFalse { (\"FAIL: \" + what) println; failures = failures + 1 }",
+            "}",
+            "raises = { |block| try { block value; \"no error\" } catch { |e| e type } }",
+            "",
+            "c = @CAMEL@ counter(10)",
+            "check value(\"start\", c value == 10)",
+            "c add(5)",
+            "check value(\"add\", c value == 15)",
+            "check value(\"add chains\", ((c add(1)) add(2)) value == 18)",
+            "check value(\"default start\", (@CAMEL@ counter) value == 0)",
+            "",
+            "d = @CAMEL@ counter(1)",
+            "d add(1)",
+            "check value(\"counters are independent\", ((c value) == 18) && ((d value) == 2))",
+            "",
+            "check value(\"a bad argument raises\", (raises value({ c add(\"x\") })) == \"ArgumentError\")",
+            "",
+            "(failures > 0) ifTrue {",
+            "    (failures toString + \" checks failed\") println",
+            "    System exit(1)",
+            "}",
+            "\"@NAME@ tests passed\" println"
+        ] join("\n") + "\n"
+    }
+
+    _native_c() {
+        [
+            "/* @PLUGIN@.c -- the native part of the @NAME@ brick.",
+            " *",
+            " * It registers one prototype, @CAMEL@Core, whose objects each own a C struct.",
+            " * src/main.clay wraps it in a Clay API. The C API is in clay_plugin.h (see",
+            " * \"Native plugins\" in the Clay guide): values cross as opaque handles,",
+            " * arguments are borrowed, and what a method returns is a new reference (or",
+            " * its own receiver). The entry point must be named <plugin>_plugin_init.",
+            " */",
+            "#include \"clay_plugin.h\"",
+            "#include <stdlib.h>",
+            "",
+            "static const ClayPluginAPI *api;",
+            "",
+            "/* what each counter owns */",
+            "typedef struct {",
+            "    intptr_t total;",
+            "} Counter;",
+            "",
+            "/* runs when the Clay object is freed */",
+            "static void counter_free(void *data) { free(data); }",
+            "",
+            "static Counter *counter_of(ClayPluginObject self) {",
+            "    Counter *c = (Counter *)api->get_data(self);",
+            "    if (!c) api->raise(\"@CAMEL@Core: not a counter (make one with @CAMEL@ counter)\", \"RuntimeError\");",
+            "    return c;",
+            "}",
+            "",
+            "/* @CAMEL@Core create(start) -> a new counter; self is the prototype */",
+            "static ClayPluginValue core_create(ClayPluginObject self, int argc, ClayPluginValue *argv) {",
+            "    Counter *c = (Counter *)calloc(1, sizeof(Counter));",
+            "    if (!c) { api->raise(\"@NAME@: out of memory\", \"RuntimeError\"); return 0; }",
+            "    if (argc > 0) {",
+            "        if (!api->is_int(argv[0])) {",
+            "            free(c);",
+            "            api->raise(\"create expects an integer\", \"ArgumentError\");",
+            "            return 0;",
+            "        }",
+            "        c->total = api->to_int(argv[0]);",
+            "    }",
+            "    ClayPluginObject obj = api->clone(self);",
+            "    api->set_data(obj, c);",
+            "    return (ClayPluginValue)obj;",
+            "}",
+            "",
+            "/* counter add(n) -> the counter, so calls chain */",
+            "static ClayPluginValue core_add(ClayPluginObject self, int argc, ClayPluginValue *argv) {",
+            "    Counter *c = counter_of(self);",
+            "    if (!c) return 0;",
+            "    if (argc < 1 || !api->is_int(argv[0])) {",
+            "        api->raise(\"add expects an integer\", \"ArgumentError\");",
+            "        return 0;",
+            "    }",
+            "    c->total += api->to_int(argv[0]);",
+            "    return (ClayPluginValue)self;",
+            "}",
+            "",
+            "/* counter value -> the total */",
+            "static ClayPluginValue core_value(ClayPluginObject self, int argc, ClayPluginValue *argv) {",
+            "    (void)argc; (void)argv;",
+            "    Counter *c = counter_of(self);",
+            "    if (!c) return 0;",
+            "    return api->make_int(c->total);",
+            "}",
+            "",
+            "static ClayPluginMethod methods[] = {",
+            "    { \"create\", core_create },",
+            "    { \"add\",    core_add },",
+            "    { \"value\",  core_value },",
+            "    { NULL, NULL }",
+            "};",
+            "",
+            "CLAY_PLUGIN_EXPORT void @PLUGIN@_plugin_init(const ClayPluginAPI *clay_api) {",
+            "    api = clay_api;",
+            "    ClayPluginType def = { \"@CAMEL@Core\", methods, counter_free, sizeof(void *) };",
+            "    api->register_type(&def);",
+            "}"
+        ] join("\n") + "\n"
+    }
+
+    _pure_readme() {
+        [
+            "# @NAME@",
+            "",
+            "TODO: what @NAME@ does.",
+            "",
+            "```clay",
+            "import(\"@NAME@\")",
+            "",
+            "@CAMEL@ greet(\"world\") println      // Hello, world!",
+            "```",
+            "",
+            "## Install",
+            "",
+            "```sh",
+            "clay bricks add github.com/YOU/@NAME@",
+            "```",
+            "",
+            "## Develop",
+            "",
+            "```sh",
+            "clay tests/test_@PLUGIN@.clay       # a brick can import itself by name",
+            "```",
+            "",
+            "## Publish",
+            "",
+            "1. Choose a license and add a `LICENSE` file.",
+            "2. Fill in `description` in `brick.json`, commit, and push to GitHub (or another Git host).",
+            "3. Tag a release: `git tag v0.1.0 && git push --tags`.",
+            "4. To let people find it, list it in the",
+            "   [clay-registry](https://github.com/mseminatore/clay-registry) with a pull request."
+        ] join("\n") + "\n"
+    }
+
+    _native_readme() {
+        [
+            "# @NAME@",
+            "",
+            "TODO: what @NAME@ does. A native brick: part of it is C, built with your C compiler",
+            "the first time it is imported.",
+            "",
+            "```clay",
+            "import(\"@NAME@\")",
+            "",
+            "c = @CAMEL@ counter(10)",
+            "c add(5)",
+            "c value println          // 15",
+            "```",
+            "",
+            "## Install",
+            "",
+            "```sh",
+            "clay bricks add github.com/YOU/@NAME@",
+            "```",
+            "",
+            "`clay bricks add` tells people that a brick runs C code and asks before going ahead.",
+            "",
+            "## Layout",
+            "",
+            "| File | What |",
+            "|---|---|",
+            "| `brick.json` | the manifest; `native` lists the C sources, flags and libraries |",
+            "| `native/@PLUGIN@.c` | the plugin: registers `@CAMEL@Core` (entry point `@PLUGIN@_plugin_init`) |",
+            "| `src/main.clay` | the Clay API that wraps it |",
+            "| `tests/test_@PLUGIN@.clay` | tests |",
+            "",
+            "Per-platform flags go in `cflags-macos`, `libs-linux`, `sources-windows` and so on;",
+            "`-I@/dir` names a directory inside the brick. See \"Native bricks\" in the Clay guide.",
+            "",
+            "## Develop",
+            "",
+            "```sh",
+            "clay tests/test_@PLUGIN@.clay       # builds the plugin on first use; a brick imports itself by name",
+            "```",
+            "",
+            "The plugin is cached in `build/` (not committed); delete it to force a rebuild. To",
+            "debug, add `\"-g\", \"-O0\"` to `cflags` in `brick.json` and run under `lldb` or `gdb`:",
+            "`lldb -- clay tests/test_@PLUGIN@.clay`. Use `api->write_output` instead of `printf`",
+            "for text people should see.",
+            "",
+            "## Publish",
+            "",
+            "1. Choose a license and add a `LICENSE` file.",
+            "2. Fill in `description` in `brick.json`, commit, and push to GitHub (or another Git host).",
+            "3. Tag a release: `git tag v0.1.0 && git push --tags`.",
+            "4. Check it on Linux, macOS and Windows (C differs between them), then list it in the",
+            "   [clay-registry](https://github.com/mseminatore/clay-registry) with a pull request."
+        ] join("\n") + "\n"
+    }
+
+    _pure_gitignore() {
+        [
+            "# bricks installed by `clay bricks install`",
+            "bricks/"
+        ] join("\n") + "\n"
+    }
+
+    _native_gitignore() {
+        [
+            "# the plugin built on first use (clay native bricks)",
+            "build/",
+            "# bricks installed by `clay bricks install`",
+            "bricks/"
+        ] join("\n") + "\n"
+    }
+
+    // [path, body] of each file, in the order they are created
+    files(native) {
+        native ifTrue {
+            return [["brick.json", self _native_json], ["src/main.clay", self _native_main],
+                    ["native/@PLUGIN@.c", self _native_c], ["tests/test_@PLUGIN@.clay", self _native_test],
+                    ["README.md", self _native_readme], [".gitignore", self _native_gitignore]]
+        }
+        [["brick.json", self _pure_json], ["src/main.clay", self _pure_main],
+         ["tests/test_@PLUGIN@.clay", self _pure_test], ["README.md", self _pure_readme],
+         [".gitignore", self _pure_gitignore]]
+    }
+
+    // what the registry accepts: a lowercase letter, then lowercase letters,
+    // digits and '-', at most 64 characters
+    nameOk(text) {
+        (text length == 0 || text length > 64) ifTrue { return false }
+        i = 0
+        { i < text length } whileTrue {
+            ch = text byteAt(i)
+            isLetter = ch >= 97 && ch <= 122
+            isDigit = ch >= 48 && ch <= 57
+            (i == 0 && isLetter == false) ifTrue { return false }
+            (isLetter == false && isDigit == false && ch != 45) ifTrue { return false }
+            i = i + 1
+        }
+        true
+    }
+
+    // "foo-bar" -> "FooBar"
+    camel(text) {
+        out = ""
+        (text split("-")) each { |part|
+            (part length > 0) ifTrue { out = out + ((part slice(0, 1)) upper) + (part slice(1, part length)) }
+        }
+        out
+    }
+
+    // "foo-bar" -> "foo_bar"
+    cName(text) { text replace("-", "_") }
+
+    fill(tpl, name, cm, pl) {
+        ((tpl replace("@NAME@", name)) replace("@CAMEL@", cm)) replace("@PLUGIN@", pl)
+    }
+}
+
 Bricks = Object clone {
     prog = "clayc"         // how the messages name the program
     _pins = nil            // brick.lock's entries while installing from it
@@ -1447,6 +1818,54 @@ Bricks = Object clone {
         0
     }
 
+    // `bricks new`: a brick in a new folder
+    cmdNew(given, native) {
+        (BrickScaffold nameOk(given)) ifFalse {
+            self _err("error: invalid brick name '" + given + "' (use lowercase letters, digits and '-', " +
+                      "starting with a letter; at most 64 characters)")
+            return 1
+        }
+        (File exists(given)) ifTrue {
+            self _err("error: '" + given + "' already exists")
+            return 1
+        }
+        cm = BrickScaffold camel(given)
+        pl = BrickScaffold cName(given)
+        self _mkdir(given)
+        (File isDir(given)) ifFalse {
+            self _err("error: cannot create " + given)
+            return 1
+        }
+        made = []
+        (BrickScaffold files(native)) each { |entry|
+            rel = BrickScaffold fill(entry at(0), given, cm, pl)
+            path = given + "/" + rel
+            // the folders on the way
+            parts = rel split("/")
+            dir = given
+            i = 0
+            { i < parts size - 1 } whileTrue {
+                dir = dir + "/" + (parts at(i))
+                self _mkdir(dir)
+                i = i + 1
+            }
+            ok = try { File write(path, BrickScaffold fill(entry at(1), given, cm, pl))
+                       true } catch { |e| false }
+            ok ifFalse {
+                self _err("error: cannot write " + path)
+                return 1
+            }
+            made push(path)
+        }
+        self _say("Created " + (native ifTrue { "native " } ifFalse { "" }) + "brick '" + given + "' in " + given + "/")
+        made each { |path| self _say("  " + path) }
+        self _say("Next:\n  cd " + given + "\n  clay tests/test_" + pl + ".clay")
+        native ifTrue {
+            self _say("(the C plugin is built the first time the brick is imported; see \"Native bricks\" in the guide)")
+        }
+        0
+    }
+
     cmdInstall() {
         m = self _project(self _initHint)
         (m == nil) ifTrue { return 1 }
@@ -1690,6 +2109,8 @@ Bricks = Object clone {
         self _err("Usage: " + prog + " bricks <command>\n\n" +
                   "Commands:\n" +
                   "  init              Create a new brick.json\n" +
+                  "  new <name> [--native]\n" +
+                  "                    Create a brick in a new folder (--native: with a C plugin)\n" +
                   "  install           Install dependencies from brick.json\n" +
                   "  update            Update installed dependencies\n" +
                   "  add <url> [name]  Add a dependency (name = its import path)\n" +
@@ -1706,6 +2127,25 @@ Bricks = Object clone {
         (args size < 1) ifTrue { return self usage }
         cmd = args at(0)
         (cmd == "init") ifTrue { return self cmdInit }
+        (cmd == "new") ifTrue {
+            given = nil
+            count = 0
+            native = false
+            i = 1
+            { i < args size } whileTrue {
+                a = args at(i)
+                (a == "--native") ifTrue { native = true } ifFalse {
+                    (count == 0) ifTrue { given = a }
+                    count = count + 1
+                }
+                i = i + 1
+            }
+            (count != 1) ifTrue {
+                self _err("Usage: " + prog + " bricks new <name> [--native]")
+                return 1
+            }
+            return self cmdNew(given, native)
+        }
         (cmd == "install") ifTrue { return self cmdInstall }
         (cmd == "update") ifTrue { return self cmdUpdate }
         (cmd == "list") ifTrue { return self cmdList }

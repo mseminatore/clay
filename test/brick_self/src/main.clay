@@ -1,0 +1,4 @@
+// selfdemo -- fixture for importing a brick by its own name from inside it
+SelfDemo = Object clone {
+    hi() { "hi from selfdemo" }
+}

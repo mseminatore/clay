@@ -5,7 +5,8 @@ Bricks is Clay's built-in package manager. Packages ("bricks") are Git repositor
 ## Quick start
 
 ```sh
-clay bricks init                              # create brick.json
+clay bricks new my-brick                      # a new brick in a new folder (--native: with C)
+clay bricks init                              # create brick.json in this folder
 clay bricks add github.com/user/some-lib      # add + install a dependency
 clay bricks add github.com/user/clay-foo foo  # ...named (and imported as) "foo"
 clay bricks install                           # install all deps from brick.json
@@ -118,10 +119,31 @@ when run from a terminal; `--yes` skips the question (for scripts and CI, which 
 without it when there is no terminal to ask). `clay bricks install`, which installs what the
 project's own `brick.json` lists, does not ask.
 
+## Creating a brick
+
+```sh
+clay bricks new my-brick              # Clay only
+clay bricks new my-brick --native     # with a C plugin
+cd my-brick && clay tests/test_my_brick.clay
+```
+
+This makes a folder with a `brick.json`, a `src/main.clay` to fill in, a test, a README
+and a `.gitignore`; `--native` adds `native/my_brick.c`, a small working plugin (a counter
+object with a C struct, a method that raises, and the `<name>_plugin_init` entry point),
+and the matching `native` section in `brick.json`. The tests pass as generated, so you
+start from something that works. A name is lowercase letters, digits and `-` and starts
+with a letter, as the registry requires; the C identifier is the name with `-` as `_`.
+
+A brick can import itself by name from inside its own folder, so its tests and examples
+say `import("my-brick")` just as its users will, with nothing installed or symlinked. For
+a native brick that builds the plugin on first use. (This works for a brick whose
+`brick.json` name is the same as its import path, not for a sub-brick of a monorepo.)
+
 ## Publishing a brick
 
 Any Git repository with a `brick.json` is a valid brick. To publish:
-1. Add a `brick.json` to your repo (`clay bricks init`)
+1. Add a `brick.json` to your repo (`clay bricks new` makes the whole layout, or
+   `clay bricks init` just the manifest)
 2. Push to GitHub (or any Git host)
 3. Tag releases with semver (`git tag v1.0.0`)
 4. Others install with `clay bricks add github.com/you/your-brick@v1.0.0`

@@ -1,0 +1,10 @@
+// A brick can be imported by its own name from inside its own folder (a brick's
+// tests and examples do this), without being installed anywhere: run this from
+// any directory, e.g. clay test/brick_self/tests/use_self.clay
+import("selfdemo")
+
+(SelfDemo hi == "hi from selfdemo") ifFalse {
+    "FAIL: selfdemo did not import itself" println
+    System exit(1)
+}
+"selfdemo imported itself" println

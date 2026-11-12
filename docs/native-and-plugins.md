@@ -165,6 +165,10 @@ prototype in a constructor method, `set_data` the struct on the clone, and
 
 ## Native bricks
 
+`clay bricks new my-brick --native` makes a native brick with a working plugin, a
+Clay wrapper and tests (see [Creating a brick](bricks.md#creating-a-brick)); read
+`native/my_brick.c` for the shape. The rest of this section is the manifest it writes.
+
 A brick can ship C sources: Clay compiles them into a plugin the first time
 the brick is imported, with the same compiler and flags as `clay --compile`,
 and keeps the result in the brick's `build/` directory (rebuilt when a source,
@@ -216,6 +220,28 @@ the plain list, so a brick can use a platform's faster library where there is on
 - `-I@/dir` and `-L@/dir` name a directory inside the brick (here
   `<brick>/native/shim`), whatever the current directory is. The `@/` is only
   accepted right after `-I` or `-L`.
+
+### Developing and debugging
+
+Run a native brick's tests from its folder (`clay tests/test_my_brick.clay`): a brick imports
+itself by name, so the plugin is built on first use and cached in `build/` (not committed;
+delete it to force a rebuild).
+
+- The plugin is built with `-O2 -fPIC -shared -w`: no debug symbols, no warnings. To debug,
+  add `"-g", "-O0"` to `cflags` in `brick.json` (the brick's flags come last, so they win) and
+  run under a debugger: `lldb -- clay tests/test_my_brick.clay`, or `gdb --args clay ...`.
+  Breakpoints on the plugin's functions can be set before the program starts.
+- To see warnings, compile by hand:
+  `cc -Wall -Wextra -fsyntax-only -I<clay>/src/runtime native/my_brick.c`.
+- For memory errors, build Clay with
+  `-DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer"`: the brick is built with the
+  same flags (through `clay-native.cfg`).
+- Print with `api->write_output(text)` (API version 3), not `printf`: under `--dap` stdout is
+  the debugger's channel and `printf` output is lost.
+- `clay --compile` links the brick's sources into the executable, so the same tests can run
+  compiled: `clay --compile -o t tests/test_my_brick.clay && ./t`.
+- Test the C on its own, in a small `main()`, before wrapping it, when the logic is the
+  hard part.
 
 The brick's `main` file wraps the plugin's prototypes in a Clay API. See
 [clay-ann](https://github.com/mseminatore/clay-ann), neural networks over the

@@ -14,7 +14,7 @@ import("../clay-bricks/src/main.clay")
 System exit(Bricks command(["add", "github.com/owner/repo"]))
 ```
 
-`Bricks command(args)` runs `init`, `add`, `install`, `update`, `list`,
+`Bricks command(args)` runs `init`, `new`, `add`, `install`, `update`, `list`,
 `remove`, `search` or `info` and returns the exit code. Set `Bricks prog` to
 change the program name used in messages.
 

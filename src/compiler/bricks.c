@@ -1173,6 +1173,430 @@ static int cmd_init(void) {
     return 0;
 }
 
+/* --- `bricks new`: scaffold a brick ---
+ *
+ * The files below are the same as the ones selfhost/clay-bricks writes (kept
+ * in step by CTest clay_selfhost_bricks, which compares what both create).
+ * @NAME@, @CAMEL@ and @PLUGIN@ stand for the brick's name (foo-bar), its
+ * prototype name (FooBar) and its C identifier (foo_bar). */
+typedef struct { const char *path; const char *body; } BrickTemplate;
+
+static const char TPL_PURE_JSON[] =
+    "{\n"
+    "  \"name\": \"@NAME@\",\n"
+    "  \"version\": \"0.1.0\",\n"
+    "  \"description\": \"TODO: what @NAME@ does, in one line\",\n"
+    "  \"main\": \"src/main.clay\",\n"
+    "  \"deps\": {}\n"
+    "}\n";
+
+static const char TPL_NATIVE_JSON[] =
+    "{\n"
+    "  \"name\": \"@NAME@\",\n"
+    "  \"version\": \"0.1.0\",\n"
+    "  \"description\": \"TODO: what @NAME@ does, in one line\",\n"
+    "  \"main\": \"src/main.clay\",\n"
+    "  \"deps\": {},\n"
+    "  \"native\": {\n"
+    "    \"plugin\": \"@PLUGIN@\",\n"
+    "    \"sources\": [\n"
+    "      \"native/@PLUGIN@.c\"\n"
+    "    ],\n"
+    "    \"cflags\": [],\n"
+    "    \"libs\": []\n"
+    "  }\n"
+    "}\n";
+
+static const char TPL_PURE_MAIN[] =
+    "// @NAME@ -- TODO: what this brick does, in one line\n"
+    "//\n"
+    "// Usage:\n"
+    "//   import(\"@NAME@\")\n"
+    "//\n"
+    "//   @CAMEL@ greet(\"world\") println      // Hello, world!\n"
+    "//\n"
+    "// Every brick shares one set of top-level names with the program that imports\n"
+    "// it, so keep yours few and distinctive: typically just the objects you provide.\n"
+    "\n"
+    "@CAMEL@ = Object clone {\n"
+    "    greet(who) { \"Hello, \" + who + \"!\" }\n"
+    "}\n";
+
+static const char TPL_NATIVE_MAIN[] =
+    "// @NAME@ -- TODO: what this brick does, in one line\n"
+    "//\n"
+    "// Usage:\n"
+    "//   import(\"@NAME@\")\n"
+    "//\n"
+    "//   c = @CAMEL@ counter(10)\n"
+    "//   c add(5)\n"
+    "//   c value println          // 15\n"
+    "//\n"
+    "// How it fits together: `@CAMEL@` (below) is Clay and only makes counters. Each\n"
+    "// counter is a clone of `@CAMEL@Core`, the prototype the C plugin registers\n"
+    "// (native/@PLUGIN@.c), so its methods are written in C. Put the friendly API\n"
+    "// here and the heavy work in C.\n"
+    "//\n"
+    "// Every brick shares one set of top-level names with the program that imports\n"
+    "// it, so keep yours few and distinctive.\n"
+    "\n"
+    "@CAMEL@ = Object clone {\n"
+    "    counter(start = 0) { @CAMEL@Core create(start) }\n"
+    "}\n";
+
+static const char TPL_PURE_TEST[] =
+    "// Tests for the @NAME@ brick. Run them from the brick's directory:\n"
+    "//   clay tests/test_@PLUGIN@.clay\n"
+    "// (a brick can be imported by its own name from inside its own directory)\n"
+    "import(\"@NAME@\")\n"
+    "\n"
+    "failures = 0\n"
+    "check = { |what, ok|\n"
+    "    ok ifFalse { (\"FAIL: \" + what) println; failures = failures + 1 }\n"
+    "}\n"
+    "\n"
+    "check value(\"greet\", (@CAMEL@ greet(\"world\")) == \"Hello, world!\")\n"
+    "\n"
+    "(failures > 0) ifTrue {\n"
+    "    (failures toString + \" checks failed\") println\n"
+    "    System exit(1)\n"
+    "}\n"
+    "\"@NAME@ tests passed\" println\n";
+
+static const char TPL_NATIVE_TEST[] =
+    "// Tests for the @NAME@ brick. Run them from the brick's directory:\n"
+    "//   clay tests/test_@PLUGIN@.clay\n"
+    "// The first run builds the C plugin (into build/, which is not committed); a\n"
+    "// brick can be imported by its own name from inside its own directory.\n"
+    "import(\"@NAME@\")\n"
+    "\n"
+    "failures = 0\n"
+    "check = { |what, ok|\n"
+    "    ok ifFalse { (\"FAIL: \" + what) println; failures = failures + 1 }\n"
+    "}\n"
+    "raises = { |block| try { block value; \"no error\" } catch { |e| e type } }\n"
+    "\n"
+    "c = @CAMEL@ counter(10)\n"
+    "check value(\"start\", c value == 10)\n"
+    "c add(5)\n"
+    "check value(\"add\", c value == 15)\n"
+    "check value(\"add chains\", ((c add(1)) add(2)) value == 18)\n"
+    "check value(\"default start\", (@CAMEL@ counter) value == 0)\n"
+    "\n"
+    "d = @CAMEL@ counter(1)\n"
+    "d add(1)\n"
+    "check value(\"counters are independent\", ((c value) == 18) && ((d value) == 2))\n"
+    "\n"
+    "check value(\"a bad argument raises\", (raises value({ c add(\"x\") })) == \"ArgumentError\")\n"
+    "\n"
+    "(failures > 0) ifTrue {\n"
+    "    (failures toString + \" checks failed\") println\n"
+    "    System exit(1)\n"
+    "}\n"
+    "\"@NAME@ tests passed\" println\n";
+
+static const char TPL_NATIVE_C[] =
+    "/* @PLUGIN@.c -- the native part of the @NAME@ brick.\n"
+    " *\n"
+    " * It registers one prototype, @CAMEL@Core, whose objects each own a C struct.\n"
+    " * src/main.clay wraps it in a Clay API. The C API is in clay_plugin.h (see\n"
+    " * \"Native plugins\" in the Clay guide): values cross as opaque handles,\n"
+    " * arguments are borrowed, and what a method returns is a new reference (or\n"
+    " * its own receiver). The entry point must be named <plugin>_plugin_init.\n"
+    " */\n"
+    "#include \"clay_plugin.h\"\n"
+    "#include <stdlib.h>\n"
+    "\n"
+    "static const ClayPluginAPI *api;\n"
+    "\n"
+    "/* what each counter owns */\n"
+    "typedef struct {\n"
+    "    intptr_t total;\n"
+    "} Counter;\n"
+    "\n"
+    "/* runs when the Clay object is freed */\n"
+    "static void counter_free(void *data) { free(data); }\n"
+    "\n"
+    "static Counter *counter_of(ClayPluginObject self) {\n"
+    "    Counter *c = (Counter *)api->get_data(self);\n"
+    "    if (!c) api->raise(\"@CAMEL@Core: not a counter (make one with @CAMEL@ counter)\", \"RuntimeError\");\n"
+    "    return c;\n"
+    "}\n"
+    "\n"
+    "/* @CAMEL@Core create(start) -> a new counter; self is the prototype */\n"
+    "static ClayPluginValue core_create(ClayPluginObject self, int argc, ClayPluginValue *argv) {\n"
+    "    Counter *c = (Counter *)calloc(1, sizeof(Counter));\n"
+    "    if (!c) { api->raise(\"@NAME@: out of memory\", \"RuntimeError\"); return 0; }\n"
+    "    if (argc > 0) {\n"
+    "        if (!api->is_int(argv[0])) {\n"
+    "            free(c);\n"
+    "            api->raise(\"create expects an integer\", \"ArgumentError\");\n"
+    "            return 0;\n"
+    "        }\n"
+    "        c->total = api->to_int(argv[0]);\n"
+    "    }\n"
+    "    ClayPluginObject obj = api->clone(self);\n"
+    "    api->set_data(obj, c);\n"
+    "    return (ClayPluginValue)obj;\n"
+    "}\n"
+    "\n"
+    "/* counter add(n) -> the counter, so calls chain */\n"
+    "static ClayPluginValue core_add(ClayPluginObject self, int argc, ClayPluginValue *argv) {\n"
+    "    Counter *c = counter_of(self);\n"
+    "    if (!c) return 0;\n"
+    "    if (argc < 1 || !api->is_int(argv[0])) {\n"
+    "        api->raise(\"add expects an integer\", \"ArgumentError\");\n"
+    "        return 0;\n"
+    "    }\n"
+    "    c->total += api->to_int(argv[0]);\n"
+    "    return (ClayPluginValue)self;\n"
+    "}\n"
+    "\n"
+    "/* counter value -> the total */\n"
+    "static ClayPluginValue core_value(ClayPluginObject self, int argc, ClayPluginValue *argv) {\n"
+    "    (void)argc; (void)argv;\n"
+    "    Counter *c = counter_of(self);\n"
+    "    if (!c) return 0;\n"
+    "    return api->make_int(c->total);\n"
+    "}\n"
+    "\n"
+    "static ClayPluginMethod methods[] = {\n"
+    "    { \"create\", core_create },\n"
+    "    { \"add\",    core_add },\n"
+    "    { \"value\",  core_value },\n"
+    "    { NULL, NULL }\n"
+    "};\n"
+    "\n"
+    "CLAY_PLUGIN_EXPORT void @PLUGIN@_plugin_init(const ClayPluginAPI *clay_api) {\n"
+    "    api = clay_api;\n"
+    "    ClayPluginType def = { \"@CAMEL@Core\", methods, counter_free, sizeof(void *) };\n"
+    "    api->register_type(&def);\n"
+    "}\n";
+
+static const char TPL_PURE_README[] =
+    "# @NAME@\n"
+    "\n"
+    "TODO: what @NAME@ does.\n"
+    "\n"
+    "```clay\n"
+    "import(\"@NAME@\")\n"
+    "\n"
+    "@CAMEL@ greet(\"world\") println      // Hello, world!\n"
+    "```\n"
+    "\n"
+    "## Install\n"
+    "\n"
+    "```sh\n"
+    "clay bricks add github.com/YOU/@NAME@\n"
+    "```\n"
+    "\n"
+    "## Develop\n"
+    "\n"
+    "```sh\n"
+    "clay tests/test_@PLUGIN@.clay       # a brick can import itself by name\n"
+    "```\n"
+    "\n"
+    "## Publish\n"
+    "\n"
+    "1. Choose a license and add a `LICENSE` file.\n"
+    "2. Fill in `description` in `brick.json`, commit, and push to GitHub (or another Git host).\n"
+    "3. Tag a release: `git tag v0.1.0 && git push --tags`.\n"
+    "4. To let people find it, list it in the\n"
+    "   [clay-registry](https://github.com/mseminatore/clay-registry) with a pull request.\n";
+
+static const char TPL_NATIVE_README[] =
+    "# @NAME@\n"
+    "\n"
+    "TODO: what @NAME@ does. A native brick: part of it is C, built with your C compiler\n"
+    "the first time it is imported.\n"
+    "\n"
+    "```clay\n"
+    "import(\"@NAME@\")\n"
+    "\n"
+    "c = @CAMEL@ counter(10)\n"
+    "c add(5)\n"
+    "c value println          // 15\n"
+    "```\n"
+    "\n"
+    "## Install\n"
+    "\n"
+    "```sh\n"
+    "clay bricks add github.com/YOU/@NAME@\n"
+    "```\n"
+    "\n"
+    "`clay bricks add` tells people that a brick runs C code and asks before going ahead.\n"
+    "\n"
+    "## Layout\n"
+    "\n"
+    "| File | What |\n"
+    "|---|---|\n"
+    "| `brick.json` | the manifest; `native` lists the C sources, flags and libraries |\n"
+    "| `native/@PLUGIN@.c` | the plugin: registers `@CAMEL@Core` (entry point `@PLUGIN@_plugin_init`) |\n"
+    "| `src/main.clay` | the Clay API that wraps it |\n"
+    "| `tests/test_@PLUGIN@.clay` | tests |\n"
+    "\n"
+    "Per-platform flags go in `cflags-macos`, `libs-linux`, `sources-windows` and so on;\n"
+    "`-I@/dir` names a directory inside the brick. See \"Native bricks\" in the Clay guide.\n"
+    "\n"
+    "## Develop\n"
+    "\n"
+    "```sh\n"
+    "clay tests/test_@PLUGIN@.clay       # builds the plugin on first use; a brick imports itself by name\n"
+    "```\n"
+    "\n"
+    "The plugin is cached in `build/` (not committed); delete it to force a rebuild. To\n"
+    "debug, add `\"-g\", \"-O0\"` to `cflags` in `brick.json` and run under `lldb` or `gdb`:\n"
+    "`lldb -- clay tests/test_@PLUGIN@.clay`. Use `api->write_output` instead of `printf`\n"
+    "for text people should see.\n"
+    "\n"
+    "## Publish\n"
+    "\n"
+    "1. Choose a license and add a `LICENSE` file.\n"
+    "2. Fill in `description` in `brick.json`, commit, and push to GitHub (or another Git host).\n"
+    "3. Tag a release: `git tag v0.1.0 && git push --tags`.\n"
+    "4. Check it on Linux, macOS and Windows (C differs between them), then list it in the\n"
+    "   [clay-registry](https://github.com/mseminatore/clay-registry) with a pull request.\n";
+
+static const char TPL_PURE_GITIGNORE[] =
+    "# bricks installed by `clay bricks install`\n"
+    "bricks/\n";
+
+static const char TPL_NATIVE_GITIGNORE[] =
+    "# the plugin built on first use (clay native bricks)\n"
+    "build/\n"
+    "# bricks installed by `clay bricks install`\n"
+    "bricks/\n";
+
+
+static const BrickTemplate brick_tpl_pure[] = {
+    { "brick.json", TPL_PURE_JSON },
+    { "src/main.clay", TPL_PURE_MAIN },
+    { "tests/test_@PLUGIN@.clay", TPL_PURE_TEST },
+    { "README.md", TPL_PURE_README },
+    { ".gitignore", TPL_PURE_GITIGNORE }
+};
+
+static const BrickTemplate brick_tpl_native[] = {
+    { "brick.json", TPL_NATIVE_JSON },
+    { "src/main.clay", TPL_NATIVE_MAIN },
+    { "native/@PLUGIN@.c", TPL_NATIVE_C },
+    { "tests/test_@PLUGIN@.clay", TPL_NATIVE_TEST },
+    { "README.md", TPL_NATIVE_README },
+    { ".gitignore", TPL_NATIVE_GITIGNORE }
+};
+
+/* "foo-bar" -> "FooBar" */
+static void brick_camel(const char *name, char *out, size_t sz) {
+    size_t n = 0;
+    int up = 1;
+    for (const char *c = name; *c && n + 1 < sz; c++) {
+        if (*c == '-') { up = 1; continue; }
+        out[n++] = (char)(up ? toupper((unsigned char)*c) : *c);
+        up = 0;
+    }
+    out[n] = '\0';
+}
+
+/* "foo-bar" -> "foo_bar" */
+static void brick_c_name(const char *name, char *out, size_t sz) {
+    size_t n = 0;
+    for (const char *c = name; *c && n + 1 < sz; c++) out[n++] = *c == '-' ? '_' : *c;
+    out[n] = '\0';
+}
+
+/* what the registry accepts: a lowercase letter, then lowercase letters, digits
+ * and '-', at most 64 characters */
+static int brick_new_name_ok(const char *s) {
+    size_t n = strlen(s);
+    if (n == 0 || n > 64 || s[0] < 'a' || s[0] > 'z') return 0;
+    for (size_t i = 1; i < n; i++)
+        if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= '0' && s[i] <= '9') || s[i] == '-')) return 0;
+    return 1;
+}
+
+/* a template with @NAME@, @CAMEL@ and @PLUGIN@ replaced (malloc'd) */
+static char *brick_fill(const char *tpl, const char *name, const char *camel, const char *plugin) {
+    size_t cap = strlen(tpl) + 1 + 64 * (strlen(name) + strlen(camel) + strlen(plugin));
+    char *out = (char *)malloc(cap);
+    if (!out) return NULL;
+    size_t n = 0;
+    for (const char *c = tpl; *c; ) {
+        const char *with = NULL;
+        size_t skip = 0;
+        if (strncmp(c, "@NAME@", 6) == 0) { with = name; skip = 6; }
+        else if (strncmp(c, "@CAMEL@", 7) == 0) { with = camel; skip = 7; }
+        else if (strncmp(c, "@PLUGIN@", 8) == 0) { with = plugin; skip = 8; }
+        if (with) {
+            size_t len = strlen(with);
+            if (n + len + 1 >= cap) { free(out); return NULL; }
+            memcpy(out + n, with, len);
+            n += len;
+            c += skip;
+        } else {
+            if (n + 2 >= cap) { free(out); return NULL; }
+            out[n++] = *c++;
+        }
+    }
+    out[n] = '\0';
+    return out;
+}
+
+static int cmd_new(const char *name, int native) {
+    if (!brick_new_name_ok(name)) {
+        fprintf(stderr, "error: invalid brick name '%s' (use lowercase letters, digits and '-', "
+                        "starting with a letter; at most 64 characters)\n", name);
+        return 1;
+    }
+    struct stat st;
+    if (stat(name, &st) == 0) {
+        fprintf(stderr, "error: '%s' already exists\n", name);
+        return 1;
+    }
+    char camel[80], plugin[80];
+    brick_camel(name, camel, sizeof(camel));
+    brick_c_name(name, plugin, sizeof(plugin));
+
+    const BrickTemplate *files = native ? brick_tpl_native : brick_tpl_pure;
+    int count = native ? (int)(sizeof(brick_tpl_native) / sizeof(brick_tpl_native[0]))
+                       : (int)(sizeof(brick_tpl_pure) / sizeof(brick_tpl_pure[0]));
+    make_dir(name);
+    if (stat(name, &st) != 0) {
+        fprintf(stderr, "error: cannot create %s\n", name);
+        return 1;
+    }
+    char shown[16][BRICK_MAX_PATH];
+    for (int i = 0; i < count; i++) {
+        char *rel = brick_fill(files[i].path, name, camel, plugin);
+        char *body = brick_fill(files[i].body, name, camel, plugin);
+        char path[BRICK_MAX_PATH];
+        if (!rel || !body || strlen(name) + strlen(rel) + 2 > sizeof(path)) {
+            free(rel); free(body);
+            fprintf(stderr, "error: cannot write %s\n", name);
+            return 1;
+        }
+        clip_fmt(path, sizeof(path), "%s/%s", name, rel);       /* (checked above to fit) */
+        for (char *c = path + strlen(name) + 1; *c; c++)       /* the folders on the way */
+            if (*c == '/') { *c = '\0'; make_dir(path); *c = '/'; }
+        FILE *f = fopen(path, "wb");
+        int ok = f && fwrite(body, 1, strlen(body), f) == strlen(body);
+        if (f && fclose(f) != 0) ok = 0;
+        if (!ok) {
+            fprintf(stderr, "error: cannot write %s\n", path);
+            free(rel); free(body);
+            return 1;
+        }
+        snprintf(shown[i], sizeof(shown[i]), "%s", path);
+        free(rel);
+        free(body);
+    }
+    printf("Created %sbrick '%s' in %s/\n", native ? "native " : "", name, name);
+    for (int i = 0; i < count; i++) printf("  %s\n", shown[i]);
+    printf("Next:\n  cd %s\n  clay tests/test_%s.clay\n", name, plugin);
+    if (native)
+        printf("(the C plugin is built the first time the brick is imported; see \"Native bricks\" in the guide)\n");
+    return 0;
+}
+
 static int cmd_install(void) {
     BrickManifest m;
     int prc = brick_parse("brick.json", &m);
@@ -1715,6 +2139,8 @@ int brick_command(int argc, char **argv) {
         fprintf(stderr, "Usage: clay bricks <command>\n\n");
         fprintf(stderr, "Commands:\n");
         fprintf(stderr, "  init              Create a new brick.json\n");
+        fprintf(stderr, "  new <name> [--native]\n");
+        fprintf(stderr, "                    Create a brick in a new folder (--native: with a C plugin)\n");
         fprintf(stderr, "  install           Install dependencies from brick.json\n");
         fprintf(stderr, "  update            Update installed dependencies\n");
         fprintf(stderr, "  add <url> [name]  Add a dependency (name = its import path)\n");
@@ -1729,6 +2155,18 @@ int brick_command(int argc, char **argv) {
     const char *cmd = argv[0];
     if (strcmp(cmd, "init") == 0) {
         return cmd_init();
+    } else if (strcmp(cmd, "new") == 0) {
+        const char *given = NULL;
+        int nargs = 0, native = 0;
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--native") == 0) native = 1;
+            else if (nargs++ == 0) given = argv[i];
+        }
+        if (nargs != 1) {
+            fprintf(stderr, "Usage: clay bricks new <name> [--native]\n");
+            return 1;
+        }
+        return cmd_new(given, native);
     } else if (strcmp(cmd, "install") == 0) {
         return cmd_install();
     } else if (strcmp(cmd, "update") == 0) {

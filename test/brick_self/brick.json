@@ -1,0 +1,7 @@
+{
+  "name": "selfdemo",
+  "version": "0.1.0",
+  "description": "Test fixture: a brick that imports itself by name, as its own tests do",
+  "main": "src/main.clay",
+  "deps": {}
+}
