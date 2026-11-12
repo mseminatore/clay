@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+#define strdup _strdup
+#endif
+
 const char *ast_current_file = NULL;
 
 AstNode *ast_new(NodeType type, int line) {

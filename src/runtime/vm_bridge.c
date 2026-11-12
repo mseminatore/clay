@@ -83,7 +83,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
             (size_t)g_vm->frame_capacity * sizeof(clayvm_frame_t));
     }
     g_vm->frames[g_vm->frame_count].return_ip = 0;
-    g_vm->frames[g_vm->frame_count].base_sp = base;
+    g_vm->frames[g_vm->frame_count].base_sp = (int)base;
     g_vm->frames[g_vm->frame_count].func_index = 0;
     g_vm->frame_count++;
 
@@ -176,7 +176,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->code = saved_code;
     g_vm->code_len = saved_code_len;
     g_vm->ip = saved_ip;
-    g_vm->sp = saved_sp;
+    g_vm->sp = (int)saved_sp;
     g_vm->running = saved_running;
     g_vm->frame_count = saved_frame_count;
 
@@ -500,7 +500,7 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
             (size_t)g_vm->frame_capacity * sizeof(clayvm_frame_t));
     }
     g_vm->frames[g_vm->frame_count].return_ip = 0;
-    g_vm->frames[g_vm->frame_count].base_sp = base;
+    g_vm->frames[g_vm->frame_count].base_sp = (int)base;
     g_vm->frames[g_vm->frame_count].func_index = 0;
     g_vm->frame_count++;
 
@@ -548,7 +548,7 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
     g_vm->code = saved_code;
     g_vm->code_len = saved_code_len;
     g_vm->ip = saved_ip;
-    g_vm->sp = saved_sp;
+    g_vm->sp = (int)saved_sp;
     g_vm->running = saved_running;
     g_vm->frame_count = saved_frame_count;
 
@@ -1322,7 +1322,7 @@ static void vm_regs_restore(clayvm_vm_t *vm, const VmTryRegs *st) {
     vm->code = st->code;
     vm->code_len = st->code_len;
     vm->ip = st->ip;
-    vm->sp = st->sp;
+    vm->sp = (int)st->sp;
     vm->running = st->running;
     vm->frame_count = st->frame_count;
 }
