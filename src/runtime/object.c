@@ -218,7 +218,7 @@ ClayObject *clay_clone(ClayObject *proto) {
         /* copy the prototype's entries, in the same order */
         clay_dict_copy_into(obj, proto);
     } else if (proto && proto->type == CLAY_TYPE_ARRAY) {
-        int cap = proto->as.array.capacity > 8 ? proto->as.array.capacity : 8;
+        int cap = proto->as.array.capacity > 8 ? (int)proto->as.array.capacity : 8;
         obj->as.array.items = (ClayValue *)malloc(sizeof(ClayValue) * (size_t)cap);
         obj->as.array.size = proto->as.array.size;
         obj->as.array.capacity = cap;

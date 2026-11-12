@@ -42,14 +42,14 @@ static void emit_op_u16(BcCompiler *bc, uint8_t op, uint16_t arg) {
 /* Emit a jump instruction with a placeholder offset, return patch position */
 static int emit_jump(BcCompiler *bc, uint8_t jump_op) {
     emit_op(bc, jump_op);
-    int patch_pos = bc->len;
+    int patch_pos = (int)bc->len;
     emit_u16(bc, 0); /* placeholder */
     return patch_pos;
 }
 
 /* Patch a previously emitted jump to target the current position */
 static void patch_jump(BcCompiler *bc, int patch_pos) {
-    int offset = bc->len - (patch_pos + 2);
+    int offset = (int)bc->len - (patch_pos + 2);
     bc->code[patch_pos]     = (uint8_t)(offset & 0xFF);
     bc->code[patch_pos + 1] = (uint8_t)((offset >> 8) & 0xFF);
 }
