@@ -91,6 +91,86 @@ void clay_stack_init(void) {
     clay_stack_limit = lo + stack_margin(size);
 }
 
+/* --- A big stack for the program ---
+ *
+ * Recursion in Clay uses C stack, and the operating system's default for the
+ * main thread (8 MB on Linux, 1 MB on Windows) is small for it. The program
+ * runs on a thread whose stack is CLAY_STACK_MB megabytes (default 256): only
+ * address space is reserved, pages are committed as they are used. 0 keeps the
+ * main thread and the system's stack size. */
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+/* AddressSanitizer gives up unpoisoning the stack after a longjmp when the
+ * stack is bigger than 64 MB, and then reports false errors */
+#define CLAY_DEFAULT_STACK_MB 60
+#else
+#define CLAY_DEFAULT_STACK_MB 256
+#endif
+
+typedef struct {
+    int (*fn)(int, char **);
+    int argc;
+    char **argv;
+    int rc;
+} StackJob;
+
+size_t clay_stack_bytes(void) {
+    long mb = CLAY_DEFAULT_STACK_MB;
+    const char *env = getenv("CLAY_STACK_MB");
+    if (env && *env) {
+        char *end = NULL;
+        long v = strtol(env, &end, 10);
+        if (end && *end == '\0' && v >= 0) mb = v;
+    }
+    if (mb > 16384) mb = 16384;
+    if (sizeof(void *) < 8 && mb > 512) mb = 512;       /* 32-bit address space */
+    return (size_t)mb * 1024u * 1024u;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI stack_job_entry(LPVOID p) {
+    StackJob *job = (StackJob *)p;
+    job->rc = job->fn(job->argc, job->argv);
+    return 0;
+}
+
+int clay_run_with_stack(int (*fn)(int, char **), int argc, char **argv) {
+    size_t bytes = clay_stack_bytes();
+    StackJob job = { fn, argc, argv, 0 };
+    if (bytes == 0) return fn(argc, argv);
+    HANDLE h = CreateThread(NULL, bytes, stack_job_entry, &job, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+    if (!h) return fn(argc, argv);                      /* no thread: the main one will do */
+    WaitForSingleObject(h, INFINITE);
+    CloseHandle(h);
+    return job.rc;
+}
+#else
+static void *stack_job_entry(void *p) {
+    StackJob *job = (StackJob *)p;
+    job->rc = job->fn(job->argc, job->argv);
+    return NULL;
+}
+
+int clay_run_with_stack(int (*fn)(int, char **), int argc, char **argv) {
+    size_t bytes = clay_stack_bytes();
+    StackJob job = { fn, argc, argv, 0 };
+    if (bytes == 0) return fn(argc, argv);
+    pthread_attr_t attr;
+    pthread_t thread;
+    if (pthread_attr_init(&attr) != 0) return fn(argc, argv);
+    if (pthread_attr_setstacksize(&attr, bytes) != 0 ||
+        pthread_create(&thread, &attr, stack_job_entry, &job) != 0) {
+        pthread_attr_destroy(&attr);
+        return fn(argc, argv);                          /* no thread: the main one will do */
+    }
+    pthread_attr_destroy(&attr);
+    pthread_join(thread, NULL);
+    return job.rc;
+}
+#endif
+
 void clay_stack_overflow(void) {
     clay_raise(CLAY_VAL(clay_error_new("stack overflow: recursion is too deep", "RuntimeError")));
 }

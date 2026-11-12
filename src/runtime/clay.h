@@ -75,6 +75,11 @@ void      clay_raise_overflow(void);
  * runaway recursion raises a RuntimeError instead of crashing. */
 extern CLAY_THREAD_LOCAL char *clay_stack_limit;
 void      clay_stack_init(void);        /* the current thread's limit (bootstrap, thread start) */
+/* Run fn(argc, argv) on a thread with a big stack (CLAY_STACK_MB megabytes, default
+ * 256; 0 = the main thread's own) and return its result. Both `clay` and compiled
+ * programs start through this. */
+int       clay_run_with_stack(int (*fn)(int, char **), int argc, char **argv);
+size_t    clay_stack_bytes(void);       /* the size that would be used */
 void      clay_stack_overflow(void);    /* raises RuntimeError; does not return */
 #if defined(_MSC_VER)
 #include <intrin.h>

@@ -1199,7 +1199,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     return exit_code;
 }
 
-int main(int argc, char *argv[]) {
+static int clay_main(int argc, char *argv[]) {
     resolve_exe_path(argv[0]);
     g_exe_path = g_exe_path_buf[0] ? g_exe_path_buf : argv[0];
     clay_executable_path = g_exe_path_buf;   /* System executable */
@@ -1472,4 +1472,8 @@ int main(int argc, char *argv[]) {
     free(source);
     free(c_file);
     return 0;
+}
+
+int main(int argc, char *argv[]) {
+    return clay_run_with_stack(clay_main, argc, argv);
 }

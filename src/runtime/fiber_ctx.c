@@ -24,12 +24,15 @@ void clay_fiber_init_stack(clay_fiber_regs_t *ctx,
 
 #if defined(__x86_64__) || defined(_M_X64)
     /*
-     * x86_64: set rsp to (stack_top - 8) so that when the stub does
-     * callq *%r12 the stack is 16-byte aligned (call pushes 8 bytes).
+     * x86_64: the swap jumps to the stub (no return address is pushed), which
+     * does callq *%r12. The ABI wants rsp 16-byte aligned at a call, so the
+     * stack starts at stack_top, aligned: the entry function then begins with
+     * rsp = 8 (mod 16) as the ABI says. (It used to start at stack_top - 8,
+     * which ran the whole fiber misaligned.)
      * r12 = entry_fn, r13 = arg (used by clay_fiber_entry_stub).
      * rip = address of clay_fiber_entry_stub.
      */
-    ctx->rsp = stack_top - 8;
+    ctx->rsp = stack_top;
     ctx->rip = (uint64_t)(uintptr_t)clay_fiber_entry_stub;
     ctx->r12 = (uint64_t)(uintptr_t)entry_fn;
     ctx->r13 = (uint64_t)(uintptr_t)arg;

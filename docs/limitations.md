@@ -46,10 +46,17 @@ importer a namespace to read, but the imported file's top-level variables are st
 as globals.
 
 **Recursion depth is limited by the C stack.** Every Clay method or block call that
-recurses uses C stack, so roughly 2,000 nested method calls (about 1,000 through blocks, and
-far fewer inside a fiber, which has a 256 KB stack) end with a `RuntimeError`, "stack
-overflow: recursion is too deep", that `try`/`catch` can handle. There is no tail-call
-elimination: loop with `whileTrue` or `each` instead of recursing for long sequences.
+recurses uses C stack. Programs run on a stack of 256 MB, which allows around 60,000 nested
+method calls (somewhat fewer through blocks); beyond that, or in a fiber, which has a 256 KB
+stack of its own (about 60 nested calls), the program raises a `RuntimeError`, "stack overflow:
+recursion is too deep", that `try`/`catch` can handle. There is no tail-call elimination: loop
+with `whileTrue` or `each` instead of recursing for long sequences.
+
+Set the environment variable `CLAY_STACK_MB` to change the size: `CLAY_STACK_MB=1024` for deeper
+recursion, `CLAY_STACK_MB=16` for a leaner process, or `CLAY_STACK_MB=0` to use the operating
+system's own stack size (8 MB on Linux and macOS, 1 MB on Windows). Only the pages a program
+uses are committed, so a big stack costs address space, not memory, until recursion reaches it.
+It applies to `clay`, to compiled programs and to `clayc`.
 
 **A method takes at most 16 parameters.** A 17th parameter isn't bound: using
 it fails with `object does not understand 'a16'`. Pass a Dict or an object
