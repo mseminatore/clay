@@ -85,6 +85,73 @@ port = srv localPort
 }
 srv close
 
+// --- non-blocking: tryRead, tryWrite and select with writers ---
+srv = Socket listen(0)
+port = srv localPort
+cli = Socket connect("127.0.0.1", port)
+conn = srv accept(1000)
+
+check value("tryRead with nothing waiting is the empty string", (cli tryRead) == "")
+check value("tryRead(max) too", (cli tryRead(10)) == "")
+conn write("abcdef")
+check value("select says it is readable", (Socket select([cli], 1000)) size == 1)
+check value("tryRead takes at most max", (cli tryRead(2)) == "ab")
+check value("tryRead takes what is left", (cli tryRead(100)) == "cdef")
+check value("...and then there is nothing", (cli tryRead) == "")
+
+// select with writers: a pair, and a list may be nil or empty
+pair = Socket select(nil, [cli], 0)
+check value("a connected socket is writable", pair size == 2 && (pair at(0)) size == 0 && (pair at(1)) == [cli])
+pair = Socket select([cli], [cli, conn], 0)
+check value("readers and writers are reported apart", (pair at(0)) size == 0 && (pair at(1)) size == 2)
+pair = Socket select([cli], nil, 20)
+check value("nil writers gives an empty list for them", pair size == 2 && (pair at(0)) size == 0 && (pair at(1)) size == 0)
+pair = Socket select([], [], 10)
+check value("empty lists just wait", pair size == 2 && (pair at(0)) size == 0 && (pair at(1)) size == 0)
+check value("the two-argument form is unchanged", (Socket select([cli], 10)) size == 0)
+check value("select(readers, nil) waits for readers only", (Socket select([cli, conn], nil, 10)) size == 2)
+check value("select needs readers in the short form", (raises value({ Socket select(nil, 10) })) == "TypeError")
+check value("writers must be sockets", (raises value({ Socket select([], [5], 0) })) == "TypeError")
+
+// fill the send buffer: tryWrite takes what fits and then reports 0 instead of waiting
+piece = "0123456789abcdef" repeat(4096)           // 64 KB
+written = 0
+rounds = 0
+full = false
+{ full == false && rounds < 4000 } whileTrue {
+    n = conn tryWrite(piece)
+    (n == 0) ifTrue { full = true }
+    written = written + n
+    rounds = rounds + 1
+}
+check value("tryWrite reports a full buffer with 0", full && written > 0)
+pair = Socket select(nil, [conn], 0)
+check value("a full buffer is not writable", (pair at(1)) size == 0)
+// the other end drains it; the writer becomes writable again
+received = 0
+{ received < written } whileTrue {
+    (Socket select([cli], 2000)) size == 1
+    chunk = cli tryRead(65536)
+    check value("the data arrives", chunk != nil)
+    received = received + chunk length
+}
+check value("everything written was received", received == written)
+pair = Socket select(nil, [conn], 2000)
+check value("writable again after the drain", (pair at(1)) size == 1)
+check value("tryWrite works again", (conn tryWrite("more")) == 4)
+check value("tryWrite of nothing is 0", (conn tryWrite("")) == 0)
+check value("the small write arrives", (cli readExactly(4)) == "more")
+
+// tryRead at the end of the stream
+conn close
+check value("select says a closed peer is readable", (Socket select([cli], 1000)) size == 1)
+check value("tryRead is nil when the peer has closed", (cli tryRead) == nil)
+check value("tryRead on a closed socket raises", (raises value({ conn tryRead })) == "SocketError")
+check value("tryWrite wants a string", (raises value({ Socket udp(0) tryWrite(5) })) == "TypeError")
+check value("tryRead max must be positive", (raises value({ Socket udp(0) tryRead(0) })) == "ArgumentError")
+cli close
+srv close
+
 // failures
 check value("a refused connection raises", (raises value({ Socket connect("127.0.0.1", port) })) == "SocketError")
 check value("a port out of range", (raises value({ Socket connect("127.0.0.1", 70000) })) == "ArgumentError")

@@ -29,7 +29,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Range | `each(block)`, `map(block)`, `filter(block)`, `contains(val)`, `toArray()`, `size()`, `step(n)`, `reverse()`, `start()`, `end()`, `toString()` |
 | Vec3 | `new(x,y,z)`, `x`, `y`, `z`, `+`, `-`, `*`, `/`, `dot(v)`, `cross(v)`, `length`, `lengthSquared`, `normalize`, `mul(v)`, `reflect(n)`, `nearZero`, `negated`, `==`, `!=`, `toString()` |
 | Thread | `spawn(block)`, `await()`, `done()`, `available` |
-| Socket | `connect(host, port)`, `listen(port)`, `udp()`, `resolve(host)`, `select(sockets)`; on a socket: `read(max)`, `readExactly(n)`, `write(data)`, `accept()`, `sendTo(host, port, data)`, `receiveFrom()`, `setTimeout(ms)`, `close()`, `localPort`, `remoteAddress` — see [Sockets](#sockets) |
+| Socket | `connect(host, port)`, `listen(port)`, `udp()`, `resolve(host)`, `select(sockets)`; on a socket: `read(max)`, `readExactly(n)`, `write(data)`, `tryRead()`, `tryWrite(data)`, `accept()`, `sendTo(host, port, data)`, `receiveFrom()`, `setTimeout(ms)`, `close()`, `localPort`, `remoteAddress` — see [Sockets](#sockets) |
 | VM | `run(unit)`, `run(unit, args)`, `hasGlobal(name)`, `counts()` — run bytecode from the [Clay compiler in Clay](native-and-plugins.md#a-clay-compiler-in-clay) (native programs only) |
 | Graphics | `window(w,h,title)`, `close`, `clear`, `color(r,g,b)`, `setPixel(x,y,r,g,b)`, `drawLine(x1,y1,x2,y2)`, `drawRect(x,y,w,h)`, `fillRect(x,y,w,h)`, `drawCircle(x,y,r)`, `fillCircle(x,y,r)`, `drawText(x,y,text)`, `fontSize(n)`, `loadPPM(path)`, `drawImage(img,x,y)`, `drawImageEx(img,x,y,scale)`, `createSprite(img,x,y,w,h)`, `drawSprite(s,x,y)`, `createBuffer(w,h)`, `bufferPixel(buf,x,y,r,g,b)`, `drawBuffer(buf,x,y)`, `pollEvent`, `waitEvent`, `isKeyDown(key)`, `mouseX`, `mouseY`, `mouseDown`, `ticks`, `delay(ms)`, `fps`, `refresh`, `resize(w,h)`, `fullscreen`, `windowed`, `width`, `height` |
 
@@ -374,18 +374,33 @@ srv = Socket listen(8080)                // loopback only; Socket listen(8080, "
 ```
 
 - `Socket connect(host, port, timeoutMs)` — the timeout is optional. `Socket listen(port, host, backlog)`
-  binds `host` (default `"127.0.0.1"`, so a server isn't reachable from other machines unless you
-  ask: pass `"0.0.0.0"` or `"::"`); port 0 picks a free one, which `localPort` tells you.
+  binds `host`; port 0 picks a free one, which `localPort` tells you.
+- **Who can connect to a server.** `host` defaults to `"127.0.0.1"` (loopback): only programs on the
+  same computer can connect, so a server you start while developing can't be reached from the
+  network by accident. To accept connections from other machines, say so: `Socket listen(8080,
+  "0.0.0.0")` (every IPv4 interface) or `Socket listen(8080, "::")` (every IPv6 interface, and IPv4
+  too). Those addresses are not safer, they are the explicit choice to be reachable; make sure that
+  is what you want, and that a firewall and your own checks stand in front of it.
   `Socket udp(port)` makes a UDP socket, bound if you give a port. `Socket resolve("host")` is an
   Array of its addresses.
-- `read(max)` returns up to `max` bytes (at least one; default 4096) or `nil` once the peer has
-  closed. `readExactly(n)` returns exactly `n` or raises. `write(data)` sends all of it and returns the
-  byte count. `shutdownWrite` closes only your sending side; `close` ends the socket (also done when
-  an unclosed socket is freed).
+- `read(max)` waits for data, then returns up to `max` bytes (at least one; default 4096), or `nil` once
+  the peer has closed. `readExactly(n)` returns exactly `n` or raises. `write(data)` sends all of it and
+  returns the byte count; it waits only if the peer isn't reading and the operating system's send
+  buffer is full. `shutdownWrite` closes only your sending side; `close` ends the socket (also done
+  when an unclosed socket is freed).
+- **Without waiting:** `tryRead(max)` returns what is there now: `""` if nothing is, `nil` if the peer
+  has closed, otherwise at least one byte. `tryWrite(data)` sends as much of `data` as fits right now
+  and returns how many bytes that was, possibly 0 when the buffer is full, so the rest is
+  `data slice(n, data length)`. Neither ever waits, whatever `setTimeout` says.
 - `accept` waits for a connection; `accept(ms)` returns `nil` if none comes within `ms` (`accept(0)`
   just looks). `Socket select([a, b], ms)` returns the sockets that can be read now (or, for a
   listening socket, have a connection waiting), so one loop can serve several: with `ms` omitted it
-  waits, with 0 it just looks.
+  waits, with 0 it just looks. `Socket select(readers, writers, ms)` also says which sockets can be
+  written to: it returns `[readable, writable]`, and either list may be `nil`
+  (`Socket select(nil, [s], 1000)`). A socket is writable when its send buffer has room, so
+  `tryWrite` will take at least one byte; a large `write` can still wait partway through, which is
+  what `tryWrite` is for. (`select(readers, nil)` with two arguments is the short form with no
+  timeout, not an empty writers list.)
 - `setTimeout(ms)` limits how long `read`, `readExactly`, `write` and `receiveFrom` wait (0: forever); it
   returns the socket, so it chains. An expired timeout raises `TimeoutError`, any other failure
   `SocketError` (type `e type`), and a bad argument `ArgumentError` or `TypeError`.

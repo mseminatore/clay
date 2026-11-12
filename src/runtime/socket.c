@@ -5,11 +5,14 @@
  *   Socket listen(port [, host [, backlog]])     TCP server (host defaults to 127.0.0.1)
  *   Socket udp([port [, host]])                  UDP socket (bound if a port is given)
  *   Socket resolve(host)                         Array of the host's addresses
- *   Socket select(sockets [, timeoutMs])         the sockets that are ready to read (0: just look)
+ *   Socket select(readers [, timeoutMs])         the readers that can be read now (0: just look)
+ *   Socket select(readers, writers [, timeoutMs])   [readable, writable]; a list may be nil
  *
  *   s read([max])         up to max bytes (at least one); nil when the peer has closed
  *   s readExactly(n)      exactly n bytes; raises if the peer closes first
- *   s write(data)         all of data; returns the byte count
+ *   s write(data)         all of data (waits if the peer isn't reading); returns the byte count
+ *   s tryRead([max])      what is waiting now: "" if nothing, nil if the peer has closed
+ *   s tryWrite(data)      as much of data as fits now; returns the byte count (0: buffer full)
  *   s accept([timeoutMs]) a listening socket's next connection; with a timeout, nil if
  *                         none came in time (0 just looks)
  *   s sendTo(host, port, data) / s receiveFrom([max])    UDP
@@ -409,23 +412,66 @@ static ClayValue socket_resolve(ClayObject *self, int argc, ClayValue *argv) {
 
 /* --- Socket select(sockets [, timeoutMs]) --- */
 
+/* the sockets of an Array argument (nil: none) as descriptors appended to fds, which has
+ * room for them; returns how many, or -1 after raising */
+#ifdef _WIN32
+typedef WSAPOLLFD poll_fd_t;
+#define POLL_READ POLLRDNORM
+#define POLL_WRITE POLLWRNORM
+#else
+typedef struct pollfd poll_fd_t;
+#define POLL_READ POLLIN
+#define POLL_WRITE POLLOUT
+#endif
+
+static int select_add(ClayValue list_arg, poll_fd_t *fds, short events, const char *who) {
+    if (CLAY_IS_NIL(list_arg)) return 0;
+    ClayObject *list = CLAY_OBJ(list_arg);
+    size_t n = clay_array_size(list);
+    for (size_t i = 0; i < n; i++) {
+        ClayValue v = clay_array_at(list, i);
+        if (!CLAY_IS_OBJ(v)) { fail("TypeError", "%s: expects an Array of sockets", who); return -1; }
+        fds[i].fd = fd_of(CLAY_OBJ(v), who, 1);            /* raises if not an open socket */
+        fds[i].events = events;
+        fds[i].revents = 0;
+    }
+    return (int)n;
+}
+
+/* Socket select(readers [, ms])             -> the readers that can be read now
+ * Socket select(readers, writers [, ms])    -> [readable, writable]
+ * Either list may be nil (or empty); ms omitted or nil waits as long as it takes, 0 just looks. */
 static ClayValue socket_select(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     net_init();
-    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_ARRAY)) {
+    int pair = argc >= 3 || (argc == 2 && CLAY_IS_TYPE(argv[1], CLAY_TYPE_ARRAY));
+    ClayValue readers = argc > 0 ? argv[0] : CLAY_NIL;
+    ClayValue writers = pair && argc > 1 ? argv[1] : CLAY_NIL;
+    int ms_index = pair ? 2 : 1;
+    if (!CLAY_IS_NIL(readers) && !CLAY_IS_TYPE(readers, CLAY_TYPE_ARRAY)) {
         fail("TypeError", "Socket select: expects an Array of sockets");
         return CLAY_NIL;
     }
-    int timeout = -1;                                      /* forever, unless given (0 just looks) */
-    if (argc > 1 && !CLAY_IS_NIL(argv[1])) {
-        intptr_t ms = clay_arg_integer(argc, argv, 1, "Socket select");
+    if (!CLAY_IS_NIL(writers) && !CLAY_IS_TYPE(writers, CLAY_TYPE_ARRAY)) {
+        fail("TypeError", "Socket select: the writers must be an Array of sockets or nil");
+        return CLAY_NIL;
+    }
+    if (!pair && CLAY_IS_NIL(readers)) {
+        fail("TypeError", "Socket select: expects an Array of sockets");
+        return CLAY_NIL;
+    }
+    int timeout = -1;
+    if (argc > ms_index && !CLAY_IS_NIL(argv[ms_index])) {
+        intptr_t ms = clay_arg_integer(argc, argv, ms_index, "Socket select");
         if (ms < 0) { fail("ArgumentError", "Socket select: the timeout must not be negative"); return CLAY_NIL; }
         timeout = (int)ms;
     }
-    ClayObject *list = CLAY_OBJ(argv[0]);
-    size_t n = clay_array_size(list);
-    ClayObject *ready = clay_array_new();
-    if (n == 0) {
+    size_t nr = CLAY_IS_NIL(readers) ? 0 : clay_array_size(CLAY_OBJ(readers));
+    size_t nw = CLAY_IS_NIL(writers) ? 0 : clay_array_size(CLAY_OBJ(writers));
+
+    ClayObject *can_read = clay_array_new();
+    ClayObject *can_write = pair ? clay_array_new() : NULL;
+    if (nr + nw == 0) {
         /* nothing to wait for: just the timeout */
         if (timeout > 0) {
 #ifdef _WIN32
@@ -435,36 +481,35 @@ static ClayValue socket_select(ClayObject *self, int argc, ClayValue *argv) {
             nanosleep(&ts, NULL);
 #endif
         }
-        return CLAY_VAL(ready);
+    } else {
+        poll_fd_t *fds = (poll_fd_t *)calloc(nr + nw, sizeof(poll_fd_t));
+        if (!fds) { fail("SocketError", "Socket select: out of memory"); return CLAY_NIL; }
+        if (select_add(readers, fds, POLL_READ, "Socket select") < 0 ||
+            select_add(writers, fds + nr, POLL_WRITE, "Socket select") < 0) {
+            free(fds);
+            return CLAY_NIL;
+        }
+        int r;
+#ifdef _WIN32
+        r = WSAPoll(fds, (ULONG)(nr + nw), timeout);
+#else
+        do { r = poll(fds, (nfds_t)(nr + nw), timeout); } while (r < 0 && errno == EINTR);
+#endif
+        if (r < 0) { int e = sock_errno(); free(fds); fail_errno("Socket select", e); return CLAY_NIL; }
+        /* an error or hang-up counts as ready: the read or write that follows reports it */
+        for (size_t i = 0; i < nr; i++)
+            if (fds[i].revents) clay_array_append(can_read, clay_array_at(CLAY_OBJ(readers), i));
+        for (size_t i = 0; i < nw; i++)
+            if (fds[nr + i].revents) clay_array_append(can_write, clay_array_at(CLAY_OBJ(writers), i));
+        free(fds);
     }
-#ifdef _WIN32
-    WSAPOLLFD *fds = (WSAPOLLFD *)calloc(n, sizeof(WSAPOLLFD));
-#else
-    struct pollfd *fds = (struct pollfd *)calloc(n, sizeof(struct pollfd));
-#endif
-    if (!fds) { clay_release(ready); fail("SocketError", "Socket select: out of memory"); return CLAY_NIL; }
-    for (size_t i = 0; i < n; i++) {
-        ClayValue v = clay_array_at(list, i);
-        if (!CLAY_IS_OBJ(v)) { free(fds); clay_release(ready); fail("TypeError", "Socket select: expects an Array of sockets"); return CLAY_NIL; }
-        sock_t fd = fd_of(CLAY_OBJ(v), "Socket select", 1);   /* raises if not an open socket */
-        fds[i].fd = fd;
-#ifdef _WIN32
-        fds[i].events = POLLRDNORM;
-#else
-        fds[i].events = POLLIN;
-#endif
-    }
-    int r;
-#ifdef _WIN32
-    r = WSAPoll(fds, (ULONG)n, timeout);
-#else
-    do { r = poll(fds, (nfds_t)n, timeout); } while (r < 0 && errno == EINTR);
-#endif
-    if (r < 0) { int e = sock_errno(); free(fds); clay_release(ready); fail_errno("Socket select", e); return CLAY_NIL; }
-    for (size_t i = 0; i < n; i++)
-        if (fds[i].revents) clay_array_append(ready, clay_array_at(list, i));
-    free(fds);
-    return CLAY_VAL(ready);
+    if (!pair) return CLAY_VAL(can_read);
+    ClayObject *both = clay_array_new();
+    clay_array_append(both, CLAY_VAL(can_read));
+    clay_array_append(both, CLAY_VAL(can_write));
+    clay_release(can_read);
+    clay_release(can_write);
+    return CLAY_VAL(both);
 }
 
 /* --- reading and writing --- */
@@ -561,6 +606,79 @@ static ClayValue socket_write(ClayObject *self, int argc, ClayValue *argv) {
         left -= (size_t)n;
     }
     return clay_int((intptr_t)total);
+}
+
+/* the error a non-blocking call got because nothing could be done yet */
+static int would_block(int err) {
+#ifdef _WIN32
+    return err == WSAEWOULDBLOCK;
+#else
+    return err == EAGAIN || err == EWOULDBLOCK;
+#endif
+}
+
+/* s tryRead([max]): what is waiting right now, without waiting: "" if nothing is,
+ * nil if the peer has closed, otherwise at least one byte and at most max */
+static ClayValue socket_tryRead(ClayObject *self, int argc, ClayValue *argv) {
+    sock_t fd = fd_of(self, "Socket tryRead", 1);
+    intptr_t max = SOCKET_DEFAULT_READ;
+    if (argc > 0 && !CLAY_IS_NIL(argv[0])) {
+        max = clay_arg_integer(argc, argv, 0, "Socket tryRead");
+        if (max < 1) { fail("ArgumentError", "Socket tryRead: max must be at least 1"); return CLAY_NIL; }
+        if (max > SOCKET_MAX_READ) max = SOCKET_MAX_READ;
+    }
+    char *buf = (char *)malloc((size_t)max);
+    if (!buf) { fail("SocketError", "Socket tryRead: out of memory"); return CLAY_NIL; }
+    set_blocking(fd, 0);
+    int n, err = 0;
+    for (;;) {
+        n = (int)recv(fd, buf, (int)max, 0);
+        err = n < 0 ? sock_errno() : 0;
+#ifndef _WIN32
+        if (n < 0 && err == EINTR) continue;
+#endif
+        break;
+    }
+    set_blocking(fd, 1);
+    ClayValue result;
+    if (n < 0) {
+        if (would_block(err)) result = CLAY_VAL(clay_string_new(""));
+        else { free(buf); fail_errno("Socket tryRead", err); return CLAY_NIL; }
+    } else if (n == 0) {
+        result = CLAY_NIL;
+    } else {
+        result = CLAY_VAL(clay_string_new_len(buf, (size_t)n));
+    }
+    free(buf);
+    return result;
+}
+
+/* s tryWrite(data): sends as much of data as fits right now, without waiting, and returns
+ * how many bytes that was (0 if the send buffer is full) */
+static ClayValue socket_tryWrite(ClayObject *self, int argc, ClayValue *argv) {
+    sock_t fd = fd_of(self, "Socket tryWrite", 1);
+    clay_arg_string(argc, argv, 0, "Socket tryWrite");     /* raises unless a String */
+    ClayObject *data = CLAY_OBJ(argv[0]);
+    size_t len = data->as.string.length;
+    if (len == 0) return clay_int(0);
+    int chunk = len > (size_t)(1 << 30) ? (1 << 30) : (int)len;
+    set_blocking(fd, 0);
+    int n, err = 0;
+    for (;;) {
+        n = (int)send(fd, data->as.string.data, chunk, SEND_FLAGS);
+        err = n < 0 ? sock_errno() : 0;
+#ifndef _WIN32
+        if (n < 0 && err == EINTR) continue;
+#endif
+        break;
+    }
+    set_blocking(fd, 1);
+    if (n < 0) {
+        if (would_block(err)) return clay_int(0);
+        fail_errno("Socket tryWrite", err);
+        return CLAY_NIL;
+    }
+    return clay_int(n);
 }
 
 /* --- accept --- */
@@ -759,6 +877,8 @@ void clay_socket_init(ClayObject *proto) {
     clay_set_method(proto, "read", socket_read);
     clay_set_method(proto, "readExactly", socket_readExactly);
     clay_set_method(proto, "write", socket_write);
+    clay_set_method(proto, "tryRead", socket_tryRead);
+    clay_set_method(proto, "tryWrite", socket_tryWrite);
     clay_set_method(proto, "accept", socket_accept);
     clay_set_method(proto, "sendTo", socket_sendTo);
     clay_set_method(proto, "receiveFrom", socket_receiveFrom);
