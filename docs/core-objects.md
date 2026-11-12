@@ -12,7 +12,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Array | `at(i)`, `setAt(i, val)`, `append(val)`, `push(val)`, `pop()`, `shift()`, `insert(i, val)`, `size()`, `length()`, `each(block)`, `map(block)`, `parallelMap(block)`, `filter(block)`, `reduce(init, block)`, `find(block)`, `sort()`, `reverse()`, `first()`, `last()`, `join(sep)`, `contains(val)`, `indexOf(val)`, `removeAt(i)`, `slice(start, end)`, `flatten()`, `sum()`, `min()`, `max()`, `avg()`, `unique()`, `==`, `!=`, `toString()` |
 | Block | `value(args...)`, `whileTrue { block }`, `whileFalse { block }` |
 | Boolean | `ifTrue { block }`, `ifFalse { block }`, `not()`, `toString()` |
-| Error | `message()`, `type()`, `line()`, `file()`, `stackTrace()`, `toString()` |
+| Error | `message()`, `type()`, `line()`, `file()`, `stackTrace()` (every recorded call, newest first), `traceback()` (the report an uncaught error prints: block-running calls left out, repeats counted, long ones cut in the middle), `toString()` |
 | Dict | `set(key, val)`, `get(key)`, `has(key)`, `remove(key)`, `size()`, `keys()`, `values()`, `each(block)`, `==`, `!=`, `toString()` (entries keep insertion order) |
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `clamp(n, lo, hi)`, `lerp(a, b, t)`, `sign(n)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `random()`, `pi`, `e` |
 | Console | `print(args...)`, `println(args...)`, `error(args...)` (to stderr), `isTerminal()` (output is a terminal, so colour codes are safe), `isInteractive()` (input is a terminal, so a prompt reaches someone), `readLine()`, `readLine(prompt)` (on a terminal: shows the prompt, with line editing and history), `readLine(prompt, color)` (the prompt in `"red"`, `"green"`, `"yellow"`, `"blue"`, `"magenta"`, `"cyan"`, `"white"` or `"black"`; put the colour here, not escape codes in the prompt, which would confuse line editing), `loadHistory(path)`, `saveHistory(path)`, `prompt(msg)` |
@@ -302,6 +302,13 @@ a resume     // 10
 b resume     // 30
 a resume     // 20
 b resume     // 40
+
+// An error nothing in the fiber catches ends it and comes out of resume
+bad = Fiber new { raise("boom") }
+msg = try { bad resume
+            "no error" } catch { |e| e message }
+msg println      // boom
+bad isDone       // true
 ```
 
 ## Vec3

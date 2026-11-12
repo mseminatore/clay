@@ -824,7 +824,31 @@ try {
 }
 ```
 
-`toString()` includes the trace, and unhandled errors print it to stderr.
+`stackTrace()` is every call that was recorded, newest first, and `toString()` includes it.
+
+An error nothing catches ends the program with a report on stderr: the error and the line
+it was raised on, then the calls that led to it, newest first (`clay`, `clayc` and
+compiled programs print the same):
+
+```
+app.clay:6: Error: bad value 2
+  at app.clay:5 in check()
+  at app.clay:5 in each()
+  at app.clay:4 in step()
+  at app.clay:8 in run()
+```
+
+A line says where a call was made (`at app.clay:5 in check()`: `check` was called on line 5).
+So that what matters stays visible, the report leaves out the calls that only run blocks
+(`value`, `ifTrue`, `ifFalse`, `whileTrue`, `whileFalse`), shows a repeated line once with
+a count (`[previous line repeated 62 more times]`, which is what a runaway recursion looks
+like), and when it is still longer than about two dozen lines keeps the first twelve (where it
+went wrong) and the last twelve (where it started) with a "not shown" line between. The shadow
+stack records the first 64 nested calls; deeper ones are counted in a line at the top.
+`e traceback` is this text for an error you caught.
+
+An error raised in a [Fiber](core-objects.md#fibers-coroutines) that nothing in the fiber catches ends the
+fiber and comes out of `resume`, where a `try` can catch it.
 
 Objects can override `doesNotUnderstand` for proxy-style dispatch:
 

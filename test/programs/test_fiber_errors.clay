@@ -1,0 +1,58 @@
+// An error nothing in a fiber catches ends the fiber and comes out of
+// resume(), where a try can catch it.
+
+failures = 0
+check = { |name, ok|
+    ok ifFalse {
+        Console print("FAIL: " + name + "\n")
+        failures = failures + 1
+    }
+}
+
+// raised before the first yield
+f1 = Fiber new({ raise("boom") })
+msg = try { f1 resume
+            "no error" } catch { |e| e message }
+check value("error escapes resume", msg == "boom")
+check value("the fiber is done", f1 isDone)
+check value("resuming a finished fiber does nothing", (f1 resume) == nil)
+
+// raised after a yield: the first resume works, the second raises
+f2 = Fiber new({
+    Fiber yield(1)
+    raise("later")
+})
+check value("first resume yields", (f2 resume) == 1)
+check value("not done yet", (f2 isDone) == false)
+msg = try { f2 resume
+            "no error" } catch { |e| e message }
+check value("later error escapes resume", msg == "later")
+
+// a fiber can catch its own errors
+f3 = Fiber new({
+    r = try { raise("inner")
+              "no error" } catch { |e| e message }
+    r
+})
+check value("a fiber catches its own error", (f3 resume) == "inner")
+
+// the error's type survives, and the program carries on
+f4 = Fiber new({ 1 / 0 })
+kind = try { f4 resume
+             "none" } catch { |e| e type }
+check value("the error keeps its type", kind == "DivisionByZero")
+
+// a fiber inside a fiber
+outer = Fiber new({
+    inner = Fiber new({ raise("deep") })
+    inner resume
+})
+msg = try { outer resume
+            "no error" } catch { |e| e message }
+check value("errors pass through nested fibers", msg == "deep")
+
+(failures > 0) ifTrue {
+    Console print(failures toString + " checks failed\n")
+    System exit(1)
+}
+Console print("fiber error tests passed\n")

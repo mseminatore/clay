@@ -356,6 +356,7 @@ add_test(NAME clay_test_op_overload COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE
 add_test(NAME clay_test_ns_import COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_ns_import.clay)
 add_test(NAME clay_test_file_scope COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_file_scope.clay)
 add_test(NAME clay_test_stack_overflow COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_stack_overflow.clay)
+add_test(NAME clay_test_fiber_errors COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber_errors.clay)
 add_test(NAME clay_test_recursion_depth COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_recursion_depth.clay)
 add_test(NAME clay_test_fiber_alignment COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber_alignment.clay)
 # CLAY_STACK_MB sets the size of the program's stack: with 1 MB the same recursion overflows
@@ -555,6 +556,39 @@ foreach(err undefined_variable undefined_in_import)
     set_tests_properties(clay_error_${err} clay_error_${err}_native PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
+
+# Runtime errors: a program that ends with an uncaught error prints exactly
+# test/errors/<name>.out (the error and its traceback), in the VM and native
+# (clayc is checked against clay in cmake/selfhost_run.cmake)
+foreach(err uncaught_trace uncaught_deep uncaught_fiber)
+    add_test(NAME clay_error_${err}
+             COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+                 -DSRC=test/errors/${err}.clay
+                 -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/errors/${err}.out
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/runtime_error_test.cmake)
+    add_test(NAME clay_error_${err}_native
+             COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+                 -DSRC=test/errors/${err}.clay
+                 -DNATIVE_OUT=${CMAKE_CURRENT_BINARY_DIR}/native_tests/err_${err}
+                 -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/errors/${err}.out
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/runtime_error_test.cmake)
+    set_tests_properties(clay_error_${err} clay_error_${err}_native PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endforeach()
+
+# A runaway recursion ends with a RuntimeError whose traceback shows the repeated
+# call once with a count (how deep it got depends on the stack, so no golden file)
+add_test(NAME clay_error_uncaught_recursion
+         COMMAND clay_compiler test/trace/uncaught_recursion.clay)
+add_test(NAME clay_error_uncaught_recursion_native
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DSRC=test/trace/uncaught_recursion.clay
+             -DOUT=${CMAKE_CURRENT_BINARY_DIR}/native_tests/err_uncaught_recursion
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/native_run_fails.cmake)
+set_tests_properties(clay_error_uncaught_recursion PROPERTIES
+    PASS_REGULAR_EXPRESSION "Error: stack overflow: recursion is too deep.*previous line repeated [0-9]+ more times")
+set_tests_properties(clay_error_uncaught_recursion clay_error_uncaught_recursion_native PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # stack_trace asserts on its own trace (the frames' wording differs by backend)
 add_test(NAME clay_smoke_stack_trace COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/stack_trace.clay)

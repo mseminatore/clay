@@ -118,7 +118,11 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 - **Prototype chain**: `ClayObject.parent` links form the chain used by both slot reads and method
   lookup. Slot *writes* are always local to the receiving object (no chain walk).
 - **Error handling**: `clay_raise()`/`clay_try_push()`/`clay_try_pop()` implement try/catch via
-  `setjmp`/`longjmp` over a linked list of frames on the C stack (no fixed nesting limit). Built-in
+  `setjmp`/`longjmp` over a linked list of frames on the C stack (no fixed nesting limit). An error
+  nothing catches is reported by `clay_error_traceback` (error.c: block-running calls dropped, repeats
+  counted, long traces cut in the middle) from `main.c`, the native no-handler path and clayc's
+  `report`; a fiber's uncaught error is raised again from `resume`. `CLAY_STACK_CHECK()` at the start
+  of VM and generated methods/blocks turns C stack exhaustion into a `RuntimeError`. Built-in
   error types: `DivisionByZero`, `OverflowError`, `MethodNotFound`, `NilError`, `TypeError`, `RuntimeError`.
 - **Integer range**: always build tagged ints with `clay_int()` (raises `OverflowError` outside 62 bits),
   multiply with `clay_int_mul()` and convert floats with `clay_float_to_int()`; never cast/shift by hand.

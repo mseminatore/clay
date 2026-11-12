@@ -524,6 +524,12 @@ char *clay_http_get_text(const char *url, int *status);
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 
+/* The traceback printed when an error ends a program: an Error's stack trace
+ * without the block-running calls, repeats counted, long ones cut in the
+ * middle. Both return a malloc'd string of whole lines, or NULL. */
+char *clay_traceback_format(const char *trace);
+char *clay_error_traceback(ClayValue err);
+
 /* --- Call trace (shadow call stack for stack traces) --- */
 #define CLAY_MAX_TRACE_DEPTH 64
 
