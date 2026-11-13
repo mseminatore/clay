@@ -180,6 +180,66 @@ static ClayValue number_mod(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int(a % b);
 }
 
+/* --- Bitwise operators (integers only; floats raise TypeError) --- */
+
+static void bit_operands(ClayObject *self, int argc, ClayValue *argv, const char *op,
+                         intptr_t *a, intptr_t *b) {
+    if (argc < 1 || is_float_arg(self, argc, argv)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Number %s: operands must be integers", op);
+        clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+    }
+    *a = self_int_value(self);
+    *b = arg_int_or_raise(argv[0], op);
+}
+
+static ClayValue number_bitand(ClayObject *self, int argc, ClayValue *argv) {
+    intptr_t a, b;
+    bit_operands(self, argc, argv, "&", &a, &b);
+    return clay_int(a & b);
+}
+
+static ClayValue number_bitor(ClayObject *self, int argc, ClayValue *argv) {
+    intptr_t a, b;
+    bit_operands(self, argc, argv, "|", &a, &b);
+    return clay_int(a | b);
+}
+
+static ClayValue number_bitxor(ClayObject *self, int argc, ClayValue *argv) {
+    intptr_t a, b;
+    bit_operands(self, argc, argv, "^", &a, &b);
+    return clay_int(a ^ b);
+}
+
+static ClayValue number_bitnot(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    if (is_float_arg(self, 0, NULL)) {
+        clay_raise(CLAY_VAL(clay_error_new("Number bitNot: receiver must be an integer", "TypeError")));
+    }
+    return clay_int(~self_int_value(self));
+}
+
+/* a << n: raises OverflowError if the result leaves the 62-bit range */
+static ClayValue number_shl(ClayObject *self, int argc, ClayValue *argv) {
+    intptr_t a, n;
+    bit_operands(self, argc, argv, "<<", &a, &n);
+    if (n < 0) clay_raise(CLAY_VAL(clay_error_new("negative shift count", "RuntimeError")));
+    if (a == 0) return clay_int(0);
+    if (n >= 62) clay_raise_overflow();
+    /* multiply instead of shifting a negative value (undefined in C99); the
+     * checked product raises OverflowError past 62 bits */
+    return clay_int(clay_int_mul(a, (intptr_t)1 << n));
+}
+
+/* a >> n: arithmetic (sign-propagating) shift */
+static ClayValue number_shr(ClayObject *self, int argc, ClayValue *argv) {
+    intptr_t a, n;
+    bit_operands(self, argc, argv, ">>", &a, &n);
+    if (n < 0) clay_raise(CLAY_VAL(clay_error_new("negative shift count", "RuntimeError")));
+    if (n >= 62) return clay_int(a < 0 ? -1 : 0);
+    return clay_int(a < 0 ? ~(~a >> n) : a >> n);
+}
+
 static ClayValue number_lt(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_FALSE;
     if (is_float_arg(self, argc, argv)) {
@@ -361,6 +421,12 @@ void clay_number_init_methods(ClayObject *proto) {
     clay_set_method(proto, "*",  number_mul);
     clay_set_method(proto, "/",  number_div);
     clay_set_method(proto, "%",  number_mod);
+    clay_set_method(proto, "&",  number_bitand);
+    clay_set_method(proto, "|",  number_bitor);
+    clay_set_method(proto, "^",  number_bitxor);
+    clay_set_method(proto, "<<", number_shl);
+    clay_set_method(proto, ">>", number_shr);
+    clay_set_method(proto, "bitNot", number_bitnot);
     clay_set_method(proto, "<",  number_lt);
     clay_set_method(proto, ">",  number_gt);
     clay_set_method(proto, "<=", number_lte);

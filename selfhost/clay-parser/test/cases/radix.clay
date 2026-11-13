@@ -1,0 +1,5 @@
+a = 0xFF
+b = 0b1010 + 0XaB
+c = -0x10
+d = 0x1FFFFFFFFFFFFFFF
+e = 0B1

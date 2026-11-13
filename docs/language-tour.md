@@ -48,7 +48,7 @@ arr each { |x| x println }  // message with trailing block
 
 ## Binary operators
 
-Binary operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`) are messages sent to the left operand.
+Binary operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, and the [bitwise operators](#bitwise-operators)) are messages sent to the left operand.
 
 ```clay
 3 + 4         // sends '+' to 3 with arg 4
@@ -95,7 +95,7 @@ Vec setMethod("*", { |scalar| Vec new(self x * scalar, self y * scalar) })
 Vec new(2, 3) * 5   // Vec(10, 15)
 ```
 
-Overloadable operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`. For built-in numbers, the fast integer/float path is used automatically; the custom method is only called for non-numeric types.
+Overloadable operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&`, `|`, `^`, `<<`, `>>`. For built-in numbers, the fast integer/float path is used automatically; the custom method is only called for non-numeric types.
 
 ## Prototypes and cloning
 
@@ -587,6 +587,34 @@ b = false
 
 `&&` and `||` short-circuit: the right side is only evaluated if needed. Values are truthy unless they are `nil`, `false`, or `0`.
 
+## Bitwise operators
+
+`&` (and), `|` (or), `^` (xor), `<<` (shift left), `>>` (shift right) and unary `~` (not) work on
+integers, each with a compound form (`&=`, `|=`, `^=`, `<<=`, `>>=`). They are messages like the
+other operators, so custom types can overload the binary ones; `~x` sends `bitNot`.
+
+```clay
+(6 & 3) println          // 2
+(6 | 3) println          // 7
+(6 ^ 3) println          // 5
+(~5) println             // -6
+(1 << 10) println        // 1024
+(-1024 >> 3) println     // -128 — right shift keeps the sign
+flags = 0
+flags |= 1 << 3          // set bit 3
+flags &= ~(1 << 3)       // clear it again
+flags println            // 0
+```
+
+Precedence, from loosest to tightest: `??`, `..`, `||`, `&&`, `==` `!=`, `<` `>` `<=` `>=`,
+`|`, `^`, `&`, `<<` `>>`, `+` `-`, `*` `/` `%` (the same order as Python). So bit tests need no
+extra parentheses (`flags & 8 == 8` is `(flags & 8) == 8`, unlike in C), and arithmetic binds
+tighter than a shift: `1 + 2 << 3` is `(1 + 2) << 3`.
+
+Operands must be integers (floats raise `TypeError`). `>>` is an arithmetic shift, a negative
+shift count raises `RuntimeError`, and a `<<` result outside the 62-bit range raises
+`OverflowError` like any other integer overflow.
+
 ### Null-coalescing (`??`)
 
 Returns the left operand if non-nil, otherwise the right:
@@ -664,6 +692,9 @@ Integers and floats are stored directly in the value (no allocation). Mixed oper
 
 ```clay
 42                            // integer
+0xFF                          // 255 (hexadecimal)
+0b1010                        // 10 (binary)
+'a'                           // 97 (character literal: the code point)
 3.14                          // float
 10 / 3                        // 3 (integer division)
 10 toFloat / 3                // 3.3333333 (float division)
@@ -672,6 +703,14 @@ Integers and floats are stored directly in the value (no allocation). Mixed oper
 (-5) abs                      // 5
 5 times { |i| i println }  // prints 0..4
 ```
+
+A character literal is a single character in single quotes and is just an integer: its Unicode
+code point (`'a'` is 97, `'€'` is 8364). It accepts the escapes `'\n'`, `'\t'`, `'\r'`, `'\0'`,
+`'\\'`, `'\''`, `'\"'` and `'\xHH'`. Hex and binary literals use the `0x` / `0b` prefixes (upper or
+lower case); like decimal literals they must fit in 62 bits.
+
+Block parameter lists use `|a, b|`; a block that takes none may be written `{ || ... }` (or simply
+`{ ... }`).
 
 ## Strings
 

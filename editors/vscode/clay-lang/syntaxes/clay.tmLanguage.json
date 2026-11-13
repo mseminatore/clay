@@ -69,6 +69,18 @@
           "match": "\\b[0-9]+[eE][+\\-]?[0-9]+\\b"
         },
         {
+          "name": "constant.numeric.hex.clay",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.clay",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "constant.character.clay",
+          "match": "'(\\\\(x[0-9a-fA-F]{2}|.)|[^'\\\\])'"
+        },
+        {
           "name": "constant.numeric.integer.clay",
           "match": "\\b[0-9]+\\b"
         }
@@ -114,7 +126,7 @@
       "patterns": [
         {
           "name": "keyword.operator.comparison.clay",
-          "match": "==|!=|<=|>=|<|>"
+          "match": "==|!=|<<|>>|<=|>=|<|>"
         },
         {
           "name": "keyword.operator.logical.clay",
@@ -122,11 +134,11 @@
         },
         {
           "name": "keyword.operator.assignment.compound.clay",
-          "match": "[+\\-*/%]="
+          "match": "<<=|>>=|[+\\-*/%&|^]="
         },
         {
           "name": "keyword.operator.arithmetic.clay",
-          "match": "[+\\-*/%]"
+          "match": "[+\\-*/%&|^~]|<<|>>"
         },
         {
           "name": "keyword.operator.assignment.clay",

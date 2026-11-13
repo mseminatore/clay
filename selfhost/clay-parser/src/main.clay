@@ -285,8 +285,72 @@ Parser = Object clone {
     // operator token usable as a method name in a clone body, or nil
     operatorName() {
         k = cur kind
-        (["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">="] contains(k)) ifTrue { return k }
+        (["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&", "|", "^", "<<", ">>"] contains(k)) ifTrue { return k }
         nil
+    }
+
+    // value of an INT token: decimal, 0x hex or 0b binary; nil if it does not
+    // fit in a 62-bit integer
+    intValue(text) {
+        radix = 10
+        start = 0
+        c1 = text byteAt(1)
+        ((text byteAt(0)) == 48 && (c1 == 120 || c1 == 88)) ifTrue { radix = 16; start = 2 }
+        ((text byteAt(0)) == 48 && (c1 == 98 || c1 == 66)) ifTrue { radix = 2; start = 2 }
+        (radix == 10) ifTrue { return try { text toInt } catch { |e| nil } }
+        max = 2305843009213693951
+        v = 0
+        i = start
+        { i < text length } whileTrue {
+            c = text byteAt(i)
+            d = (c >= 97) ifTrue { c - 87 } ifFalse { (c >= 65) ifTrue { c - 55 } ifFalse { c - 48 } }
+            (v > (max - d) / radix) ifTrue { return nil }
+            v = v * radix + d
+            i = i + 1
+        }
+        v
+    }
+
+    // value of a character literal body (the raw text between the quotes): one
+    // escape (n t r 0 backslash, quotes, xHH) or one UTF-8 encoded character,
+    // whose code point is the value. [code point, nil] or [nil, message].
+    decodeChar(s) {
+        n = s length
+        (n == 0) ifTrue { return [nil, "empty character literal"] }
+        b0 = s byteAt(0)
+        (b0 == 92) ifTrue {
+            (n == 2) ifTrue {
+                e = s byteAt(1)
+                (e == 110) ifTrue { return [10, nil] }
+                (e == 116) ifTrue { return [9, nil] }
+                (e == 114) ifTrue { return [13, nil] }
+                (e == 48) ifTrue { return [0, nil] }
+                (e == 92) ifTrue { return [92, nil] }
+                (e == 39) ifTrue { return [39, nil] }
+                (e == 34) ifTrue { return [34, nil] }
+            }
+            ((n == 4 && (s byteAt(1)) == 120 && (self isHexDigit(s byteAt(2))) && (self isHexDigit(s byteAt(3))))) ifTrue {
+                return [(self hexValue(s byteAt(2))) * 16 + (self hexValue(s byteAt(3))), nil]
+            }
+            return [nil, "invalid escape in character literal"]
+        }
+        w = 0
+        cp = 0
+        (b0 < 128) ifTrue { w = 1; cp = b0 }
+        ((b0 / 32) == 6) ifTrue { w = 2; cp = b0 % 32 }
+        ((b0 / 16) == 14) ifTrue { w = 3; cp = b0 % 16 }
+        ((b0 / 8) == 30) ifTrue { w = 4; cp = b0 % 8 }
+        (w == 0) ifTrue { return [nil, "invalid UTF-8 in character literal"] }
+        i = 1
+        { i < w && i < n } whileTrue {
+            c = s byteAt(i)
+            ((c / 64) == 2) ifFalse { return [nil, "invalid UTF-8 in character literal"] }
+            cp = cp * 64 + c % 64
+            i = i + 1
+        }
+        (n > w) ifTrue { return [nil, "character literal must be a single character"] }
+        (n < w) ifTrue { return [nil, "invalid UTF-8 in character literal"] }
+        [cp, nil]
     }
 
     isHexDigit(c) { (c >= 48 && c <= 57) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70) }
@@ -423,10 +487,29 @@ Parser = Object clone {
             return self send(l, operand, "not", [])
         }
 
+        (self match("~")) ifTrue {
+            l = prev line
+            operand = self primary
+            (operand == nil) ifTrue { return nil }
+            return self send(l, operand, "bitNot", [])
+        }
+
+        (self match("CHAR")) ifTrue {
+            n = Node make("Int", prev line)
+            n value = 0
+            r = self decodeChar(prev text)
+            (r at(1) != nil) ifTrue {
+                self errorPrev(r at(1))
+                return n
+            }
+            n value = r at(0)
+            return n
+        }
+
         (self match("INT")) ifTrue {
             n = Node make("Int", prev line)
             n value = 0
-            v = try { prev text toInt } catch { |e| nil }
+            v = self intValue(prev text)
             (v == nil) ifTrue {
                 self errorPrev("integer literal is too large for a 62-bit integer (use a float, e.g. 1e19)")
                 return n
@@ -630,7 +713,10 @@ Parser = Object clone {
         n params = []
         n body = []
         self skipNewlines
-        (self check("|")) ifTrue {
+        // empty parameter list: ||
+        hasEmpty = self match("||")
+        hasEmpty ifTrue { self skipNewlines }
+        ((hasEmpty == false) && (self check("|"))) ifTrue {
             self advance
             (self check("|")) ifFalse {
                 self expect("IDENT", "Expected parameter name")
@@ -797,7 +883,8 @@ Parser = Object clone {
 
     precedences = #{
         "??": 1, "..": 2, "||": 3, "&&": 4, "==": 5, "!=": 5,
-        "<": 6, ">": 6, "<=": 6, ">=": 6, "+": 7, "-": 7, "*": 8, "/": 8, "%": 8
+        "<": 6, ">": 6, "<=": 6, ">=": 6, "|": 7, "^": 8, "&": 9, "<<": 10, ">>": 10,
+        "+": 11, "-": 11, "*": 12, "/": 12, "%": 12
     }
 
     binaryExpr(minPrec) {
@@ -819,7 +906,10 @@ Parser = Object clone {
 
     // --- statements ---
 
-    compoundOps = #{ "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%" }
+    compoundOps = #{
+        "+=": "+", "-=": "-", "*=": "*", "/=": "/", "%=": "%",
+        "&=": "&", "|=": "|", "^=": "^", "<<=": "<<", ">>=": ">>"
+    }
 
     statement() {
         hadError ifTrue { return nil }

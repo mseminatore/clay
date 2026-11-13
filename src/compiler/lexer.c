@@ -115,7 +115,50 @@ static Token lex_string(Lexer *lexer) {
     return make_token(lexer, has_interp ? TOK_INTERP_STRING : TOK_STRING, start, length);
 }
 
+/* 'c' -- the token text is the raw text between the quotes (escapes and
+ * multi-byte characters are decoded by the parser) */
+static Token lex_char(Lexer *lexer) {
+    const char *start = lexer->current; /* after opening quote */
+    while (peek(lexer) != '\'') {
+        if (peek(lexer) == '\0' || peek(lexer) == '\n') {
+            return error_token(lexer, "Unterminated character literal");
+        }
+        if (peek(lexer) == '\\') {
+            advance(lexer);
+            if (peek(lexer) == '\0' || peek(lexer) == '\n') {
+                return error_token(lexer, "Unterminated character literal");
+            }
+        }
+        advance(lexer);
+    }
+    int length = (int)(lexer->current - start);
+    advance(lexer); /* closing quote */
+    return make_token(lexer, TOK_CHAR, start, length);
+}
+
 static Token lex_number(Lexer *lexer, const char *start) {
+    /* 0xFF / 0b1010 */
+    if (start[0] == '0' && (peek(lexer) == 'x' || peek(lexer) == 'X')) {
+        advance(lexer);
+        if (!isxdigit((unsigned char)peek(lexer))) {
+            return error_token(lexer, "Invalid hexadecimal literal");
+        }
+        while (isxdigit((unsigned char)peek(lexer))) advance(lexer);
+        return make_token(lexer, TOK_INT, start, (int)(lexer->current - start));
+    }
+    if (start[0] == '0' && (peek(lexer) == 'b' || peek(lexer) == 'B')) {
+        advance(lexer);
+        if (!isdigit((unsigned char)peek(lexer))) {
+            return error_token(lexer, "Invalid binary literal");
+        }
+        int bad = 0;
+        while (isdigit((unsigned char)peek(lexer))) {
+            if (peek(lexer) > '1') bad = 1;
+            advance(lexer);
+        }
+        if (bad) return error_token(lexer, "Invalid binary literal");
+        return make_token(lexer, TOK_INT, start, (int)(lexer->current - start));
+    }
     while (isdigit((unsigned char)peek(lexer))) {
         advance(lexer);
     }
@@ -194,6 +237,11 @@ Token lexer_next(Lexer *lexer) {
         return lex_string(lexer);
     }
 
+    /* Character literal */
+    if (c == '\'') {
+        return lex_char(lexer);
+    }
+
     /* Number */
     if (isdigit((unsigned char)c)) {
         return lex_number(lexer, start);
@@ -222,6 +270,7 @@ Token lexer_next(Lexer *lexer) {
             return make_token(lexer, TOK_DOT, start, 1);
         case '|':
             if (match(lexer, '|')) return make_token(lexer, TOK_OR, start, 2);
+            if (match(lexer, '=')) return make_token(lexer, TOK_PIPE_ASSIGN, start, 2);
             return make_token(lexer, TOK_PIPE, start, 1);
         case ';': return make_token(lexer, TOK_SEMICOLON, start, 1);
         case '+':
@@ -246,14 +295,27 @@ Token lexer_next(Lexer *lexer) {
             if (match(lexer, '=')) return make_token(lexer, TOK_NOT_EQUAL, start, 2);
             return make_token(lexer, TOK_BANG, start, 1);
         case '<':
+            if (match(lexer, '<')) {
+                if (match(lexer, '=')) return make_token(lexer, TOK_SHL_ASSIGN, start, 3);
+                return make_token(lexer, TOK_SHL, start, 2);
+            }
             if (match(lexer, '=')) return make_token(lexer, TOK_LESS_EQ, start, 2);
             return make_token(lexer, TOK_LESS, start, 1);
         case '>':
+            if (match(lexer, '>')) {
+                if (match(lexer, '=')) return make_token(lexer, TOK_SHR_ASSIGN, start, 3);
+                return make_token(lexer, TOK_SHR, start, 2);
+            }
             if (match(lexer, '=')) return make_token(lexer, TOK_GREATER_EQ, start, 2);
             return make_token(lexer, TOK_GREATER, start, 1);
         case '&':
             if (match(lexer, '&')) return make_token(lexer, TOK_AND, start, 2);
-            return error_token(lexer, "Unexpected character '&' (did you mean '&&'?)");
+            if (match(lexer, '=')) return make_token(lexer, TOK_AMP_ASSIGN, start, 2);
+            return make_token(lexer, TOK_AMP, start, 1);
+        case '^':
+            if (match(lexer, '=')) return make_token(lexer, TOK_CARET_ASSIGN, start, 2);
+            return make_token(lexer, TOK_CARET, start, 1);
+        case '~': return make_token(lexer, TOK_TILDE, start, 1);
         case '?':
             if (match(lexer, '?')) return make_token(lexer, TOK_NULLCOALESCE, start, 2);
             return error_token(lexer, "Unexpected character '?' (did you mean '?\?'?)");
@@ -267,6 +329,7 @@ const char *token_type_name(TokenType type) {
         case TOK_INT:        return "INT";
         case TOK_FLOAT:      return "FLOAT";
         case TOK_STRING:     return "STRING";
+        case TOK_CHAR:       return "CHAR";
         case TOK_INTERP_STRING: return "INTERP_STRING";
         case TOK_IDENT:      return "IDENT";
         case TOK_SELF:       return "SELF";
@@ -310,11 +373,21 @@ const char *token_type_name(TokenType type) {
         case TOK_AND:        return "&&";
         case TOK_OR:         return "||";
         case TOK_NULLCOALESCE: return "??";
+        case TOK_AMP:        return "&";
+        case TOK_CARET:      return "^";
+        case TOK_TILDE:      return "~";
+        case TOK_SHL:        return "<<";
+        case TOK_SHR:        return ">>";
         case TOK_PLUS_ASSIGN:    return "+=";
         case TOK_MINUS_ASSIGN:   return "-=";
         case TOK_STAR_ASSIGN:    return "*=";
         case TOK_SLASH_ASSIGN:   return "/=";
         case TOK_PERCENT_ASSIGN: return "%=";
+        case TOK_AMP_ASSIGN:   return "&=";
+        case TOK_PIPE_ASSIGN:  return "|=";
+        case TOK_CARET_ASSIGN: return "^=";
+        case TOK_SHL_ASSIGN:   return "<<=";
+        case TOK_SHR_ASSIGN:   return ">>=";
         case TOK_EOF:        return "EOF";
         case TOK_ERROR:      return "ERROR";
         default:             return "???";
