@@ -307,6 +307,7 @@ add_test(NAME clay_tests COMMAND test_runner)
 
 # Clay language integration tests (run via bytecode VM)
 add_test(NAME clay_test_numbers  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_numbers.clay)
+add_test(NAME clay_test_bitops  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_bitops.clay)
 add_test(NAME clay_test_floats  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_floats.clay)
 add_test(NAME clay_test_strings  COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_strings.clay)
 add_test(NAME clay_test_arrays   COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_arrays.clay)

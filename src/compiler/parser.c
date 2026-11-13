@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
@@ -189,6 +190,11 @@ static const char *operator_method_name(Parser *p) {
         case TOK_GREATER:    return ">";
         case TOK_LESS_EQ:    return "<=";
         case TOK_GREATER_EQ: return ">=";
+        case TOK_AMP:        return "&";
+        case TOK_PIPE:       return "|";
+        case TOK_CARET:      return "^";
+        case TOK_SHL:        return "<<";
+        case TOK_SHR:        return ">>";
         default:             return NULL;
     }
 }
@@ -236,6 +242,47 @@ static char *process_escapes(const char *raw, int len) {
     }
     out[j] = '\0';
     return out;
+}
+
+/* Value of a character literal body (the raw text between the quotes): one
+ * escape (n t r 0 backslash, single or double quote, or xHH) or one UTF-8
+ * encoded character, whose code point is the value. Returns NULL and sets
+ * *out, or an error message. */
+static const char *decode_char_literal(const char *s, int len, long long *out) {
+    if (len == 0) return "empty character literal";
+    if (s[0] == '\\') {
+        if (len == 2) {
+            switch (s[1]) {
+                case 'n':  *out = '\n'; return NULL;
+                case 't':  *out = '\t'; return NULL;
+                case 'r':  *out = '\r'; return NULL;
+                case '0':  *out = 0;    return NULL;
+                case '\\': *out = '\\'; return NULL;
+                case '\'': *out = '\''; return NULL;
+                case '"':  *out = '"';  return NULL;
+                default:   break;
+            }
+        } else if (len == 4 && s[1] == 'x' &&
+                   isxdigit((unsigned char)s[2]) && isxdigit((unsigned char)s[3])) {
+            char hex[3] = { s[2], s[3], '\0' };
+            *out = strtol(hex, NULL, 16);
+            return NULL;
+        }
+        return "invalid escape in character literal";
+    }
+    unsigned char b0 = (unsigned char)s[0];
+    int n = b0 < 0x80 ? 1 : (b0 & 0xE0) == 0xC0 ? 2 : (b0 & 0xF0) == 0xE0 ? 3 :
+            (b0 & 0xF8) == 0xF0 ? 4 : 0;
+    if (n == 0) return "invalid UTF-8 in character literal";
+    long long cp = n == 1 ? b0 : n == 2 ? (b0 & 0x1F) : n == 3 ? (b0 & 0x0F) : (b0 & 0x07);
+    for (int i = 1; i < n && i < len; i++) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80) return "invalid UTF-8 in character literal";
+        cp = (cp << 6) | ((unsigned char)s[i] & 0x3F);
+    }
+    if (len > n) return "character literal must be a single character";
+    if (len < n) return "invalid UTF-8 in character literal";
+    *out = cp;
+    return NULL;
 }
 
 /* --- Forward declarations --- */
@@ -321,7 +368,10 @@ static AstNode *parse_primary(Parser *p) {
         AstNode *node = ast_new(NODE_INT_LIT, p->previous.line);
         char *s = token_strdup(&p->previous);
         errno = 0;
-        long long v = strtoll(s, NULL, 10);
+        long long v;
+        if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) v = strtoll(s + 2, NULL, 16);
+        else if (s[0] == '0' && (s[1] == 'b' || s[1] == 'B')) v = strtoll(s + 2, NULL, 2);
+        else v = strtoll(s, NULL, 10);
         /* Integers are tagged 62-bit values (INTPTR_MAX >> 2 on 64-bit hosts) */
         if (errno == ERANGE || v > (long long)(INTPTR_MAX >> 2)) {
             free(s);
@@ -346,6 +396,31 @@ static AstNode *parse_primary(Parser *p) {
     if (match(p, TOK_STRING)) {
         AstNode *node = ast_new(NODE_STRING_LIT, p->previous.line);
         node->as.string_lit.value = process_escapes(p->previous.start, p->previous.length);
+        return node;
+    }
+
+    /* Unary bitwise not: ~expr is a send of bitNot */
+    if (match(p, TOK_TILDE)) {
+        int line = p->previous.line;
+        AstNode *operand = parse_primary(p);
+        if (!operand) return NULL;
+        AstNode *node = ast_new(NODE_SEND, line);
+        node->as.send.receiver = operand;
+        node->as.send.message = strdup("bitNot");
+        nodelist_init(&node->as.send.args);
+        return node;
+    }
+
+    /* Character literal: 'a' is the integer code point */
+    if (match(p, TOK_CHAR)) {
+        AstNode *node = ast_new(NODE_INT_LIT, p->previous.line);
+        long long cp = 0;
+        const char *err = decode_char_literal(p->previous.start, p->previous.length, &cp);
+        if (err) {
+            parser_error_prev(p, err);
+            return node;
+        }
+        node->as.int_lit.value = cp;
         return node;
     }
 
@@ -614,8 +689,12 @@ static AstNode *parse_block(Parser *p) {
 
     skip_newlines(p);
 
+    /* Empty parameter list: || */
+    if (match(p, TOK_OR)) {
+        skip_newlines(p);
+    }
     /* Check for |param1, param2| */
-    if (check(p, TOK_PIPE)) {
+    else if (check(p, TOK_PIPE)) {
         parser_advance(p);
         if (!check(p, TOK_PIPE)) {
             /* Parse parameter names */
@@ -871,6 +950,8 @@ static int is_binary_op(TokenType type) {
            type == TOK_LESS_EQ || type == TOK_GREATER_EQ ||
            type == TOK_AND || type == TOK_OR ||
            type == TOK_NULLCOALESCE ||
+           type == TOK_PIPE || type == TOK_CARET || type == TOK_AMP ||
+           type == TOK_SHL || type == TOK_SHR ||
            type == TOK_RANGE;
 }
 
@@ -888,10 +969,18 @@ static int precedence(TokenType type) {
             return 5;
         case TOK_LESS: case TOK_GREATER: case TOK_LESS_EQ: case TOK_GREATER_EQ:
             return 6;
-        case TOK_PLUS: case TOK_MINUS:
+        case TOK_PIPE:
             return 7;
-        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+        case TOK_CARET:
             return 8;
+        case TOK_AMP:
+            return 9;
+        case TOK_SHL: case TOK_SHR:
+            return 10;
+        case TOK_PLUS: case TOK_MINUS:
+            return 11;
+        case TOK_STAR: case TOK_SLASH: case TOK_PERCENT:
+            return 12;
         default: return 0;
     }
 }
@@ -933,6 +1022,11 @@ static const char *compound_assign_op(TokenType type) {
         case TOK_STAR_ASSIGN:    return "*";
         case TOK_SLASH_ASSIGN:   return "/";
         case TOK_PERCENT_ASSIGN: return "%";
+        case TOK_AMP_ASSIGN:     return "&";
+        case TOK_PIPE_ASSIGN:    return "|";
+        case TOK_CARET_ASSIGN:   return "^";
+        case TOK_SHL_ASSIGN:     return "<<";
+        case TOK_SHR_ASSIGN:     return ">>";
         default:                 return NULL;
     }
 }

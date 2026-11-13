@@ -1,0 +1,130 @@
+// test_bitops.clay — hex/binary/char literals and bitwise operators
+
+Test = Object clone {
+    _p = 0
+    _f = 0
+
+    eq(a, b) {
+        (a == b) ifTrue { self _p = self _p + 1 }
+        (!(a == b)) ifTrue {
+            self _f = self _f + 1
+            ("FAIL: " + a toString() + " != " + b toString()) println()
+        }
+        self
+    }
+
+    done() {
+        total = self _p + self _f
+        (total toString() + " tests, " + self _p toString() + " passed, " + self _f toString() + " failed") println()
+        (self _f > 0) ifTrue { raise("test failures") }
+        self
+    }
+}
+
+// Message raised by a block, or "" if it did not raise
+errOf = { |b| try { b value; "" } catch { |e| e message } }
+
+// Hex and binary literals
+Test eq(0xFF, 255)
+Test eq(0Xab, 171)
+Test eq(0x0, 0)
+Test eq(0b1010, 10)
+Test eq(0B11, 3)
+Test eq(-0x10, -16)
+Test eq(0x1FFFFFFFFFFFFFFF, 2305843009213693951)
+Test eq(0xFF toString, "255")
+
+// Character literals are integer code points
+Test eq('a', 97)
+Test eq('A' + 1, 66)
+Test eq('\n', 10)
+Test eq('\t', 9)
+Test eq('\r', 13)
+Test eq('\0', 0)
+Test eq('\\', 92)
+Test eq('\'', 39)
+Test eq('"', 34)
+Test eq('\x41', 65)
+Test eq('é', 233)
+Test eq('€', 8364)
+Test eq(' ', 32)
+Test eq('z' - 'a', 25)
+
+// Bitwise operators
+Test eq(6 & 3, 2)
+Test eq(6 | 3, 7)
+Test eq(6 ^ 3, 5)
+Test eq(~0, -1)
+Test eq(~5, -6)
+Test eq(-1 & 0xFF, 255)
+Test eq(1 << 10, 1024)
+Test eq(1 << 0, 1)
+Test eq(0 << 100, 0)
+Test eq(1024 >> 3, 128)
+Test eq(-1024 >> 3, -128)
+Test eq(-5 >> 1, -3)
+Test eq(-1 >> 100, -1)
+Test eq(5 >> 100, 0)
+Test eq(1 << 60, 1152921504606846976)
+
+// Precedence (as Python): * / %, then + -, then << >>, then & ^ |, then comparison
+Test eq(1 + 2 << 3, 24)
+Test eq(1 << 2 + 1, 8)
+Test eq(2 * 3 << 1, 12)
+Test eq(1 | 2 ^ 3 & 4, 3)
+Test eq((6 & 3 == 2), true)
+Test eq(1 << 4 | 1, 17)
+Test eq(0xF0 & 0x3C >> 2, 0)
+Test eq(0xF0 | 0x0F ^ 0xFF, 0xF0)
+
+// Compound assignment
+x = 5
+x <<= 2;  Test eq(x, 20)
+x |= 1;   Test eq(x, 21)
+x &= 0xF; Test eq(x, 5)
+x ^= 3;   Test eq(x, 6)
+x >>= 1;  Test eq(x, 3)
+
+Box = Object clone { v = 12 }
+Box v &= 10; Test eq(Box v, 8)
+Box v |= 3;  Test eq(Box v, 11)
+Box v ^= 1;  Test eq(Box v, 10)
+Box v <<= 2; Test eq(Box v, 40)
+Box v >>= 3; Test eq(Box v, 5)
+
+// Blocks: empty parameter list, and | in a block body
+f = { || 7 }
+Test eq(f value, 7)
+g = { |a, b| a | b }
+Test eq(g value(4, 1), 5)
+Test eq([1, 2, 3] map { |n| n | 8 }, [9, 10, 11])
+h = { ||
+    1 + 1
+}
+Test eq(h value, 2)
+
+// Operator overloading
+Flags = Object clone {
+    bits = 6
+    &(o) { bits & o }
+    |(o) { bits | o }
+    ^(o) { bits ^ o }
+    <<(o) { bits << o }
+    >>(o) { bits >> o }
+}
+Test eq(Flags & 3, 2)
+Test eq(Flags | 1, 7)
+Test eq(Flags ^ 3, 5)
+Test eq(Flags << 2, 24)
+Test eq(Flags >> 1, 3)
+
+// Errors
+Test eq(errOf value({ 1 << 62 }), "integer overflow (integers are 62-bit; use toFloat for larger values)")
+Test eq(errOf value({ 3 << 61 }), "integer overflow (integers are 62-bit; use toFloat for larger values)")
+Test eq(errOf value({ 1 << -1 }), "negative shift count")
+Test eq(errOf value({ 1 >> -1 }), "negative shift count")
+Test eq(errOf value({ 1.5 & 1 }), "Number &: operands must be integers")
+Test eq(errOf value({ 1 | 2.5 }), "Number |: operands must be integers")
+Test eq(errOf value({ 1 ^ "a" }), "Number ^: argument is not a Number")
+
+Test done()

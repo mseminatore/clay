@@ -1,0 +1,26 @@
+a = 6 & 3 | 1 ^ 2
+b = 1 + 2 << 3 * 4 >> 1
+c = a & b == 4
+d = ~a & ~b
+e = -~a
+x = 5
+x <<= 2
+x |= 1
+x &= 0xF
+x ^= 3
+x >>= 1
+o = Object clone {
+    v = 6
+    &(other) { v & other }
+    |(other) { v | other }
+    ^(other) { v ^ other }
+    <<(other) { v << other }
+    >>(other) { v >> other }
+}
+o v |= 8
+o v <<= 1
+f = { || 1 }
+g = { || 
+    2 }
+h = { |q| q | 1 }
+i = [1, 2] map { |n| n | 4 }

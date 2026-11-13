@@ -310,6 +310,94 @@ static void test_parser_slot_assign(void) {
     }
 }
 
+static void test_parser_bitwise(void) {
+    SUITE("Parser Bitwise and Radix Literals");
+
+    COMMENT("hex and binary literal values...");
+    {
+        AstNode *s = parse_stmt("0xFF");
+        TEST(s != NULL && s->type == NODE_INT_LIT && s->as.int_lit.value == 255);
+        s = parse_stmt("0b1010");
+        TEST(s != NULL && s->type == NODE_INT_LIT && s->as.int_lit.value == 10);
+        s = parse_stmt("-0x10");
+        TEST(s != NULL && s->type == NODE_INT_LIT && s->as.int_lit.value == -16);
+    }
+
+    COMMENT("character literal is an integer...");
+    {
+        AstNode *s = parse_stmt("'a'");
+        TEST(s != NULL && s->type == NODE_INT_LIT && s->as.int_lit.value == 97);
+    }
+
+    COMMENT("shifts bind looser than + and tighter than &...");
+    {
+        AstNode *s = parse_stmt("1 + 2 << 3");
+        TEST(s != NULL && s->type == NODE_BINARY);
+        TEST(strcmp(s->as.binary.op, "<<") == 0);
+        TEST(s->as.binary.left->type == NODE_BINARY);
+        TEST(strcmp(s->as.binary.left->as.binary.op, "+") == 0);
+    }
+
+    COMMENT("| < ^ < & in precedence, all above comparison...");
+    {
+        AstNode *s = parse_stmt("a | b ^ c & d");
+        TEST(s != NULL && s->type == NODE_BINARY);
+        TEST(strcmp(s->as.binary.op, "|") == 0);
+        TEST(strcmp(s->as.binary.right->as.binary.op, "^") == 0);
+        TEST(strcmp(s->as.binary.right->as.binary.right->as.binary.op, "&") == 0);
+
+        s = parse_stmt("a & b == c");
+        TEST(s != NULL && s->type == NODE_BINARY);
+        TEST(strcmp(s->as.binary.op, "==") == 0);
+        TEST(strcmp(s->as.binary.left->as.binary.op, "&") == 0);
+    }
+
+    COMMENT("unary ~ is a bitNot send...");
+    {
+        AstNode *s = parse_stmt("~a");
+        TEST(s != NULL && s->type == NODE_SEND);
+        TEST(strcmp(s->as.send.message, "bitNot") == 0);
+    }
+
+    COMMENT("compound bitwise assignment desugars to a binary op...");
+    {
+        AstNode *s = parse_stmt("x <<= 2");
+        TEST(s != NULL && s->type == NODE_ASSIGN);
+        TEST(s->as.assign.value->type == NODE_BINARY);
+        TEST(strcmp(s->as.assign.value->as.binary.op, "<<") == 0);
+        s = parse_stmt("x |= 1");
+        TEST(s != NULL && s->type == NODE_ASSIGN);
+        TEST(strcmp(s->as.assign.value->as.binary.op, "|") == 0);
+    }
+
+    COMMENT("empty block parameter list...");
+    {
+        AstNode *s = parse_stmt("{ || 1 }");
+        TEST(s != NULL && s->type == NODE_BLOCK);
+        TEST(s->as.block.params.count == 0);
+        TEST(s->as.block.body.count == 1);
+    }
+
+    COMMENT("a block parameter list and | in the body...");
+    {
+        AstNode *s = parse_stmt("{ |a| a | 1 }");
+        TEST(s != NULL && s->type == NODE_BLOCK);
+        TEST(s->as.block.params.count == 1);
+        TEST(s->as.block.body.items[0]->type == NODE_BINARY);
+    }
+
+    COMMENT("bad character literals do not parse...");
+    {
+        const char *bad[] = { "''", "'ab'", "0b2", "0x" };
+        for (int i = 0; i < 4; i++) {
+            Parser parser;
+            parser_init(&parser, bad[i], "<test>");
+            parser_parse(&parser);
+            TEST(parser.had_error);
+        }
+    }
+}
+
 void test_parser(void) {
     MODULE("Parser");
 
@@ -324,4 +412,5 @@ void test_parser(void) {
     test_parser_multiple_stmts();
     test_parser_errors();
     test_parser_slot_assign();
+    test_parser_bitwise();
 }

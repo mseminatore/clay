@@ -6,6 +6,7 @@ typedef enum {
     TOK_INT,            /* 42 */
     TOK_FLOAT,          /* 3.14 */
     TOK_STRING,         /* "hello" */
+    TOK_CHAR,           /* 'a' (raw text between the quotes) */
     TOK_INTERP_STRING,  /* "hello ${name}" - contains interpolation */
     TOK_IDENT,          /* foo, Bar, clone */
 
@@ -54,6 +55,11 @@ typedef enum {
     TOK_AND,            /* && */
     TOK_OR,             /* || */
     TOK_NULLCOALESCE,   /* ?? */
+    TOK_AMP,            /* & */
+    TOK_CARET,          /* ^ */
+    TOK_TILDE,          /* ~ */
+    TOK_SHL,            /* << */
+    TOK_SHR,            /* >> */
     TOK_RANGE,          /* .. */
 
     /* Compound assignment */
@@ -62,6 +68,11 @@ typedef enum {
     TOK_STAR_ASSIGN,    /* *= */
     TOK_SLASH_ASSIGN,   /* /= */
     TOK_PERCENT_ASSIGN, /* %= */
+    TOK_AMP_ASSIGN,     /* &= */
+    TOK_PIPE_ASSIGN,    /* |= */
+    TOK_CARET_ASSIGN,   /* ^= */
+    TOK_SHL_ASSIGN,     /* <<= */
+    TOK_SHR_ASSIGN,     /* >>= */
 
     /* Special */
     TOK_EOF,

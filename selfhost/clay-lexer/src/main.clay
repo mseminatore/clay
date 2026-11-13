@@ -12,7 +12,7 @@
 // This is a port of src/compiler/lexer.c and produces exactly the same tokens
 // (CTest clay_selfhost_lexer compares the two on every .clay file in the
 // repository). Token kinds use the C lexer's type names: "INT", "FLOAT", "STRING",
-// "INTERP_STRING", "IDENT", the keywords in upper case ("SELF", "RETURN",
+// "INTERP_STRING", "CHAR" (raw text between the quotes), "IDENT", the keywords in upper case ("SELF", "RETURN",
 // ...), punctuation and operators as their own text ("(", "==", "+=", "#{",
 // ...), and "NEWLINE", "EOF", "ERROR".
 //
@@ -59,7 +59,7 @@ Lexer = Object clone {
     // Single-character tokens
     singles = #{
         "(": "(", ")": ")", "{": "{", "}": "}", "[": "[", "]": "]",
-        ",": ",", ":": ":", ";": ";"
+        ",": ",", ":": ":", ";": ";", "~": "~"
     }
 
     // Tokens that may continue with a second character:
@@ -67,6 +67,7 @@ Lexer = Object clone {
     pairs = #{
         ".": [".", "..", ".", nil],
         "|": ["|", "||", "|", nil],
+        "^": ["=", "^=", "^", nil],
         "+": ["=", "+=", "+", nil],
         "-": ["=", "-=", "-", nil],
         "*": ["=", "*=", "*", nil],
@@ -76,10 +77,14 @@ Lexer = Object clone {
         "!": ["=", "!=", "!", nil],
         "<": ["=", "<=", "<", nil],
         ">": ["=", ">=", ">", nil],
-        "&": ["&", "&&", nil, "Unexpected character '&' (did you mean '&&'?)"],
+        "&": ["&", "&&", "&", nil],
         "?": ["?", "??", nil, "Unexpected character '?' (did you mean '??'?)"],
         "#": ["{", "#{", nil, "Unexpected character '#' (did you mean '#{' for a dict literal?)"]
     }
+
+    // Operators with an "=" form that the pairs table can't express because
+    // the character already has another two-character form: &= and |=
+    eqForms = #{ "&": "&=", "|": "|=" }
 
     init(source) {
         src = source
@@ -133,6 +138,7 @@ Lexer = Object clone {
             }
             return self string
         }
+        (c == 39) ifTrue { return self charLiteral }
         (self isDigit(c)) ifTrue { return self number(start) }
         ((self isAlpha(c)) || c == 95) ifTrue { return self identifier(start) }
         self operator(start)
@@ -204,7 +210,49 @@ Lexer = Object clone {
         Token new(interp ifTrue { "INTERP_STRING" } ifFalse { "STRING" }, body, line)
     }
 
+    // 'c': the token text is the raw text between the quotes (the parser
+    // decodes escapes and multi-byte characters)
+    charLiteral() {
+        start = pos
+        { (self peek(0)) != 39 } whileTrue {
+            c = self peek(0)
+            (c == 0 || c == 10) ifTrue { return self error("Unterminated character literal") }
+            (c == 92) ifTrue {
+                pos = pos + 1
+                d = self peek(0)
+                (d == 0 || d == 10) ifTrue { return self error("Unterminated character literal") }
+            }
+            pos = pos + 1
+        }
+        body = src slice(start, pos)
+        pos = pos + 1
+        Token new("CHAR", body, line)
+    }
+
+    isHexDigit(c) { (self isDigit(c)) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70) }
+
     number(start) {
+        // 0xFF / 0b1010
+        (src byteAt(start) == 48) ifTrue {
+            n0 = self peek(0)
+            (n0 == 120 || n0 == 88) ifTrue {
+                pos = pos + 1
+                (self isHexDigit(self peek(0))) ifFalse { return self error("Invalid hexadecimal literal") }
+                { self isHexDigit(self peek(0)) } whileTrue { pos = pos + 1 }
+                return self make("INT", start)
+            }
+            (n0 == 98 || n0 == 66) ifTrue {
+                pos = pos + 1
+                (self isDigit(self peek(0))) ifFalse { return self error("Invalid binary literal") }
+                bad = false
+                { self isDigit(self peek(0)) } whileTrue {
+                    ((self peek(0)) > 49) ifTrue { bad = true }
+                    pos = pos + 1
+                }
+                bad ifTrue { return self error("Invalid binary literal") }
+                return self make("INT", start)
+            }
+        }
         self skipDigits
         isFloat = false
         ((self peek(0)) == 46 && (self isDigit(self peek(1)))) ifTrue {
@@ -238,11 +286,25 @@ Lexer = Object clone {
         ch = src slice(start, pos)
         single = singles get(ch)
         (single != nil) ifTrue { return self make(single, start) }
+        // << >> <<= >>=
+        ((ch == "<" || ch == ">") && src slice(pos, pos + 1) == ch) ifTrue {
+            pos = pos + 1
+            (src slice(pos, pos + 1) == "=") ifTrue {
+                pos = pos + 1
+                return self make(ch + ch + "=", start)
+            }
+            return self make(ch + ch, start)
+        }
         pair = pairs get(ch)
         (pair == nil) ifTrue { return self error("Unexpected character") }
         (src slice(pos, pos + 1) == pair at(0)) ifTrue {
             pos = pos + 1
             return self make(pair at(1), start)
+        }
+        eq = eqForms get(ch)
+        (eq != nil && src slice(pos, pos + 1) == "=") ifTrue {
+            pos = pos + 1
+            return self make(eq, start)
         }
         (pair at(2) == nil) ifTrue { return self error(pair at(3)) }
         self make(pair at(2), start)
