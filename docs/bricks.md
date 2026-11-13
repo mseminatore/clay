@@ -112,6 +112,13 @@ Bitbucket) are shown, and text is clipped. The list is the registry's generated 
 and used when the network is unavailable. `CLAY_REGISTRY` names another list: a URL, or a local
 file for a mirror or a private registry (the same `{"version": 1, "bricks": [...]}` format).
 
+**A new listing takes a few minutes to show up.** The registry rebuilds the list when a listing
+is merged, and GitHub then serves the file from a cache that keeps it for up to five minutes. So
+a brick that was just listed (or whose entry just changed) may be missing from `clay bricks search`
+for that long: wait a few minutes and search again. The list is also rebuilt every day from each
+brick's own `brick.json`, so a new version of a listed brick appears without any change to its
+entry.
+
 ### Native bricks
 
 A brick with a `"native"` section compiles C code with your C compiler the first time it is
