@@ -63,4 +63,19 @@ sum = 0
 [1, 2, 3] each { |x| sum = sum + x }
 Test eq(sum, 6)
 
+// Concatenation: a new array, operands untouched
+ca = [1, 2]
+cb = [3, 4]
+Test eq(ca + cb, [1, 2, 3, 4])
+Test eq(ca concat(cb), [1, 2, 3, 4])
+Test eq(ca + [], [1, 2])
+Test eq([] + [], [])
+Test eq(ca + ca, [1, 2, 1, 2])
+Test eq(ca, [1, 2])
+Test eq(cb, [3, 4])
+Test eq([[1], 2] + [[3]], [[1], 2, [3]])
+Test eq((ca + cb) size, 4)
+cr = try { ca + 5; "no error" } catch { |e| e type }
+Test eq(cr, "TypeError")
+
 Test done()

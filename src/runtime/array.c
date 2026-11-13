@@ -484,6 +484,20 @@ static ClayValue array_slice(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+/* a + b / a concat(b): a new array holding a's elements then b's */
+static ClayValue array_concat(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_ARRAY)) {
+        clay_raise(CLAY_VAL(clay_error_new("Array +: argument is not an Array", "TypeError")));
+    }
+    ClayObject *other = CLAY_OBJ(argv[0]);
+    ClayObject *result = clay_array_new();
+    /* sizes read up front: other may be self */
+    size_t n1 = self->as.array.size, n2 = other->as.array.size;
+    for (size_t i = 0; i < n1; i++) clay_array_append(result, self->as.array.items[i]);
+    for (size_t i = 0; i < n2; i++) clay_array_append(result, other->as.array.items[i]);
+    return CLAY_VAL(result);
+}
+
 static ClayValue array_insert(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 2 || !CLAY_IS_INT(argv[0])) return CLAY_VAL(self);
     intptr_t idx = clay_to_int(argv[0]);
@@ -564,6 +578,8 @@ void clay_array_init_methods(ClayObject *proto) {
     clay_set_method(proto, "pop", array_pop);
     clay_set_method(proto, "shift", array_shift);
     clay_set_method(proto, "slice", array_slice);
+    clay_set_method(proto, "+", array_concat);
+    clay_set_method(proto, "concat", array_concat);
     clay_set_method(proto, "insert", array_insert);
     clay_set_method(proto, "setAt", array_setAt);
     clay_set_method(proto, "parallelMap", array_parallel_map);

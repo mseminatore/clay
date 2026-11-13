@@ -675,6 +675,7 @@ arr unique                    // unique elements
 arr pop                       // remove + return last
 arr shift                     // remove + return first
 arr slice(1, 3)               // sub-array [index 1..3)
+arr + [7, 8]                  // new array with the elements of both (also `concat`)
 arr insert(1, "x")            // insert at index
 arr setAt(0, "y")             // set element at index
 
