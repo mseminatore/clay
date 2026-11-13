@@ -801,7 +801,7 @@ or one raised by the `catch` block itself. `break`, `continue` and `return` pass
 through it the same way. An error raised inside `finally` replaces the one in
 flight.
 
-A message an object has no method for raises `MethodNotFound`, and the message says what the object was: `Array does not understand 'byteAt'` (the name is what `type` returns: `String`, `Dict`, a prototype's `_name`, or `Object`; numbers say `integer` or `float`).
+A message an object has no method for raises `MethodNotFound`, and the message says what the object was: `Array does not understand 'byteAt'` (the name is what `type` returns: `String`, `Dict`, and so on. A prototype you assign to a top-level variable, as in `Dog = Object clone { ... }`, is named after the variable, so it and its clones say `Dog`; an object created anywhere else, such as inside a method, is just an `Object`. Numbers say `integer` or `float`).
 
 Error types include `DivisionByZero`, `OverflowError` (integer results outside the 62-bit range), `MethodNotFound`, `NilError`, `TypeError` (an argument of the wrong type, e.g. `Math sqrt("x")`), `ArgumentError` (a missing or invalid argument, or too many arguments to a method), and `RuntimeError` (for user-raised strings).
 
