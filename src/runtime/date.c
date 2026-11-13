@@ -22,6 +22,19 @@ static ClayValue date_now(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(d);
 }
 
+/* Date nowMillis() - the current time as integer milliseconds since the Unix epoch.
+ * (An integer: a 32-bit float cannot hold a timestamp to the millisecond.) */
+static ClayValue date_nowMillis(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    struct timespec ts;
+#ifdef _WIN32
+    timespec_get(&ts, TIME_UTC);                 /* the system clock, to well under a millisecond */
+#else
+    clock_gettime(CLOCK_REALTIME, &ts);
+#endif
+    return clay_int((intptr_t)((long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000));
+}
+
 /* Date fromTimestamp(ts) - create a Date from epoch seconds */
 static ClayValue date_fromTimestamp(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t ts = clay_arg_integer(argc, argv, 0, "Date fromTimestamp");
@@ -109,6 +122,7 @@ static ClayValue date_format(ClayObject *self, int argc, ClayValue *argv) {
 /* Register Date methods */
 void clay_date_init_methods(ClayObject *date) {
     clay_set_method(date, "now", date_now);
+    clay_set_method(date, "nowMillis", date_nowMillis);
     clay_set_method(date, "fromTimestamp", date_fromTimestamp);
     clay_set_method(date, "year", date_year);
     clay_set_method(date, "month", date_month);

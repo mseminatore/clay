@@ -60,6 +60,20 @@ assert value(d2 year() == d year(), "fromTimestamp year matches")
 f = d format("%Y")
 assert value(f == d year() toString(), "format %Y matches year")
 
+// Test 13: nowMillis is the current time in integer milliseconds since the epoch
+ms = Date nowMillis
+assert value(ms > 1700000000000, "nowMillis is a Unix time in milliseconds")
+secs = Date now timestamp
+assert value((ms / 1000 - secs) abs <= 1, "nowMillis agrees with now timestamp to a second")
+// the clock moves in milliseconds: wait for it to change (bounded, so a stuck clock fails)
+before = Date nowMillis
+spins = 0
+{ (Date nowMillis) == before && spins < 5000000 } whileTrue { spins = spins + 1 }
+after = Date nowMillis
+assert value(after > before, "nowMillis advances")
+assert value(after - before < 1000, "nowMillis advances by milliseconds, not seconds")
+assert value((ms - (ms / 1000 * 1000)) < 1000, "nowMillis has a millisecond part")
+
 (passed toString() + " passed, " + failed toString() + " failed") println()
 
 (failed > 0) ifTrue { System exit(1) }

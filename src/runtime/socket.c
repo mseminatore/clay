@@ -159,9 +159,10 @@ static void fail_errno(const char *who, int err) {
 /* --- socket objects --- */
 
 /* a new Socket object around fd (the object owns it) */
-static ClayValue wrap(sock_t fd, const char *kind) {
+static ClayValue wrap(sock_t fd, const char *kind, int family) {
     ClayObject *obj = clay_clone(clay_Socket);
     clay_set_slot(obj, "_sock", clay_int((intptr_t)fd));
+    clay_set_slot(obj, "_family", clay_int(family));         /* AF_INET or AF_INET6, for sendTo */
     clay_set_slot(obj, "_timeout", clay_int(0));
     clay_set_slot_take(obj, "_kind", CLAY_VAL(clay_string_new(kind)));
     return CLAY_VAL(obj);
@@ -180,6 +181,13 @@ static sock_t fd_of(ClayObject *self, const char *who, int must_be_open) {
         return SOCK_BAD;
     }
     return (sock_t)fd;
+}
+
+/* the address family the socket was made with (AF_UNSPEC if unknown). Asked of the object,
+ * not of the system: getsockname fails on Windows for a socket that is not bound yet. */
+static int family_of(ClayObject *self) {
+    ClayValue v = clay_get_slot(self, "_family");
+    return CLAY_IS_INT(v) ? (int)clay_to_int(v) : AF_UNSPEC;
 }
 
 static int timeout_of(ClayObject *self) {
@@ -244,6 +252,7 @@ static ClayValue socket_connect(ClayObject *self, int argc, ClayValue *argv) {
 
     int last_err = 0, timed_out = 0;
     sock_t fd = SOCK_BAD;
+    int family = AF_UNSPEC;                    /* of the address that worked */
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
         sock_t s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s == SOCK_BAD) { last_err = sock_errno(); continue; }
@@ -271,7 +280,7 @@ static ClayValue socket_connect(ClayObject *self, int argc, ClayValue *argv) {
             }
             if (ok) set_blocking(s, 1);
         }
-        if (ok) { fd = s; break; }
+        if (ok) { fd = s; family = ai->ai_family; break; }
         sock_close(s);
     }
     freeaddrinfo(res);
@@ -280,7 +289,7 @@ static ClayValue socket_connect(ClayObject *self, int argc, ClayValue *argv) {
         else fail("SocketError", "Socket connect: %s (%s:%d)", net_error_text(last_err), host, port);
         return CLAY_NIL;
     }
-    return wrap(fd, "tcp");
+    return wrap(fd, "tcp", family);
 }
 
 /* --- Socket listen(port [, host [, backlog]]) --- */
@@ -312,6 +321,7 @@ static ClayValue socket_listen(ClayObject *self, int argc, ClayValue *argv) {
     }
     int last_err = 0;
     sock_t fd = SOCK_BAD;
+    int family = AF_UNSPEC;                    /* of the address that worked */
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
         sock_t s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s == SOCK_BAD) { last_err = sock_errno(); continue; }
@@ -326,7 +336,7 @@ static ClayValue socket_listen(ClayObject *self, int argc, ClayValue *argv) {
             setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&off, sizeof(off));
         }
 #endif
-        if (bind(s, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0 && listen(s, backlog) == 0) { fd = s; break; }
+        if (bind(s, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0 && listen(s, backlog) == 0) { fd = s; family = ai->ai_family; break; }
         last_err = sock_errno();
         sock_close(s);
     }
@@ -335,7 +345,7 @@ static ClayValue socket_listen(ClayObject *self, int argc, ClayValue *argv) {
         fail("SocketError", "Socket listen: %s (%s:%d)", net_error_text(last_err), host, port);
         return CLAY_NIL;
     }
-    return wrap(fd, "listen");
+    return wrap(fd, "listen", family);
 }
 
 /* --- Socket udp([port [, host]]) --- */
@@ -362,10 +372,11 @@ static ClayValue socket_udp(ClayObject *self, int argc, ClayValue *argv) {
     }
     int last_err = 0;
     sock_t fd = SOCK_BAD;
+    int family = AF_UNSPEC;                    /* of the address that worked */
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
         sock_t s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s == SOCK_BAD) { last_err = sock_errno(); continue; }
-        if (!bind_it || bind(s, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) { fd = s; break; }
+        if (!bind_it || bind(s, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) { fd = s; family = ai->ai_family; break; }
         last_err = sock_errno();
         sock_close(s);
     }
@@ -374,7 +385,7 @@ static ClayValue socket_udp(ClayObject *self, int argc, ClayValue *argv) {
         fail("SocketError", "Socket udp: %s", net_error_text(last_err));
         return CLAY_NIL;
     }
-    return wrap(fd, "udp");
+    return wrap(fd, "udp", family);
 }
 
 /* --- Socket resolve(host) --- */
@@ -702,7 +713,7 @@ static ClayValue socket_accept(ClayObject *self, int argc, ClayValue *argv) {
     }
     if (c == SOCK_BAD) { fail_errno("Socket accept", sock_errno()); return CLAY_NIL; }
     no_sigpipe(c);
-    return wrap(c, "tcp");
+    return wrap(c, "tcp", family_of(self));      /* same family as the listener */
 }
 
 /* --- UDP --- */
@@ -720,12 +731,7 @@ static ClayValue socket_sendTo(ClayObject *self, int argc, ClayValue *argv) {
     memset(&hints, 0, sizeof(hints));
     /* Resolve for the kind of socket this is: a name has IPv6 and IPv4 addresses, and the
      * first one is no use to an IPv4 socket (the system says "Invalid argument"). */
-    hints.ai_family = AF_UNSPEC;
-    {
-        struct sockaddr_storage mine;
-        socklen_t mine_len = sizeof(mine);
-        if (getsockname(fd, (struct sockaddr *)&mine, &mine_len) == 0) hints.ai_family = mine.ss_family;
-    }
+    hints.ai_family = family_of(self);
 #ifdef AI_V4MAPPED
     if (hints.ai_family == AF_INET6) hints.ai_flags = AI_V4MAPPED;    /* an IPv6 socket can still reach an IPv4-only name */
 #endif

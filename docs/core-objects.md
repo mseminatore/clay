@@ -19,7 +19,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` (sorted), `copy(from, to)`, `modified(path)`, `cwd()`, `chdir(path)`, `tempDir()` — binary-safe; `delete` also removes empty directories. Recursive helpers are in `stdlib/fs` |
 | System | `exit(code)`, `run(command)` (shell command → exit status; use `Process` to capture output), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `version()` (the Clay version, e.g. `"0.1.0"`), `clock()` (elapsed milliseconds since the program started), `allocCount()`, `deallocCount()`, `liveObjects()` (allocated − freed), `memory()` (process resident memory in bytes) |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
-| Date | `now()`, `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
+| Date | `now()`, `nowMillis()` (integer milliseconds since 1970), `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
 | Crypto | `sha256(str)`, `sha1(str)`, `md5(str)`, `hmacSha256(key, data)` (hex digests), `randomBytes(n)` (hex, from the OS), `constantTimeEquals(a, b)` |
@@ -154,6 +154,7 @@ d minute                           // 30 (0-59)
 d second                           // 45 (0-59)
 d weekday                          // 1 (0=Sun..6=Sat)
 d timestamp                        // Unix epoch seconds
+Date nowMillis                     // the time now in integer milliseconds since 1970
 
 // Create from timestamp
 d2 = Date fromTimestamp(1700000000)
@@ -162,6 +163,12 @@ d2 = Date fromTimestamp(1700000000)
 d format("%A, %B %d, %Y") println  // "Sunday, February 23, 2026"
 d format("%H:%M") println          // "14:30"
 ```
+
+`Date nowMillis` is the wall clock to the millisecond, as an integer: a Unix time in milliseconds
+is far beyond what Clay's 32-bit floats can hold exactly, so keep such times as integers
+(`ms / 1000` is whole seconds). For measuring how long something takes, `System clock`
+(milliseconds since the program started) is the better tool: it never jumps when the system
+clock is adjusted.
 
 ## HTTP client
 
