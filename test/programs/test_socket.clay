@@ -184,6 +184,13 @@ check value("...and the other end gets it", ((a receiveFrom(100)) at(0)) == "hi"
 a close
 b close
 
+// a host name usually has IPv6 and IPv4 addresses; sendTo must pick one this (IPv4) socket can reach
+named = Socket udp(0)
+named setTimeout(1000)
+check value("sendTo a host name", (Socket udp() sendTo("localhost", named localPort, "hi")) == 2)
+check value("...and it arrives", ((named receiveFrom(100)) at(0)) == "hi")
+named close
+
 // --- names ---
 check value("resolve a numeric address", (Socket resolve("127.0.0.1")) == ["127.0.0.1"])
 check value("resolve gives strings", (Socket resolve("localhost")) size > 0)

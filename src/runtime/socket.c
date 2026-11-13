@@ -718,7 +718,17 @@ static ClayValue socket_sendTo(ClayObject *self, int argc, ClayValue *argv) {
     snprintf(portbuf, sizeof(portbuf), "%d", port);
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
+    /* Resolve for the kind of socket this is: a name has IPv6 and IPv4 addresses, and the
+     * first one is no use to an IPv4 socket (the system says "Invalid argument"). */
     hints.ai_family = AF_UNSPEC;
+    {
+        struct sockaddr_storage mine;
+        socklen_t mine_len = sizeof(mine);
+        if (getsockname(fd, (struct sockaddr *)&mine, &mine_len) == 0) hints.ai_family = mine.ss_family;
+    }
+#ifdef AI_V4MAPPED
+    if (hints.ai_family == AF_INET6) hints.ai_flags = AI_V4MAPPED;    /* an IPv6 socket can still reach an IPv4-only name */
+#endif
     hints.ai_socktype = SOCK_DGRAM;
     int gai = getaddrinfo(host, portbuf, &hints, &res);
     if (gai != 0) {
