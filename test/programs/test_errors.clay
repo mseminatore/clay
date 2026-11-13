@@ -147,4 +147,20 @@ msg = try { n < 3 whileTrue { 1 } } catch { |e| e message() }
 Test eq(msg contains("whileTrue is sent to a block"), true)
 Test eq((try { n foo } catch { |e| e message() }), "integer does not understand 'foo'")
 
+// "does not understand" says what the receiver was
+Test eq((try { [1, 2] byteAt(0) } catch { |e| e message() }), "Array does not understand 'byteAt'")
+Test eq((try { "text" foo } catch { |e| e message() }), "String does not understand 'foo'")
+Test eq((try { #{"a": 1} bar } catch { |e| e message() }), "Dict does not understand 'bar'")
+Test eq((try { { 1 } baz } catch { |e| e message() }), "Block does not understand 'baz'")
+Test eq((try { true nope } catch { |e| e message() }), "Boolean does not understand 'nope'")
+Test eq((try { (1..3) quux } catch { |e| e message() }), "Range does not understand 'quux'")
+Test eq((try { Object clone zap } catch { |e| e message() }), "Object does not understand 'zap'")
+// a user prototype with a _name is called by it, and so are its clones
+Named = Object clone { _name = "Named" }
+Test eq((try { Named wag } catch { |e| e message() }), "Named does not understand 'wag'")
+Test eq((try { Named clone wag } catch { |e| e message() }), "Named does not understand 'wag'")
+Test eq((try { Named wag } catch { |e| e type() }), "MethodNotFound")
+// ...and the precedence hint still follows the message
+Test eq((try { "x" ifTrue { 1 } } catch { |e| e message() } contains("String does not understand 'ifTrue'")), true)
+
 Test done()

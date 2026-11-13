@@ -295,7 +295,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
     }
 
     char buf[256];
-    snprintf(buf, sizeof(buf), "object does not understand '%s'%s", selector, clay_dnu_hint(selector));
+    snprintf(buf, sizeof(buf), "%s does not understand '%s'%s", obj ? clay_type_name(obj) : "Object",
+             selector, clay_dnu_hint(selector));
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     clay_trace_pop();
     return CLAY_NIL;

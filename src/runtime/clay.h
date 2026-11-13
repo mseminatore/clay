@@ -532,6 +532,10 @@ char *clay_http_get_text(const char *url, int *status);
 /* Create an Error object with message and type */
 ClayObject *clay_error_new(const char *message, const char *type);
 
+/* What `type` says about an object: "String", "Array", ..., a prototype's _name, else "Object".
+ * Valid while the object is alive. Used to say what did not understand a message. */
+const char *clay_type_name(ClayObject *obj);
+
 /* The traceback printed when an error ends a program: an Error's stack trace
  * without the block-running calls, repeats counted, long ones cut in the
  * middle. Both return a malloc'd string of whole lines, or NULL. */

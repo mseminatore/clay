@@ -801,6 +801,8 @@ or one raised by the `catch` block itself. `break`, `continue` and `return` pass
 through it the same way. An error raised inside `finally` replaces the one in
 flight.
 
+A message an object has no method for raises `MethodNotFound`, and the message says what the object was: `Array does not understand 'byteAt'` (the name is what `type` returns: `String`, `Dict`, a prototype's `_name`, or `Object`; numbers say `integer` or `float`).
+
 Error types include `DivisionByZero`, `OverflowError` (integer results outside the 62-bit range), `MethodNotFound`, `NilError`, `TypeError` (an argument of the wrong type, e.g. `Math sqrt("x")`), `ArgumentError` (a missing or invalid argument, or too many arguments to a method), and `RuntimeError` (for user-raised strings).
 
 Methods written in Clay raise `ArgumentError` when called with more arguments than they declare (fewer is fine — missing parameters are `nil` or take their defaults). Blocks accept extra arguments, so `each { |x| ... }` works on a Dict too.

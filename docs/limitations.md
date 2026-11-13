@@ -63,7 +63,7 @@ program (the VM, fibers and all) until they finish or time out. Give sockets a t
 (`setTimeout`) and use `Socket select` to serve several at once. There is no TLS on raw sockets.
 
 **A method takes at most 16 parameters.** A 17th parameter isn't bound: using
-it fails with `object does not understand 'a16'`. Pass a Dict or an object
+it fails with `... does not understand 'a16'`. Pass a Dict or an object
 instead of a long parameter list.
 
 **Most built-in methods ignore extra arguments.** Methods written in Clay raise

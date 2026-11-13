@@ -109,18 +109,19 @@ static ClayValue object_println(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue *argv) {
-    (void)self;
     const char *sel = (argc > 0 && CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0]))
         ? clay_string_data(CLAY_OBJ(argv[0]))
         : "???";
     char buf[256];
-    snprintf(buf, sizeof(buf), "object does not understand '%s'%s", sel, clay_dnu_hint(sel));
+    /* say what the receiver was: "Array does not understand 'byteAt'" tells you more than "object" */
+    snprintf(buf, sizeof(buf), "%s does not understand '%s'%s", clay_type_name(self), sel, clay_dnu_hint(sel));
     clay_raise(CLAY_VAL(clay_error_new(buf, "MethodNotFound")));
     return CLAY_NIL;
 }
 
-static ClayValue object_type(ClayObject *self, int argc, ClayValue *argv) {
-    (void)argc; (void)argv;
+/* The name `type` reports for an object: String, Array, ..., or the _name of a
+ * user prototype, else Object. The pointer is valid while the object is alive. */
+const char *clay_type_name(ClayObject *self) {
     const char *name;
     if (self == &clay_true_obj || self == &clay_false_obj) {
         name = "Boolean";
@@ -156,7 +157,12 @@ static ClayValue object_type(ClayObject *self, int argc, ClayValue *argv) {
                 break;
         }
     }
-    return CLAY_VAL(clay_string_new(name));
+    return name;
+}
+
+static ClayValue object_type(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    return CLAY_VAL(clay_string_new(clay_type_name(self)));
 }
 
 static void collect_methods_chain(ClayObject *obj, ClayObject *arr, HashTable *seen, int inherited) {
