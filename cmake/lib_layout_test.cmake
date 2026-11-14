@@ -74,6 +74,7 @@ if(ROOT)
         execute_process(COMMAND "${exe}" "${WORK}/libdir.clay" WORKING_DIRECTORY "${WORK}"
                         RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
         string(STRIP "${out}" out)
+        file(TO_CMAKE_PATH "${out}" out)     # Windows: the exe path has backslashes
         if(NOT rc EQUAL 0 OR NOT out STREQUAL "${want}")
             message(FATAL_ERROR "selfhost Parser libDir in ${layout}: want ${want}, got '${out}' (${rc}):\n${err}")
         endif()

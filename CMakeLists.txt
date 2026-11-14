@@ -279,6 +279,51 @@ if(WIN32 AND SDL2_FOUND AND TARGET SDL2::SDL2)
         COMMENT "Copying SDL2 DLL")
 endif()
 
+# --- Install / package (cmake --install build --prefix <dir>; cpack) ---
+# Layout: bin/clay and lib/clay/{stdlib,web}, which clay finds next to its
+# executable (resolve_lib_dir in main.c). The paths are fixed rather than
+# GNUInstallDirs' so a lib64 platform can't break that lookup.
+# clay-native.cfg is not installed: it holds this machine's absolute paths,
+# so an installed clay runs programs on the VM but `--compile` needs a build.
+install(TARGETS clay_compiler RUNTIME DESTINATION bin)
+if(WIN32 AND SDL2_FOUND AND TARGET SDL2::SDL2)
+    install(FILES $<TARGET_FILE:SDL2::SDL2> DESTINATION bin)
+endif()
+foreach(brick stdlib web)
+    install(DIRECTORY lib/${brick} DESTINATION lib/clay
+            PATTERN ".git" EXCLUDE
+            PATTERN ".github" EXCLUDE
+            PATTERN ".gitignore" EXCLUDE
+            PATTERN "bricks" EXCLUDE)
+endforeach()
+install(FILES LICENSE README.md THIRD_PARTY_NOTICES.md DESTINATION share/doc/clay)
+
+file(STRINGS src/runtime/version.h CLAY_VERSION_LINE REGEX "#define CLAY_VERSION ")
+string(REGEX REPLACE ".*\"(.*)\".*" "\\1" CLAY_VERSION_STR "${CLAY_VERSION_LINE}")
+if(APPLE)
+    set(CLAY_PKG_OS macos)
+elseif(WIN32)
+    set(CLAY_PKG_OS windows)
+else()
+    string(TOLOWER "${CMAKE_SYSTEM_NAME}" CLAY_PKG_OS)
+endif()
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" CLAY_PKG_ARCH)
+if(CLAY_PKG_ARCH MATCHES "^(amd64|x64)$")
+    set(CLAY_PKG_ARCH x86_64)
+elseif(CLAY_PKG_ARCH STREQUAL "aarch64")
+    set(CLAY_PKG_ARCH arm64)
+endif()
+set(CPACK_PACKAGE_NAME clay)
+set(CPACK_PACKAGE_VERSION "${CLAY_VERSION_STR}")
+set(CPACK_PACKAGE_FILE_NAME "clay-${CLAY_VERSION_STR}-${CLAY_PKG_OS}-${CLAY_PKG_ARCH}")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+if(WIN32)
+    set(CPACK_GENERATOR ZIP)
+else()
+    set(CPACK_GENERATOR TGZ)
+endif()
+include(CPack)
+
 # Test runner
 add_executable(test_runner test/test_runtime.c test/test_lexer.c test/test_parser.c)
 target_link_libraries(test_runner clay_compiler_lib testy)
@@ -612,6 +657,13 @@ add_test(NAME clay_lib_layout
              -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
              -DWORK=${CMAKE_CURRENT_BINARY_DIR}/lib_layout
              -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lib_layout_test.cmake)
+
+# cmake --install gives a working clay: bundled bricks found, nothing stray
+add_test(NAME clay_install
+         COMMAND ${CMAKE_COMMAND} -DBUILD=${CMAKE_CURRENT_BINARY_DIR} -DCONFIG=$<CONFIG>
+             -DVERSION=${CLAY_VERSION_STR}
+             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/install_test
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/install_test.cmake)
 
 # stack_trace asserts on its own trace (the frames' wording differs by backend)
 add_test(NAME clay_smoke_stack_trace COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/stack_trace.clay)

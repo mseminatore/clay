@@ -23,6 +23,13 @@ Add `build/` to your `PATH`, or call it as `./build/clay`.
 For the fastest native programs, configure a Release build:
 `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`.
 
+To install Clay outside the source tree, run `cmake --install build --prefix ~/.local` (any
+prefix works). This puts `clay` in `bin/` and the bundled bricks in `lib/clay/`, where `clay` finds
+them on its own. `cpack` in the build directory makes the same tree as an archive
+(`clay-<version>-<os>-<arch>.tar.gz`, or `.zip` on Windows). An installed `clay` runs programs on the
+VM. `--compile` still needs the build directory, because `clay-native.cfg` records that machine's
+paths.
+
 ## Your first program
 
 Save this as `hello.clay`:
