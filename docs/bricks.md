@@ -58,8 +58,9 @@ import("utils.clay")  // regular file import (unchanged)
 Brick resolution: reads `bricks/<name>/brick.json` to find the `main` entry point. Falls back to `bricks/<name>/src/main.clay` if no manifest exists.
 
 `bricks/` is searched in the current directory and up to two parents, then beside the importing
-file and up to two of its parents. Last come the bricks bundled with Clay (`stdlib` and `web`, in
-the `lib/` directory of the Clay checkout, or in `$CLAY_LIB` if set). A project's own `bricks/` wins,
+file and up to two of its parents. Last come the bricks bundled with Clay (`stdlib` and `web`): in `$CLAY_LIB` if set, else
+in the `lib/` directory beside the `clay` executable (or `../lib/clay`, as in a `/usr/local` install),
+else in the `lib/` directory of the Clay checkout the executable was built in. A project's own `bricks/` wins,
 so `clay bricks add github.com/mseminatore/clay-stdlib@v1.0.0 stdlib` pins one project to a different
 standard library without affecting the rest.
 

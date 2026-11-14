@@ -606,6 +606,13 @@ add_test(NAME clay_bricks_new
              -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/bricks_new_test.cmake)
 set_tests_properties(clay_bricks_new PROPERTIES LABELS "native")
 
+# an unpacked or installed clay finds its lib/ beside the executable (no checkout)
+add_test(NAME clay_lib_layout
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/lib_layout
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lib_layout_test.cmake)
+
 # stack_trace asserts on its own trace (the frames' wording differs by backend)
 add_test(NAME clay_smoke_stack_trace COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/stack_trace.clay)
 set_tests_properties(clay_smoke_stack_trace PROPERTIES

@@ -1122,8 +1122,10 @@ Parser = Object clone {
     }
 
     // The bundled bricks directory, as main.c's resolve_lib_dir: $CLAY_LIB,
-    // else the lib/ of the Clay checkout holding the running clay (its
-    // directory or up to three parents, the first with src/runtime/clay.h).
+    // else the lib/ next to the running clay (<exe dir>/lib or
+    // <exe dir>/../lib/clay, holding stdlib/brick.json), else the lib/ of the
+    // Clay checkout holding it (its directory or up to three parents, the
+    // first with src/runtime/clay.h).
     // A native program doesn't know its executable, so it looks up from the
     // current directory instead. nil if there is none.
     libDir() {
@@ -1134,6 +1136,8 @@ Parser = Object clone {
             sep = self lastSep(exe)
             (sep < 0) ifTrue { return nil }
             dir = exe slice(0, sep)
+            (File exists(dir + "/lib/stdlib/brick.json")) ifTrue { return dir + "/lib" }
+            (File exists(dir + "/../lib/clay/stdlib/brick.json")) ifTrue { return dir + "/../lib/clay" }
             up = 0
             { up < 4 } whileTrue {
                 (File exists(dir + "/src/runtime/clay.h")) ifTrue { return dir + "/lib" }

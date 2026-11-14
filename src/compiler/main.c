@@ -189,7 +189,31 @@ static void resolve_clay_dir(const char *argv0, char *clay_dir, size_t sz) {
     find_clay_dir(clay_dir, sz);
 }
 
-/* Where the bundled bricks live: $CLAY_LIB, else <clay checkout>/lib.
+/* A bundled-bricks directory holds the stdlib brick: <dir>/stdlib/brick.json */
+static int lib_dir_ok(const char *dir) {
+    char probe[1300];
+    snprintf(probe, sizeof(probe), "%s/stdlib/brick.json", dir);
+    FILE *f = fopen(probe, "r");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+/* The lib/ of an installed or unpacked Clay, next to the executable:
+ * <exe dir>/lib (a release archive, or a Makefile build in a checkout) or
+ * <exe dir>/../lib/clay (a prefix such as /usr/local). */
+static int find_installed_lib(char *out, size_t sz) {
+    static const char *const rel[] = { "lib", "../lib/clay" };
+    if (!g_exe_dir[0]) return 0;
+    for (size_t i = 0; i < sizeof(rel) / sizeof(rel[0]); i++) {
+        snprintf(out, sz, "%s%s", g_exe_dir, rel[i]);
+        if (lib_dir_ok(out)) return 1;
+    }
+    return 0;
+}
+
+/* Where the bundled bricks live: $CLAY_LIB, else the lib/ next to the
+ * executable (installed layout), else <clay checkout>/lib.
  * selfhost/clay-parser's libDir mirrors this. */
 static void resolve_lib_dir(void) {
     const char *env = getenv("CLAY_LIB");
@@ -197,7 +221,11 @@ static void resolve_lib_dir(void) {
         parser_set_lib_dir(env);
         return;
     }
-    char clay_dir[1024], lib[1100];
+    char clay_dir[1024], lib[1400];
+    if (find_installed_lib(lib, sizeof(lib))) {
+        parser_set_lib_dir(lib);
+        return;
+    }
     if (find_clay_dir(clay_dir, sizeof(clay_dir))) {
         snprintf(lib, sizeof(lib), "%s/lib", clay_dir);
         parser_set_lib_dir(lib);
