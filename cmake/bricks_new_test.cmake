@@ -31,7 +31,7 @@ foreach(f brick.json src/main.clay tests/test_demo_kit.clay README.md .gitignore
 endforeach()
 # the workflow keeps GitHub's ${{ }} expressions (they pass through the Clay strings the port builds)
 file(READ "${WORK}/demo-kit/.github/workflows/test.yml" workflow)
-foreach(want "runs-on: \${{ matrix.os }}" "ref: \${{ env.CLAY_REF }}" "CLAY_REF: main" "tests/test_*.clay")
+foreach(want "runs-on: \${{ matrix.os }}" "ref: \${{ env.CLAY_REF }}" "CLAY_REF: main" "tests/test_*.clay" "bricks install")
     string(FIND "${workflow}" "${want}" at)
     if(at LESS 0)
         message(FATAL_ERROR "the workflow lacks '${want}':\n${workflow}")

@@ -143,7 +143,8 @@ start from something that works. A name is lowercase letters, digits and `-` and
 with a letter, as the registry requires; the C identifier is the name with `-` as `_`.
 
 The workflow, `.github/workflows/test.yml`, runs the brick's `tests/test_*.clay` on Linux, macOS
-and Windows for every push and pull request, building Clay from source (set `CLAY_REF` in it to
+and Windows for every push and pull request, building Clay from source and running `clay bricks install` first, so the brick's own
+dependencies are present (set `CLAY_REF` in it to
 a release tag once you depend on one). It is only a file: a brick on another Git host can ignore
 it, or leave it out with `clay bricks new my-brick --no-ci`. For a native brick it is how you find out
 that your C builds with the other platforms' compilers.
