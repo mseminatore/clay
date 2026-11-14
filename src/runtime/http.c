@@ -194,6 +194,30 @@ static ClayValue do_http_request(const char *url, const char *method, const char
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
+
+/* Load the trusted CA certificates. OpenSSL's defaults (honouring
+ * SSL_CERT_FILE / SSL_CERT_DIR) point where the OpenSSL that clay was built
+ * against keeps them, e.g. Homebrew's etc/openssl@3. A clay linked against a
+ * static OpenSSL and run on another machine may have no such file, so then
+ * also load the operating system's own bundle. Returns 1 on success. */
+static int http_load_ca_certs(SSL_CTX *ctx) {
+    static const char *const system_bundles[] = {
+        "/etc/ssl/cert.pem",                     /* macOS, Alpine, Fedora */
+        "/etc/ssl/certs/ca-certificates.crt",    /* Debian, Ubuntu, Arch */
+        "/etc/pki/tls/certs/ca-bundle.crt",      /* RHEL, CentOS */
+        "/etc/ssl/ca-bundle.pem",                /* openSUSE */
+        NULL
+    };
+    if (SSL_CTX_set_default_verify_paths(ctx) != 1) return 0;
+    const char *file = getenv(X509_get_default_cert_file_env());
+    if (!file || !*file) file = X509_get_default_cert_file();
+    if (access(file, R_OK) == 0) return 1;
+    for (int i = 0; system_bundles[i]; i++)
+        if (access(system_bundles[i], R_OK) == 0 &&
+            SSL_CTX_load_verify_locations(ctx, system_bundles[i], NULL) == 1)
+            return 1;
+    return 1;    /* no bundle file: a certificate directory may still work */
+}
 #endif
 
 /* Case-insensitive prefix match */
@@ -334,7 +358,7 @@ static ClayValue do_http_request(const char *url, const char *method, const char
          * (honours SSL_CERT_FILE / SSL_CERT_DIR) and require TLS 1.2+. */
         SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_2_VERSION);
         SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
-        if (SSL_CTX_set_default_verify_paths(ssl_ctx) != 1) {
+        if (!http_load_ca_certs(ssl_ctx)) {
             SSL_CTX_free(ssl_ctx); close(fd);
             return make_error_response("SSL: could not load trusted CA certificates");
         }
