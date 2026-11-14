@@ -13,7 +13,7 @@ and add its `bin` folder to your `PATH`. It contains `bin/clay` and the bundled 
 
 - **Linux**: needs glibc 2.35 or newer and OpenSSL 3 (Ubuntu 22.04+, Debian 12+, Fedora,
   RHEL 9).
-- **macOS**: needs macOS 14 or newer on Apple silicon. The binary is not notarized, so if you
+- **macOS**: needs macOS 15 or newer on Apple silicon. The binary is not notarized, so if you
   downloaded it with a browser, macOS will refuse to open it. Download with `curl -LO`, or remove
   the quarantine flag once: `xattr -dr com.apple.quarantine clay-<version>-macos-arm64`.
 - **Windows**: SmartScreen may warn about an unrecognized app. Choose **More info**, then **Run

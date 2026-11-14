@@ -34,7 +34,8 @@ jobs:
           - name: linux-arm64
             os: ubuntu-22.04-arm
           - name: macos-arm64
-            os: macos-14              # the archive needs this macOS version or newer
+            os: macos-15              # the archive needs this macOS version or newer
+                                      # (Homebrew's static OpenSSL targets the runner's)
           - name: windows-x86_64
             os: windows-2022
     runs-on: ${{ matrix.os }}
@@ -95,7 +96,12 @@ jobs:
       # no CLAY_LIB, and (macOS) without Homebrew's OpenSSL or its certificates.
       - name: Test the archive
         run: |
-          pkg=$(ls build/clay-*.tar.gz build/clay-*.zip 2>/dev/null | head -1)
+          # (Actions runs bash with -e -o pipefail: no `ls` of a glob that may not match)
+          pkg=
+          for f in build/clay-*.tar.gz build/clay-*.zip; do
+            if [ -f "$f" ]; then pkg=$f; break; fi
+          done
+          [ -n "$pkg" ] || { echo "::error::cpack made no archive"; exit 1; }
           echo "archive: $pkg"
           dir=$(mktemp -d)
           cp "$pkg" "$dir/" && cd "$dir"
