@@ -90,6 +90,9 @@ OPENSSL_LIBS :=
 ifneq ($(shell pkg-config --exists openssl 2>/dev/null && echo yes),)
     OPENSSL_FLAGS = -DCLAY_HAS_SSL $(shell pkg-config --cflags openssl)
     OPENSSL_LIBS = $(shell pkg-config --libs openssl)
+    ifeq ($(UNAME_S),Darwin)
+        OPENSSL_LIBS += -framework Security -framework CoreFoundation
+    endif
 endif
 
 CLAY_TESTS = test/programs/test_numbers.clay test/programs/test_strings.clay \

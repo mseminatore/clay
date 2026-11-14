@@ -5,6 +5,9 @@
  * - Windows: WinHTTP (winhttp.h)
  * - Unix/macOS: POSIX sockets with manual HTTP/1.1
  */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE        /* the Security framework headers need it */
+#endif
 #include "clay.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -195,11 +198,42 @@ static ClayValue do_http_request(const char *url, const char *method, const char
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
 
+#ifdef __APPLE__
+/* no check()/verify()/require() macros from AssertMacros.h */
+#define __ASSERT_MACROS_DEFINE_VERSIONS_WITHOUT_UNDERSCORES 0
+#include <Security/Security.h>
+
+/* Add the system's trusted root certificates from the Keychain, macOS's
+ * real trust store (/etc/ssl/cert.pem is a static copy, updated only with
+ * the OS, and can lack current roots). Returns 1 if any were added. */
+static int http_load_keychain_roots(SSL_CTX *ctx) {
+    CFArrayRef anchors = NULL;
+    if (SecTrustCopyAnchorCertificates(&anchors) != errSecSuccess || !anchors) return 0;
+    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+    int added = 0;
+    for (CFIndex i = 0; i < CFArrayGetCount(anchors); i++) {
+        SecCertificateRef cert = (SecCertificateRef)CFArrayGetValueAtIndex(anchors, i);
+        CFDataRef der = SecCertificateCopyData(cert);
+        if (!der) continue;
+        const unsigned char *p = CFDataGetBytePtr(der);
+        X509 *x = d2i_X509(NULL, &p, (long)CFDataGetLength(der));
+        if (x) {
+            if (X509_STORE_add_cert(store, x) == 1) added++;
+            X509_free(x);
+        }
+        CFRelease(der);
+    }
+    CFRelease(anchors);
+    return added > 0;
+}
+#endif
+
 /* Load the trusted CA certificates. OpenSSL's defaults (honouring
  * SSL_CERT_FILE / SSL_CERT_DIR) point where the OpenSSL that clay was built
  * against keeps them, e.g. Homebrew's etc/openssl@3. A clay linked against a
  * static OpenSSL and run on another machine may have no such file, so then
- * also load the operating system's own bundle. Returns 1 on success. */
+ * also load the operating system's own roots: the Keychain on macOS, else a
+ * well-known bundle file. Returns 1 on success. */
 static int http_load_ca_certs(SSL_CTX *ctx) {
     static const char *const system_bundles[] = {
         "/etc/ssl/cert.pem",                     /* macOS, Alpine, Fedora */
@@ -212,6 +246,9 @@ static int http_load_ca_certs(SSL_CTX *ctx) {
     const char *file = getenv(X509_get_default_cert_file_env());
     if (!file || !*file) file = X509_get_default_cert_file();
     if (access(file, R_OK) == 0) return 1;
+#ifdef __APPLE__
+    if (http_load_keychain_roots(ctx)) return 1;
+#endif
     for (int i = 0; system_bundles[i]; i++)
         if (access(system_bundles[i], R_OK) == 0 &&
             SSL_CTX_load_verify_locations(ctx, system_bundles[i], NULL) == 1)
