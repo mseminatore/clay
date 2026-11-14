@@ -1,7 +1,26 @@
 # Getting started
 
-This page covers building Clay, running programs, and the REPLs. When you're
+This page covers installing or building Clay, running programs, and the REPLs. When you're
 ready, continue with the [language tour](language-tour.md).
+
+## Installing
+
+Each [release](https://github.com/mseminatore/clay/releases) has an archive per platform:
+`clay-<version>-linux-x86_64.tar.gz`, `-linux-arm64.tar.gz`, `-macos-arm64.tar.gz` and
+`-windows-x86_64.zip`, plus `SHA256SUMS` to check the download against. Unpack the archive anywhere
+and add its `bin` folder to your `PATH`. It contains `bin/clay` and the bundled bricks in
+`lib/clay/`, which `clay` finds on its own.
+
+- **Linux**: needs glibc 2.35 or newer and OpenSSL 3 (Ubuntu 22.04+, Debian 12+, Fedora,
+  RHEL 9).
+- **macOS**: needs macOS 14 or newer on Apple silicon. The binary is not notarized, so if you
+  downloaded it with a browser, macOS will refuse to open it. Download with `curl -LO`, or remove
+  the quarantine flag once: `xattr -dr com.apple.quarantine clay-<version>-macos-arm64`.
+- **Windows**: SmartScreen may warn about an unrecognized app. Choose **More info**, then **Run
+  anyway**, or run `Unblock-File` on the zip in PowerShell before unpacking it.
+
+Release builds have HTTPS but not `Graphics` (SDL2). They run programs on the VM. `--compile`
+needs a build from source, described next.
 
 ## Building
 

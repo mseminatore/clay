@@ -1,0 +1,165 @@
+name: Release
+
+# Builds the binary archives (clay + its bundled bricks) for each platform,
+# tests the unpacked archive on a clean path, and attaches the archives and
+# SHA256SUMS to the GitHub release for the tag.
+#
+#   git tag v0.3.1 && git push origin v0.3.1     # build and publish
+#   Actions > Release > Run workflow              # build only (no tag), or
+#                                                 # give a tag to (re)publish it
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (empty: build the branch, publish nothing)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04          # oldest glibc we build on = oldest it runs on
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+          - name: macos-arm64
+            os: macos-14              # the archive needs this macOS version or newer
+          - name: windows-x86_64
+            os: windows-2022
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG || github.ref }}
+          submodules: recursive
+
+      - name: Tag matches version.h
+        if: env.TAG != ''
+        run: |
+          v=$(sed -n 's/^#define CLAY_VERSION "\(.*\)"/\1/p' src/runtime/version.h)
+          if [ "v$v" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match CLAY_VERSION $v in src/runtime/version.h"
+            exit 1
+          fi
+
+      # HTTPS: Linux links the distro's OpenSSL 3 (security updates come from the
+      # distro); macOS links OpenSSL statically so no Homebrew is needed; Windows
+      # uses WinHTTP. SDL2 (Graphics) is left out of release builds.
+      - name: Install OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Configure
+        run: |
+          args=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON)
+          case "$RUNNER_OS" in
+            macOS)   args+=(-DOPENSSL_USE_STATIC_LIBS=TRUE
+                            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)") ;;
+            # static C runtime: no Visual C++ Redistributable needed
+            Windows) args+=(-DCMAKE_POLICY_DEFAULT_CMP0091=NEW
+                            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded) ;;
+          esac
+          cmake -S . -B build "${args[@]}" | tee configure.log
+          if [ "$RUNNER_OS" != Windows ] && ! grep -q "OpenSSL found" configure.log; then
+            echo "::error::OpenSSL not found: the release would have no HTTPS"
+            exit 1
+          fi
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure -LE "bricks|selfhost"
+
+      - name: Package
+        working-directory: build
+        run: cpack -C Release
+
+      # The archive must work on its own: unpacked away from the checkout, with
+      # no CLAY_LIB, and (macOS) without Homebrew's OpenSSL or its certificates.
+      - name: Test the archive
+        run: |
+          pkg=$(ls build/clay-*.tar.gz build/clay-*.zip 2>/dev/null | head -1)
+          echo "archive: $pkg"
+          dir=$(mktemp -d)
+          cp "$pkg" "$dir/" && cd "$dir"
+          cmake -E tar xf "$(basename "$pkg")"
+          clay="$(pwd)/$(basename "$pkg" | sed 's/\.tar\.gz$//; s/\.zip$//')/bin/clay"
+          [ "$RUNNER_OS" = Windows ] && clay="$clay.exe"
+          unset CLAY_LIB
+
+          "$clay" --version
+          printf 'import("stdlib/json")\nimport("web/router")\n(Json stringify([1, 2])) println\n(Router type) println\n' > bricks.clay
+          "$clay" bricks.clay | tee out.txt
+          grep -q Router out.txt
+
+          case "$RUNNER_OS" in
+            macOS)
+              otool -L "$clay"
+              if otool -L "$clay" | grep -E "/opt/homebrew|/usr/local"; then
+                echo "::error::the macOS binary links libraries outside the system"
+                exit 1
+              fi
+              export SSL_CERT_FILE=/nonexistent SSL_CERT_DIR=/nonexistent ;;  # no Homebrew certs
+            Linux)
+              ldd "$clay"
+              if ldd "$clay" | grep "not found"; then exit 1; fi ;;
+          esac
+
+          printf 'r = Http get("https://example.com")\n(r status) println\n(r status == 200) ifFalse { (r body) println; System exit(1) }\n' > https.clay
+          for i in 1 2 3; do "$clay" https.clay && break; [ $i = 3 ] && exit 1; sleep 5; done
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: clay-${{ matrix.name }}
+          path: |
+            build/clay-*.tar.gz
+            build/clay-*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum clay-* > SHA256SUMS
+          cat SHA256SUMS
+
+      # An existing release (e.g. written by hand) keeps its notes and gets the
+      # files; otherwise a draft is created to review and publish.
+      - name: Attach to the release
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --draft --verify-tag --title "Clay $TAG" --generate-notes
+          fi

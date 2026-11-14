@@ -187,7 +187,7 @@ resp status println
 resp body println
 ```
 
-> **Note:** On Windows, Http uses WinHTTP and supports HTTPS natively. On Unix/macOS, HTTPS requires OpenSSL (`brew install openssl` on macOS, typically pre-installed on Linux). Build with `cmake` and it will auto-detect OpenSSL. Without OpenSSL, only HTTP is supported.
+> **Note:** Release downloads support HTTPS on every platform. On Windows, Http uses WinHTTP. On Unix/macOS, a build from source needs OpenSSL for HTTPS (`brew install openssl` on macOS, usually already installed on Linux), and `cmake` detects it automatically. Without OpenSSL, only HTTP is supported. Certificates are checked against the system's trusted roots (`SSL_CERT_FILE` / `SSL_CERT_DIR` override them).
 
 ## HTTP server
 

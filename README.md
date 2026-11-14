@@ -39,6 +39,23 @@ server, ORM, templates, …)
 - native compilation to C for speed and distribution 
 - a VS Code extension with a full debugger.
 
+## Installing Clay
+
+Download the archive for your platform from the
+[releases page](https://github.com/mseminatore/clay/releases) (Linux x86_64 and arm64, macOS
+arm64, Windows x86_64), unpack it anywhere, and add its `bin` folder to your `PATH`:
+
+```sh
+curl -LO https://github.com/mseminatore/clay/releases/latest/download/clay-<version>-macos-arm64.tar.gz
+tar xzf clay-<version>-macos-arm64.tar.gz
+export PATH="$PWD/clay-<version>-macos-arm64/bin:$PATH"
+clay --version
+```
+
+The archive includes the standard library and web bricks. A release runs programs on the VM, and
+for `clay --compile` you build Clay from source (below). [Getting started](docs/getting-started.md#installing)
+covers macOS and Windows download warnings.
+
 ## Building Clay
 
 Requires CMake 3.10+ and a C compiler. On Windows, Visual Studio is detected automatically.
