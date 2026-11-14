@@ -8,6 +8,6 @@
 #ifndef CLAY_VERSION_H
 #define CLAY_VERSION_H
 
-#define CLAY_VERSION "0.2.0"
+#define CLAY_VERSION "0.3.0"
 
 #endif /* CLAY_VERSION_H */
