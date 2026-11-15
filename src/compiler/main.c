@@ -243,13 +243,40 @@ typedef struct {
     char libs[4096];
 } NativeCfg;
 
+/* Replace each ${CLAY_NATIVE} in s (capacity sz) with dir */
+static void expand_clay_native(char *s, size_t sz, const char *dir) {
+    static const char token[] = "${CLAY_NATIVE}";
+    char out[4096];
+    size_t n = 0;
+    for (const char *p = s; *p && n + 1 < sizeof(out); ) {
+        if (strncmp(p, token, sizeof(token) - 1) == 0) {
+            n += (size_t)snprintf(out + n, sizeof(out) - n, "%s", dir);
+            if (n >= sizeof(out)) n = sizeof(out) - 1;
+            p += sizeof(token) - 1;
+        } else {
+            out[n++] = *p++;
+        }
+    }
+    out[n] = '\0';
+    snprintf(s, sz, "%s", out);
+}
+
+/* The cfg of a build tree sits next to clay; an installed clay has one in
+ * <lib>/native/ whose paths are relative to that directory (${CLAY_NATIVE}). */
 static int load_native_cfg(NativeCfg *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     if (!g_exe_dir[0]) return 0;
-    char path[1200];
+    char path[1400], native_dir[1300] = "";
     snprintf(path, sizeof(path), "%sclay-native.cfg", g_exe_dir);
     FILE *f = fopen(path, "r");
-    if (!f) return 0;
+    if (!f) {
+        char lib[1200];
+        if (!find_installed_lib(lib, sizeof(lib))) return 0;
+        snprintf(native_dir, sizeof(native_dir), "%s/native", lib);
+        snprintf(path, sizeof(path), "%s/clay-native.cfg", native_dir);
+        f = fopen(path, "r");
+        if (!f) return 0;
+    }
     char line[4200];
     while (fgets(line, sizeof(line), f)) {
         size_t n = strlen(line);
@@ -265,6 +292,11 @@ static int load_native_cfg(NativeCfg *cfg) {
         else if (strcmp(line, "libs") == 0)   snprintf(cfg->libs, sizeof(cfg->libs), "%s", val);
     }
     fclose(f);
+    if (native_dir[0]) {
+        expand_clay_native(cfg->cc, sizeof(cfg->cc), native_dir);
+        expand_clay_native(cfg->cflags, sizeof(cfg->cflags), native_dir);
+        expand_clay_native(cfg->libs, sizeof(cfg->libs), native_dir);
+    }
     cfg->loaded = cfg->cc[0] && cfg->libs[0];
     return cfg->loaded;
 }

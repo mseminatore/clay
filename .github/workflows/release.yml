@@ -131,6 +131,15 @@ jobs:
           printf 'r = Http get("https://example.com")\n(r status) println\n(r status == 200) ifFalse { (r body) println; System exit(1) }\n' > https.clay
           for i in 1 2 3; do "$clay" https.clay && break; [ $i = 3 ] && exit 1; sleep 5; done
 
+          # --compile and native bricks, with the archive's lib/clay/native and
+          # this runner's C compiler (cc, or MSVC found through vswhere)
+          "$clay" --compile -o bricks_native bricks.clay
+          ./bricks_native | tee out.txt
+          grep -q Router out.txt
+          "$clay" bricks new nat-kit --native
+          (cd nat-kit && "$clay" tests/test_nat_kit.clay &&
+             "$clay" --compile -o nat_kit_native tests/test_nat_kit.clay && ./nat_kit_native)
+
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:

@@ -19,8 +19,14 @@ and add its `bin` folder to your `PATH`. It contains `bin/clay` and the bundled 
 - **Windows**: SmartScreen may warn about an unrecognized app. Choose **More info**, then **Run
   anyway**, or run `Unblock-File` on the zip in PowerShell before unpacking it.
 
-Release builds have HTTPS but not `Graphics` (SDL2). They run programs on the VM. `--compile`
-needs a build from source, described next.
+Release builds have HTTPS but not `Graphics` (SDL2). `clay --compile` and native bricks
+work from a release: `lib/clay/native/` holds the runtime headers and prebuilt libraries, and
+your system's C compiler does the rest:
+
+- **Linux**: `cc` (gcc or clang; `sudo apt install build-essential` on Debian/Ubuntu)
+- **macOS**: the Xcode Command Line Tools (`xcode-select --install`)
+- **Windows**: Visual Studio or its Build Tools with the "Desktop development with C++"
+  workload. `clay` finds it on its own, with no Developer Command Prompt needed.
 
 ## Building
 
@@ -45,9 +51,9 @@ For the fastest native programs, configure a Release build:
 To install Clay outside the source tree, run `cmake --install build --prefix ~/.local` (any
 prefix works). This puts `clay` in `bin/` and the bundled bricks in `lib/clay/`, where `clay` finds
 them on its own. `cpack` in the build directory makes the same tree as an archive
-(`clay-<version>-<os>-<arch>.tar.gz`, or `.zip` on Windows). An installed `clay` runs programs on the
-VM. `--compile` still needs the build directory, because `clay-native.cfg` records that machine's
-paths.
+(`clay-<version>-<os>-<arch>.tar.gz`, or `.zip` on Windows). The install includes
+`lib/clay/native/` (headers, static libraries and a `clay-native.cfg` with paths relative to it), so
+an installed `clay` can `--compile` too.
 
 ## Your first program
 

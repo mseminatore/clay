@@ -52,9 +52,9 @@ export PATH="$PWD/clay-<version>-macos-arm64/bin:$PATH"
 clay --version
 ```
 
-The archive includes the standard library and web bricks. A release runs programs on the VM, and
-for `clay --compile` you build Clay from source (below). [Getting started](docs/getting-started.md#installing)
-covers macOS and Windows download warnings.
+The archive includes the standard library and web bricks, plus what `clay --compile` and native
+bricks link against (you supply the C compiler). [Getting started](docs/getting-started.md#installing)
+covers which compiler to install, and the macOS and Windows download warnings.
 
 ## Building Clay
 

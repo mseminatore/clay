@@ -39,3 +39,10 @@ their notices as their licenses require.
 | [SDL2](https://www.libsdl.org/) | the `Graphics` prototype | zlib License |
 
 On Windows, HTTPS uses the operating system's WinHTTP.
+
+The release archives on GitHub are built without SDL2. The Linux archives link the
+distribution's OpenSSL dynamically. The macOS archive links OpenSSL statically into `clay`, and
+ships its static libraries in `lib/clay/native/` so that `clay --compile` can link them into
+your programs. Its license is included as `share/doc/clay/OPENSSL-LICENSE.txt`. A program you
+build with `--compile` from that archive contains OpenSSL, so pass its license on if you
+distribute the program.

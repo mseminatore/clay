@@ -8,7 +8,8 @@ plugins.
 
 `clay --compile` turns a program into C and links it against the prebuilt
 runtime libraries of the build that produced `clay` (recorded in
-`clay-native.cfg` next to the binary), so compiling takes a fraction of a
+`clay-native.cfg` next to the binary in a build tree, or in `lib/clay/native/` of a release or
+`cmake --install`), so compiling takes a fraction of a
 second and the native program has the same features — HTTPS, Graphics,
 plugins — as `clay` itself. Native programs are typically 3–4× faster than the
 VM; use a Release build (`cmake -DCMAKE_BUILD_TYPE=Release`) so the runtime
