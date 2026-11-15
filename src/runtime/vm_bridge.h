@@ -115,6 +115,9 @@ typedef struct {
     /* Known slot names from the enclosing clone block (for Io-style assignment) */
     const char **known_slots;
     int          known_slot_count;
+    /* known_slots[known_slot_count .. known_member_count): the methods
+     * declared in that clone block (a bare name or call reads them from self) */
+    int          known_member_count;
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);

@@ -462,6 +462,7 @@ add_test(NAME clay_test_trailing_blocks COMMAND clay_compiler ${CMAKE_CURRENT_SO
 add_test(NAME clay_test_return COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_return.clay)
 add_test(NAME clay_test_init_globals COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_init_globals.clay)
 add_test(NAME clay_test_c_names COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_c_names.clay)
+add_test(NAME clay_test_call_syntax COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_call_syntax.clay)
 add_test(NAME clay_test_slot_shadowing COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_slot_shadowing.clay)
 add_test(NAME clay_test_scoping COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_scoping.clay)
 add_test(NAME clay_test_break_continue COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_break_continue.clay)

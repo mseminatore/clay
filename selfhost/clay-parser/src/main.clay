@@ -44,6 +44,7 @@ Node = Object clone {
     catchBlock = nil
     finallyBlock = nil
     isSuper = false    // Send: `super msg`
+    isCall = false     // Send: `foo(args)` (recv Ident foo, name "value")
     superMark = false  // parser-internal: a Self node standing for `super`
     alias = nil        // Import: `as Name`
     fnName = nil       // codegen: the C function of a Block / MethodDef
@@ -107,6 +108,7 @@ AstPrinter = Object clone {
         (k == "Ident" || k == "Assign" || k == "SlotDef" || k == "Binary") ifTrue {
             return k + "(" + n name + ")"
         }
+        (k == "Send" && n isCall) ifTrue { return "Call(" + n recv name + ")" }
         (k == "Send") ifTrue {
             return "Send(" + (n isSuper ifTrue { "super" } ifFalse { "" }) + "." + n name + ")"
         }
@@ -142,7 +144,7 @@ AstPrinter = Object clone {
         k = n kind
         (k == "Assign" || k == "SlotDef") ifTrue { self emit(out, n value, in, "") }
         (k == "Send") ifTrue {
-            self emit(out, n recv, in, "")
+            (n isCall) ifFalse { self emit(out, n recv, in, "") }
             self emitAll(out, n items, in, "")
         }
         (k == "Binary") ifTrue {
@@ -546,6 +548,15 @@ Parser = Object clone {
         (self match("IDENT")) ifTrue {
             n = Node make("Ident", prev line)
             n name = prev text
+            // foo(args): Send(Ident foo, "value", args) marked isCall; the
+            // compilers send `self foo(args)` when foo resolves to self
+            (self match("(")) ifTrue {
+                c = self send(n line, n, "value", [])
+                c isCall = true
+                self argList(c items, true)
+                (self check("{")) ifTrue { c items push(self block) }
+                return c
+            }
             return n
         }
 
@@ -1011,7 +1022,7 @@ Parser = Object clone {
 
         e = self expression
         // receiver slot = value
-        (e != nil && e kind == "Send" && e items size == 0 && (self check("="))) ifTrue {
+        (e != nil && e kind == "Send" && e items size == 0 && e isCall == false && (self check("="))) ifTrue {
             self advance
             n = Node make("SlotAssign", e line)
             n recv = e recv
@@ -1020,7 +1031,7 @@ Parser = Object clone {
             return n
         }
         // receiver slot += value
-        (e != nil && e kind == "Send" && e items size == 0) ifTrue {
+        (e != nil && e kind == "Send" && e items size == 0 && e isCall == false) ifTrue {
             cop = compoundOps get(cur kind)
             (cop != nil) ifTrue {
                 self advance

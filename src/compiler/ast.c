@@ -49,6 +49,7 @@ AstNode *ast_clone(AstNode *node) {
             c->as.send.receiver = ast_clone(node->as.send.receiver);
             c->as.send.message = strdup(node->as.send.message);
             c->as.send.is_super = node->as.send.is_super;
+            c->as.send.is_call = node->as.send.is_call;
             nodelist_clone(&c->as.send.args, &node->as.send.args);
             break;
         case NODE_BINARY:
@@ -244,7 +245,10 @@ static void print_node(AstNode *node, int indent, const char *label) {
         case NODE_SELF:       printf("Self"); break;
         case NODE_ASSIGN:     printf("Assign(%s)", node->as.assign.name); break;
         case NODE_SEND:
-            printf("Send(%s.%s)", node->as.send.is_super ? "super" : "", node->as.send.message);
+            if (node->as.send.is_call)
+                printf("Call(%s)", node->as.send.receiver->as.ident.name);
+            else
+                printf("Send(%s.%s)", node->as.send.is_super ? "super" : "", node->as.send.message);
             break;
         case NODE_BINARY:     printf("Binary(%s)", node->as.binary.op); break;
         case NODE_BLOCK:      printf("Block(params=%d)", node->as.block.params.count); break;
@@ -275,7 +279,7 @@ static void print_node(AstNode *node, int indent, const char *label) {
     switch (node->type) {
         case NODE_ASSIGN:     print_node(node->as.assign.value, in, NULL); break;
         case NODE_SEND:
-            print_node(node->as.send.receiver, in, NULL);
+            if (!node->as.send.is_call) print_node(node->as.send.receiver, in, NULL);
             print_list(&node->as.send.args, in, NULL);
             break;
         case NODE_BINARY:

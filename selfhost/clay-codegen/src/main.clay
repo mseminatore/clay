@@ -167,6 +167,7 @@ FnDef = Object clone {
     node = nil
     captures = nil
     cloneSlots = nil
+    cloneMembers = nil      // its clone body's slot and method names
     inMethodCtx = false
 
     make(fname, ctx, n, caps, inCtx) {
@@ -197,6 +198,7 @@ CodeGen = Object clone {
     toplevelFiles = nil     // top-level variable name -> the files that assign it
     boxed = nil
     knownSlots = nil
+    knownMembers = nil      // slot and method names of the enclosing clone body
     ownedTemps = nil
     inFunction = false
     useSlotRecv = false
@@ -241,6 +243,7 @@ CodeGen = Object clone {
         toplevelFiles = #{}
         boxed = []
         knownSlots = nil
+        knownMembers = nil
         ownedTemps = []
         inFunction = false
         useSlotRecv = false
@@ -355,6 +358,18 @@ CodeGen = Object clone {
 
     isBoxed(n) { boxed contains(n) }
     isKnownSlot(n) { knownSlots != nil && (knownSlots contains(n)) }
+    isKnownMember(n) { knownMembers != nil && (knownMembers contains(n)) }
+
+    // foo(args): does foo resolve to a slot or method of self (ident's
+    // clay_get_slot cases)? Then it's `self foo(args)`, else `foo value(args)`
+    // (call_targets_self in codegen.c)
+    callTargetsSelf(nm) {
+        (self hasSlotFlag(nm)) ifTrue { return false }
+        (inMethod && methodCtx && (self isKnownMember(nm)) && (self isFnLocal(nm)) == false &&
+         (self isBoxed(nm)) == false) ifTrue { return true }
+        ((self isBoxed(nm)) || (self isLocal(nm)) || (self isBuiltinGlobal(nm))) ifTrue { return false }
+        inMethod
+    }
 
     isBuiltinGlobal(n) { (builtins has(n)) || (pluginGlobals contains(n)) }
     builtinExpr(n) {
@@ -523,7 +538,7 @@ CodeGen = Object clone {
             (caps contains(nm)) ifTrue { return nil }
             // a slot of the clone body is read from the method's self, even
             // when a top-level variable has the same name
-            ((self isKnownSlot(nm)) && (self isLocal("_method_self")) &&
+            ((self isKnownMember(nm)) && (self isLocal("_method_self")) &&
              ((self isLocal(nm)) == false || (self isToplevelVar(nm)))) ifTrue {
                 self captureMethodSelf(caps)
                 return nil
@@ -660,8 +675,8 @@ CodeGen = Object clone {
                       (self methodSelfExpr) + ", \"" + nm + "\") : " + (self localReadExpr(nm)) + ";")
             return t
         }
-        // a slot declared in the clone body wins over a top-level variable
-        (inMethod && methodCtx && (self isKnownSlot(nm)) && (self isFnLocal(nm)) == false &&
+        // a slot or method declared in the clone body wins over a top-level variable
+        (inMethod && methodCtx && (self isKnownMember(nm)) && (self isFnLocal(nm)) == false &&
          (self isBoxed(nm)) == false) ifTrue {
             (self isBoxed("_method_self")) ifTrue {
                 self line("ClayValue " + t + " = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"" + nm + "\");")
@@ -713,6 +728,15 @@ CodeGen = Object clone {
     }
 
     send(n) {
+        (n isCall && (self callTargetsSelf(n recv name))) ifTrue {
+            me = n recv clone
+            me kind = "Self"
+            c = n clone
+            c recv = me
+            c name = n recv name
+            c isCall = false
+            return self send(c)
+        }
         recv = self expr(n recv)
         (recv == nil) ifTrue { return nil }
         args = []
@@ -875,7 +899,10 @@ CodeGen = Object clone {
         n body each { |s| self scan(s, params, caps) }
         md = FnDef make(fname, nil, n, caps, methodCtx)
         collected push(md)
-        (inMethod && knownSlots != nil) ifTrue { md cloneSlots = knownSlots }
+        (inMethod && knownMembers != nil) ifTrue {
+            md cloneSlots = knownSlots
+            md cloneMembers = knownMembers
+        }
 
         t = self tempName
         (caps size > 0) ifTrue {
@@ -1210,6 +1237,8 @@ CodeGen = Object clone {
         self line(cv + " = CLAY_VAL(clay_clone(CLAY_OBJ(" + proto + ")));")
         slotNames = []
         n items each { |m| (m kind == "SlotDef") ifTrue { slotNames push(m name) } }
+        memberNames = slotNames slice(0, slotNames size)
+        n items each { |m| (m kind == "MethodDef") ifTrue { memberNames push(m name) } }
         n items each { |m|
             (m kind == "SlotDef") ifTrue {
                 v = self expr(m value)
@@ -1223,6 +1252,7 @@ CodeGen = Object clone {
                 } ifFalse {
                     md = FnDef make(m fnName, cv, m, [], true)
                     md cloneSlots = (slotNames size > 0) ifTrue { slotNames } ifFalse { nil }
+                    md cloneMembers = memberNames
                     collected push(md)
                     self line("clay_set_method(CLAY_OBJ(" + cv + "), \"" + m name + "\", " + m fnName + ");")
                 }
@@ -1261,6 +1291,7 @@ CodeGen = Object clone {
         savedBase = methodLocalBase
         savedSuper = superProto
         savedKnown = knownSlots
+        savedMembers = knownMembers
         savedCtx = methodCtx
         savedInFunction = inFunction
         methodLocalBase = locals size
@@ -1271,6 +1302,7 @@ CodeGen = Object clone {
         fnCells = []
         superProto = d objContext
         knownSlots = d cloneSlots
+        knownMembers = d cloneMembers
 
         (n kind == "MethodDef") ifTrue {
             pc = n params size toString
@@ -1350,6 +1382,7 @@ CodeGen = Object clone {
         superProto = savedSuper
         methodLocalBase = savedBase
         knownSlots = savedKnown
+        knownMembers = savedMembers
         locals = locals slice(0, savedLocalCount)
         boxed = boxed slice(0, savedBoxedCount)
         out push("}\n")

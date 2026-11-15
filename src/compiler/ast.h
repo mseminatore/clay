@@ -67,6 +67,9 @@ struct AstNode {
             char *message;
             NodeList args;
             int is_super;   /* 1 if receiver is 'super' */
+            int is_call;    /* 1 for `foo(args)`: receiver is Ident(foo), message
+                             * "value"; a compiler sends `self foo(args)` instead
+                             * when foo would resolve to a slot of self */
         } send;
 
         /* NODE_BINARY */

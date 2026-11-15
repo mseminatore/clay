@@ -143,6 +143,11 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.
+- **Call syntax `foo(args)`**: parsed as `Send(Ident foo, "value", args)` with `is_call` set
+  (`Call(foo)` in `--ast`). A compiler sends `self foo(args)` instead when `foo` would resolve to self
+  like a bare name (`bc_name_is_self_slot` / `call_targets_self`; selfhost `selfSlotName` /
+  `callTargetsSelf`). Bare reads and calls treat methods declared in the clone body like declared
+  slots (`known_member_count` after the slot names); assignments still use only the slots.
 
 ## Conventions
 

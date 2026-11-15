@@ -228,7 +228,7 @@ Point = Object clone {
 }
 ```
 
-The lookup order is: local variable or parameter → captured variable → a slot declared in the enclosing `clone` body → top-level variable (wherever it is assigned in the file) → `self` slot or method. So a slot declared in the object's own body always beats a top-level variable of the same name, which keeps a brick's objects working whatever names the script using them chooses:
+The lookup order is: local variable or parameter → captured variable → a slot or method declared in the enclosing `clone` body → top-level variable (wherever it is assigned in the file) → `self` slot or method. So a slot declared in the object's own body always beats a top-level variable of the same name, which keeps a brick's objects working whatever names the script using them chooses:
 
 ```clay
 Config = Object clone {
@@ -239,7 +239,19 @@ path = "./local.conf"
 Config show println        // /etc/app.conf
 ```
 
-A slot that's only inherited from a prototype, not declared in this clone body, isn't known when the method is compiled, so there a top-level variable of the same name still wins — write `self path` to be explicit. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (a top-level block does assign the top-level variables of its own file):
+Calls with arguments resolve the same way, so a method calls another method of `self` without writing `self`. `name(args)` runs a block when `name` is a variable, and sends `self name(args)` when it's a slot or method:
+
+```clay
+Greeter = Object clone {
+  greeting = "Hello"
+  format(name) { "${greeting}, ${name}!" }
+  greet(name) { format(name) println }   // same as: self format(name)
+  greetAll(names) { names each { |n| greet(n) } }
+}
+Greeter greetAll(["Ada", "Alan"])        // Hello, Ada!  Hello, Alan!
+```
+
+A slot or method that's only inherited from a prototype, not declared in this clone body, isn't known when the method is compiled, so there a top-level variable of the same name still wins — write `self path` to be explicit. Slot writes also resolve implicitly (Io-style `updateSlot` semantics): `x = val` in a method writes the slot `x` if the name is declared in the enclosing `clone` block **or** if `self` (or its prototype chain) already has a slot `x` when the method is called — for example one created by a constructor. Otherwise `x` is a new local variable. Assignment in a method, or in a block inside one, never changes a top-level variable (a top-level block does assign the top-level variables of its own file):
 
 ```clay
 Point = Object clone {
@@ -366,12 +378,16 @@ Blocks are closures. Parameters go between pipes:
 
 ```clay
 doubler = { |x| x * 2 }
-doubler value(5) println   // 10
+doubler(5) println         // 10
+doubler value(5) println   // 10: the same call, written as a message
 
 // No-arg block
 greet = { "hello" println }
-greet value
+greet()
 ```
+
+`doubler(5)` is shorthand for `doubler value(5)`. A bare `doubler` (no parentheses) is the
+block itself, so you can store it or pass it on: `[1, 2] map(doubler)`.
 
 ## Trailing block syntax
 

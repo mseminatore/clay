@@ -400,6 +400,7 @@ typedef struct MethodDef {
     CaptureList captures; /* captured variables for blocks */
     const char **clone_slots; /* slot names from enclosing clone (Io-style assign) */
     int clone_slot_count;
+    int clone_member_count;   /* clone_slots[clone_slot_count..]: its method names */
     int in_method_ctx;  /* a method, or a block created (transitively) inside one */
     struct MethodDef *next;
 } MethodDef;
@@ -421,6 +422,7 @@ static void collect_method(const char *func_name, const char *obj_ctx, AstNode *
     capture_init(&m->captures);
     m->clone_slots = NULL;
     m->clone_slot_count = 0;
+    m->clone_member_count = 0;
     m->next = collected_methods;
     collected_methods = m;
 }
@@ -436,6 +438,7 @@ static void collect_method_with_captures(const char *func_name, const char *obj_
     caps->names = NULL; caps->count = 0; caps->capacity = 0;
     m->clone_slots = NULL;
     m->clone_slot_count = 0;
+    m->clone_member_count = 0;
     m->next = collected_methods;
     collected_methods = m;
 }
@@ -769,6 +772,7 @@ static int name_in_list(const char *name, char **list, int count) {
 static void scan_free_vars(AstNode *node, char **block_params, int param_count,
                            CaptureList *caps, CodeGen *cg);
 static int is_known_slot(CodeGen *cg, const char *name);
+static int is_known_member(CodeGen *cg, const char *name);
 
 /* When capturing a flagged name, also capture its flag and the method's self */
 static void capture_slot_flag(CaptureList *caps, const char *name, CodeGen *cg) {
@@ -798,7 +802,7 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
             if (capture_has(caps, name)) break;
             /* A slot of the clone body is read from the method's self, even
              * when a top-level variable has the same name */
-            if (is_known_slot(cg, name) && is_local(cg, "_method_self") &&
+            if (is_known_member(cg, name) && is_local(cg, "_method_self") &&
                 (!is_local(cg, name) || is_toplevel_var(cg, name))) {
                 if (!capture_has(caps, "_method_self")) capture_add(caps, "_method_self");
                 break;
@@ -924,6 +928,14 @@ static void scan_free_vars(AstNode *node, char **block_params, int param_count,
     }
 }
 
+/* A slot or method declared in the enclosing clone body? */
+static int is_known_member(CodeGen *cg, const char *name) {
+    for (int i = 0; i < cg->known_member_count; i++) {
+        if (strcmp(cg->known_slots[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
 static int is_known_slot(CodeGen *cg, const char *name) {
     for (int i = 0; i < cg->known_slot_count; i++) {
         if (strcmp(cg->known_slots[i], name) == 0) return 1;
@@ -940,7 +952,7 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
         local_read_expr(cg, node->as.ident.name, local, sizeof(local));
         fprintf(cg->out, "ClayValue %s = CLAY_IS_TRUTHY(%s) ? clay_get_slot(%s, \"%s\") : %s;\n",
                 t, flag, method_self_expr(cg), node->as.ident.name, local);
-    } else if (cg->in_method && cur_method_ctx && is_known_slot(cg, node->as.ident.name) &&
+    } else if (cg->in_method && cur_method_ctx && is_known_member(cg, node->as.ident.name) &&
                !is_fn_local(cg, node->as.ident.name) && !is_boxed(cg, node->as.ident.name)) {
         /* A slot declared in the clone body wins over a top-level variable of
          * the same name (bc_compiler.c and clay-codegen do the same) */
@@ -1276,9 +1288,10 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
 
     collect_method_with_captures(fname, NULL, node, &caps);
     /* Propagate known slots from enclosing method to block */
-    if (cg->in_method && cg->known_slots) {
+    if (cg->in_method && cg->known_slots) {  /* slots and/or methods */
         collected_methods->clone_slots = cg->known_slots;
         collected_methods->clone_slot_count = cg->known_slot_count;
+        collected_methods->clone_member_count = cg->known_member_count;
     }
 
     char *t = temp_name(cg);
@@ -1514,8 +1527,32 @@ static char *emit_raise(CodeGen *cg, AstNode *node) {
     return t;
 }
 
+/* foo(args): does foo resolve to a slot or method of self (emit_ident's
+ * clay_get_slot branches) rather than a variable? Then the call is
+ * `self foo(args)`; otherwise `foo value(args)`. bc_compiler.c's
+ * bc_name_is_self_slot and clay-codegen agree. */
+static int call_targets_self(CodeGen *cg, const char *name) {
+    if (has_slot_flag(cg, name)) return 0;
+    if (cg->in_method && cur_method_ctx && is_known_member(cg, name) &&
+        !is_fn_local(cg, name) && !is_boxed(cg, name))
+        return 1;
+    if (is_boxed(cg, name) || is_local(cg, name) || is_builtin_global(name)) return 0;
+    return cg->in_method;
+}
+
 static char *emit_expr(CodeGen *cg, AstNode *node) {
     if (!node) return NULL;
+    if (node->type == NODE_SEND && node->as.send.is_call &&
+        call_targets_self(cg, node->as.send.receiver->as.ident.name)) {
+        AstNode self_node = *node->as.send.receiver;
+        self_node.type = NODE_SELF;
+        self_node.as.int_lit.value = 0;
+        AstNode send = *node;
+        send.as.send.receiver = &self_node;
+        send.as.send.message = node->as.send.receiver->as.ident.name;
+        send.as.send.is_call = 0;
+        return emit_expr(cg, &send);
+    }
     switch (node->type) {
         case NODE_INT_LIT:    return emit_int_lit(cg, node);
         case NODE_FLOAT_LIT:  return emit_float_lit(cg, node);
@@ -1875,13 +1912,22 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
         if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
             slot_name_count++;
     }
+    /* slot names first, then method names (read from self by bare names) */
+    int member_count = slot_name_count;
+    for (int i = 0; i < node->as.clone.members.count; i++) {
+        if (node->as.clone.members.items[i]->type == NODE_METHOD_DEF) member_count++;
+    }
     const char **slot_names = NULL;
-    if (slot_name_count > 0) {
-        slot_names = (const char **)malloc((size_t)slot_name_count * sizeof(const char *));
+    if (member_count > 0) {
+        slot_names = (const char **)malloc((size_t)member_count * sizeof(const char *));
         int si = 0;
         for (int i = 0; i < node->as.clone.members.count; i++) {
             if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
                 slot_names[si++] = node->as.clone.members.items[i]->as.slot_def.name;
+        }
+        for (int i = 0; i < node->as.clone.members.count; i++) {
+            if (node->as.clone.members.items[i]->type == NODE_METHOD_DEF)
+                slot_names[si++] = node->as.clone.members.items[i]->as.method_def.name;
         }
     }
 
@@ -1906,6 +1952,7 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
             /* Attach clone slot names to the just-collected method */
             collected_methods->clone_slots = slot_names;
             collected_methods->clone_slot_count = slot_name_count;
+            collected_methods->clone_member_count = member_count;
             emit_indent(cg);
             fprintf(cg->out, "clay_set_method(CLAY_OBJ(%s), \"%s\", %s);\n",
                     cvar, member->as.method_def.name, fname);
@@ -1954,6 +2001,7 @@ static void emit_method_bodies(CodeGen *cg) {
         const char *saved_super_proto = cg->super_proto;
         const char **saved_known_slots = cg->known_slots;
         int saved_known_slot_count = cg->known_slot_count;
+        int saved_known_member_count = cg->known_member_count;
         cg->method_local_base = cg->local_count;
         cg->in_method = 1;
         int saved_method_ctx = cur_method_ctx;
@@ -1966,6 +2014,7 @@ static void emit_method_bodies(CodeGen *cg) {
         cg->super_proto = cur->obj_context;
         cg->known_slots = cur->clone_slots;
         cg->known_slot_count = cur->clone_slot_count;
+        cg->known_member_count = cur->clone_member_count;
 
         if (node->type == NODE_METHOD_DEF) {
             /* runaway recursion raises instead of overflowing the C stack */
@@ -2097,6 +2146,7 @@ static void emit_method_bodies(CodeGen *cg) {
         cg->method_local_base = saved_method_local_base;
         cg->known_slots = saved_known_slots;
         cg->known_slot_count = saved_known_slot_count;
+        cg->known_member_count = saved_known_member_count;
         /* Clear locals added in this scope */
         while (cg->local_count > saved_local_count) {
             cg->local_count--;
@@ -2139,6 +2189,7 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->boxed_capacity = 0;
     cg->known_slots = NULL;
     cg->known_slot_count = 0;
+    cg->known_member_count = 0;
     cg->owned_temps = NULL;
     cg->owned_temp_count = 0;
     cg->owned_temp_capacity = 0;

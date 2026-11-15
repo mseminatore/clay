@@ -596,10 +596,33 @@ static AstNode *parse_primary(Parser *p) {
         return node;
     }
 
-    /* Identifier */
+    /* Identifier, or a call `foo(args)`: Send(Ident(foo), "value", args)
+     * marked is_call. The compilers send `self foo(args)` instead when foo
+     * would resolve to a slot or method of self, so `foo(x)` runs a block held
+     * in a variable and calls a method of self without writing `self`. */
     if (match(p, TOK_IDENT)) {
         AstNode *node = ast_new(NODE_IDENT, p->previous.line);
         node->as.ident.name = token_strdup(&p->previous);
+        if (match(p, TOK_LPAREN)) {
+            AstNode *call = ast_new(NODE_SEND, node->line);
+            call->as.send.receiver = node;
+            call->as.send.message = strdup("value");
+            call->as.send.is_call = 1;
+            nodelist_init(&call->as.send.args);
+            if (!check(p, TOK_RPAREN)) {
+                nodelist_push(&call->as.send.args, parse_expression(p));
+                while (match(p, TOK_COMMA)) {
+                    skip_newlines(p);
+                    nodelist_push(&call->as.send.args, parse_expression(p));
+                }
+            }
+            expect(p, TOK_RPAREN, "Expected ')'");
+            /* Trailing block: repeat(3) { ... } */
+            if (check(p, TOK_LBRACE)) {
+                nodelist_push(&call->as.send.args, parse_block(p));
+            }
+            return call;
+        }
         return node;
     }
 
@@ -1176,7 +1199,7 @@ static AstNode *parse_statement(Parser *p) {
      * If result is a zero-arg send (e.g. p x) followed by =, it's slot assignment */
     AstNode *expr = parse_expression(p);
     if (expr && expr->type == NODE_SEND && expr->as.send.args.count == 0 &&
-        check(p, TOK_ASSIGN)) {
+        !expr->as.send.is_call && check(p, TOK_ASSIGN)) {
         parser_advance(p); /* consume = */
         AstNode *node = ast_new(NODE_SLOT_ASSIGN, expr->line);
         node->as.slot_assign.receiver = expr->as.send.receiver;
@@ -1190,7 +1213,8 @@ static AstNode *parse_statement(Parser *p) {
     }
 
     /* Check for compound slot assignment: obj slot += expr → obj slot = obj slot + expr */
-    if (expr && expr->type == NODE_SEND && expr->as.send.args.count == 0) {
+    if (expr && expr->type == NODE_SEND && expr->as.send.args.count == 0 &&
+        !expr->as.send.is_call) {
         const char *cop = compound_assign_op(p->current.type);
         if (cop) {
             parser_advance(p); /* consume += etc. */

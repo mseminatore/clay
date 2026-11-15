@@ -554,6 +554,14 @@ static void bc_prescan_list(BcCompiler *bc, NodeList *list) {
 }
 
 /* Check if a name is a known slot from the enclosing clone block */
+/* A slot or method declared in the enclosing clone block? */
+static int bc_is_known_member(BcCompiler *bc, const char *name) {
+    for (int i = 0; i < bc->known_member_count; i++) {
+        if (strcmp(bc->known_slots[i], name) == 0) return 1;
+    }
+    return 0;
+}
+
 static int bc_is_known_slot(BcCompiler *bc, const char *name) {
     for (int i = 0; i < bc->known_slot_count; i++) {
         if (strcmp(bc->known_slots[i], name) == 0) return 1;
@@ -838,8 +846,34 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     return chunk_id;
 }
 
+/* Does a bare name that isn't a local resolve to a slot or method of self?
+ * Inside a method: yes unless it's a builtin global, or a top-level variable
+ * not shadowed by a slot declared in the clone body (codegen.c's
+ * call_targets_self and clay-bytecode's selfSlotName agree). */
+static int bc_name_is_self_slot(BcCompiler *bc, const char *name) {
+    return bc->in_method && !is_builtin_global(name) &&
+           (bc_is_known_member(bc, name) || !bc_is_user_global(bc, name));
+}
+
 static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
     if (!node || bc->had_error) return;
+
+    /* foo(args): a block in a variable runs (`foo value(args)`, the node as
+     * parsed); a name that resolves to self sends `self foo(args)` */
+    if (node->type == NODE_SEND && node->as.send.is_call) {
+        const char *name = node->as.send.receiver->as.ident.name;
+        if (bc_resolve_local(bc, name) < 0 && bc_name_is_self_slot(bc, name)) {
+            AstNode self_node = *node->as.send.receiver;
+            self_node.type = NODE_SELF;
+            self_node.as.int_lit.value = 0;
+            AstNode send = *node;
+            send.as.send.receiver = &self_node;
+            send.as.send.message = (char *)name;
+            send.as.send.is_call = 0;
+            bc_emit_expr(bc, &send);
+            return;
+        }
+    }
     bc->current_line = node->line;
 
     switch (node->type) {
@@ -877,8 +911,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                     emit_u16(bc, (uint16_t)bc->native_cell_get);
                     emit_byte(bc, 1);
                 }
-            } else if (bc->in_method && !is_builtin_global(ident_name) &&
-                       (bc_is_known_slot(bc, ident_name) || !bc_is_user_global(bc, ident_name))) {
+            } else if (bc_name_is_self_slot(bc, ident_name)) {
                 /* Inside a method: bare identifier → implicit self slot lookup.
                  * A slot declared in the clone body wins over a global of the
                  * same name (codegen.c and clay-bytecode do the same).
@@ -1205,22 +1238,30 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             /* Collect slot names for Io-style assignment in methods */
             const char **saved_slots = bc->known_slots;
             int saved_slot_count = bc->known_slot_count;
-            int slot_name_count = 0;
+            int saved_member_count = bc->known_member_count;
+            int slot_name_count = 0, member_count = 0;
             for (int i = 0; i < node->as.clone.members.count; i++) {
-                if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
-                    slot_name_count++;
+                NodeType t = node->as.clone.members.items[i]->type;
+                if (t == NODE_SLOT_DEF) slot_name_count++;
+                if (t == NODE_SLOT_DEF || t == NODE_METHOD_DEF) member_count++;
             }
+            /* slot names first, then method names */
             const char **slot_names = NULL;
-            if (slot_name_count > 0) {
-                slot_names = (const char **)malloc((size_t)slot_name_count * sizeof(const char *));
+            if (member_count > 0) {
+                slot_names = (const char **)malloc((size_t)member_count * sizeof(const char *));
                 int si = 0;
                 for (int i = 0; i < node->as.clone.members.count; i++) {
                     if (node->as.clone.members.items[i]->type == NODE_SLOT_DEF)
                         slot_names[si++] = node->as.clone.members.items[i]->as.slot_def.name;
                 }
+                for (int i = 0; i < node->as.clone.members.count; i++) {
+                    if (node->as.clone.members.items[i]->type == NODE_METHOD_DEF)
+                        slot_names[si++] = node->as.clone.members.items[i]->as.method_def.name;
+                }
             }
             bc->known_slots = slot_names;
             bc->known_slot_count = slot_name_count;
+            bc->known_member_count = member_count;
 
             /* Set slots and methods on the cloned object */
             for (int i = 0; i < node->as.clone.members.count; i++) {
@@ -1264,6 +1305,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             free(slot_names);
             bc->known_slots = saved_slots;
             bc->known_slot_count = saved_slot_count;
+            bc->known_member_count = saved_member_count;
             break;
         }
 

@@ -1,0 +1,81 @@
+// foo(args): runs a block held in a variable (`foo value(args)`), or calls a
+// method of self (`self foo(args)`). foo resolves like a bare name: local or
+// parameter, captured variable, a slot or method declared in the clone body,
+// top-level variable, then self.
+
+check = { |label, got, want|
+    (got != want) ifTrue {
+        raise("FAIL: " + label + " - expected " + want toString + ", got " + got toString)
+    }
+}
+
+// Top-level blocks
+double = { |x| x * 2 }
+check("global block", double(5), 10)
+answer = { 42 }
+check("no-arg block", answer(), 42)
+add = { |a, b| a + b }
+check("nested calls", add(double(1), double(2)), 6)
+
+greet = { |n| "global " + n }
+
+Animal = Object clone {
+    sound() { "..." }
+    twice(s) { s + s }
+    shout = { |s| s + "!" }                  // a slot holding a block
+    greet(n) { "method " + n }               // declared here: beats the global
+
+    speak() { twice(sound()) }               // methods of self, no `self`
+    slotBlock() { shout("hey") }
+    globalBlock() { double(21) }
+    localBlock() {
+        sub = { |a, b| a - b }
+        sub(10, 3)
+    }
+    inBlock() { [1, 2] map { |n| twice(n) } }
+    declared() { greet("x") }
+    param(greet) { greet("y") }              // the parameter wins
+    flagged() {
+        h = 1
+        h = { |n| "local " + n }
+        h("z")
+    }
+    times(n, blk) {
+        out = []
+        (1..n) each { |i| out push(blk value(i)) }
+        out
+    }
+    trailing() { times(3) { |i| i * 10 } }
+}
+
+check("methods of self", Animal speak, "......")
+check("slot block", Animal slotBlock, "hey!")
+check("global block in method", Animal globalBlock, 42)
+check("local block", Animal localBlock, 7)
+check("inside a block", Animal inBlock, [2, 4])
+check("declared method beats global", Animal declared, "method x")
+check("parameter beats method", Animal param({ |n| "param " + n }), "param y")
+check("flagged local", Animal flagged, "local z")
+check("trailing block", Animal trailing, [10, 20, 30])
+
+// Dispatch is dynamic: a clone's override is the one called
+Dog = Animal clone { sound() { "woof" } }
+check("override", Dog speak, "woofwoof")
+
+// Only inherited (not declared in this clone body): the top-level variable
+// wins, as for a bare name; `self greet(...)` is the explicit form
+Base = Object clone { hello(n) { "inherited " + n } }
+hello = { |n| "global " + n }
+Kid = Base clone {
+    viaCall() { hello("v") }
+    viaSelf() { self hello("v") }
+}
+check("inherited vs global", Kid viaCall, "global v")
+check("explicit self", Kid viaSelf, "inherited v")
+
+// An unknown name inside a method is a message to self
+Lost = Object clone { go() { nosuch(1) } }
+r = try { Lost go } catch { |e| e type }
+check("unknown method", r, "MethodNotFound")
+
+"call syntax: all checks passed" println

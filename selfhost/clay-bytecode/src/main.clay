@@ -149,6 +149,7 @@ BcGen = Object clone {
     inMeth = false         // inside a method body (or a block within one)
     isMethChunk = false    // compiling a method body itself
     slotsKnown = nil       // slot names of the enclosing clone body
+    membersKnown = nil     // its slot and method names (bare reads and calls)
 
     new(file = nil, live = false, plugins = nil) {
         g = self clone
@@ -298,6 +299,14 @@ BcGen = Object clone {
     flagLocal(n) { self resolveLocal("?" + n) }
 
     isKnownSlot(n) { slotsKnown != nil && (slotsKnown contains(n)) }
+    isKnownMember(n) { membersKnown != nil && (membersKnown contains(n)) }
+
+    // a bare name that isn't a local resolves to a slot or method of self
+    // (bc_name_is_self_slot in bc_compiler.c)
+    selfSlotName(nm) {
+        inMeth && (self isBuiltin(nm)) == false &&
+            ((self isKnownMember(nm)) || (self isUserGlobal(nm)) == false)
+    }
 
     // push local s, unwrapping its cell if captured
     getLocalValue(s) {
@@ -694,6 +703,15 @@ BcGen = Object clone {
         (k == "Assign") ifTrue { return self assignExpr(n) }
         (k == "Destructure") ifTrue { return nil }
         (k == "Send") ifTrue {
+            // foo(args): `self foo(args)` when foo resolves to self, else
+            // `foo value(args)` as parsed
+            (n isCall && (self resolveLocal(n recv name)) < 0 &&
+             (self selfSlotName(n recv name))) ifTrue {
+                self native(N_LOAD_SELF, 0)
+                self pushString(n recv name)
+                n items each { |a| self expr(a) }
+                return self native(N_SEND, 2 + n items size)
+            }
             self expr(n recv)
             self pushString(n name)
             n items each { |a| self expr(a) }
@@ -759,10 +777,9 @@ BcGen = Object clone {
             (self isCaptured(s)) ifTrue { self native(N_CELL_GET, 1) }
             return nil
         }
-        (inMeth && (self isBuiltin(nm)) == false &&
-         ((self isKnownSlot(nm)) || (self isUserGlobal(nm)) == false)) ifTrue {
-            // implicit self: a slot or method of self (a slot declared in the
-            // clone body wins over a global of the same name)
+        (self selfSlotName(nm)) ifTrue {
+            // implicit self: a slot or method of self (a slot or method
+            // declared in the clone body wins over a global of the same name)
             self native(N_LOAD_SELF, 0)
             self pushString(nm)
             return self native(N_SEND, 2)
@@ -891,7 +908,9 @@ BcGen = Object clone {
         self expr(n recv)
         self native(N_CLONE, 1)
         outerSlots = slotsKnown
+        outerMembers = membersKnown
         slotsKnown = (n items filter { |m| m kind == "SlotDef" }) map { |m| m name }
+        membersKnown = slotsKnown + ((n items filter { |m| m kind == "MethodDef" }) map { |m| m name })
         n items each { |m|
             (m kind == "SlotDef") ifTrue {
                 self emitOp(DUP)
@@ -912,6 +931,7 @@ BcGen = Object clone {
             }
         }
         slotsKnown = outerSlots
+        membersKnown = outerMembers
         nil
     }
 
