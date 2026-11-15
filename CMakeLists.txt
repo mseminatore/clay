@@ -321,11 +321,13 @@ if(SDL2_FOUND)    # not in release builds; a local install links this machine's 
 endif()
 if(MSVC)
     set(CLAY_INSTALL_CC cl)
-    set(CLAY_INSTALL_CFLAGS "/nologo /O2 ${CLAY_NATIVE_CRT} /D_CRT_SECURE_NO_WARNINGS ${CLAY_NATIVE_DEFS} /I\"\${CLAY_NATIVE}/include\"")
+    set(CLAY_INSTALL_CFLAGS "/nologo /O2 ${CLAY_NATIVE_CRT} ${CMAKE_C_FLAGS} /D_CRT_SECURE_NO_WARNINGS ${CLAY_NATIVE_DEFS} /I\"\${CLAY_NATIVE}/include\"")
     string(APPEND CLAY_INSTALL_LIBS " winhttp.lib ws2_32.lib user32.lib bcrypt.lib")
 else()
     set(CLAY_INSTALL_CC cc)
-    set(CLAY_INSTALL_CFLAGS "-std=c99 -O2 ${CLAY_NATIVE_DEFS} -I\"\${CLAY_NATIVE}/include\"")
+    # CMAKE_C_FLAGS as in the build-tree cfg: the libraries were built with
+    # them (e.g. -fsanitize=address), so programs linking them need them too
+    set(CLAY_INSTALL_CFLAGS "-std=c99 -O2 ${CMAKE_C_FLAGS} ${CLAY_NATIVE_DEFS} -I\"\${CLAY_NATIVE}/include\"")
     if(OPENSSL_FOUND)
         if(OPENSSL_SSL_LIBRARY MATCHES "\\.a$")
             # static OpenSSL (macOS releases): ship it so programs link it too
