@@ -158,6 +158,18 @@ static void skip_newlines(Parser *p) {
     }
 }
 
+/* After a statement in a block or method body: a newline, ';' or the closing
+ * '}' must follow. Without this, `twice("ha") println` parsed as two
+ * statements (`twice` and `("ha") println`) instead of reporting an error. */
+static void end_body_statement(Parser *p) {
+    if (check(p, TOK_RBRACE) || check(p, TOK_EOF) || p->had_error) return;
+    if (!check(p, TOK_NEWLINE) && !check(p, TOK_SEMICOLON)) {
+        parser_error(p, "Expected newline or ';' after statement");
+        return;
+    }
+    skip_newlines(p);
+}
+
 /* Is the current token a newline, followed (after any more newlines) by a
  * `{` alone on its line? That's an Allman-style clone body:
  *     Point = Object clone
@@ -724,7 +736,7 @@ static AstNode *parse_block(Parser *p) {
                 nodelist_push(&node->as.block.body, stmt);
             }
         }
-        skip_newlines(p);
+        end_body_statement(p);
     }
 
     expect(p, TOK_RBRACE, "Expected '}'");
@@ -814,7 +826,7 @@ static AstNode *parse_clone_body(Parser *p) {
                         nodelist_push(&method->as.method_def.body, stmt);
                     }
                 }
-                skip_newlines(p);
+                end_body_statement(p);
             }
             expect(p, TOK_RBRACE, "Expected '}'");
             nodelist_push(&node->as.clone.members, method);

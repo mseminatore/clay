@@ -741,8 +741,19 @@ Parser = Object clone {
     statementsUntilBrace(list) {
         { (self check("}")) == false && (self check("EOF")) == false && hadError == false } whileTrue {
             self addStatement(self statement, list)
-            self skipNewlines
+            self endBodyStatement
         }
+    }
+
+    // after a statement in a block or method body: newline, ';' or '}'
+    // (end_body_statement in parser.c)
+    endBodyStatement() {
+        ((self check("}")) || (self check("EOF")) || hadError) ifTrue { return nil }
+        ((self check("NEWLINE")) == false && (self check(";")) == false) ifTrue {
+            self error("Expected newline or ';' after statement")
+            return nil
+        }
+        self skipNewlines
     }
 
     // --- clone body: { slot = value  method(params) { body } } ---

@@ -1,0 +1,5 @@
+// a bare call with arguments is not a statement followed by another one
+A = Object clone {
+  twice(s) { s + s }
+  go() { twice("ha") println }
+}
