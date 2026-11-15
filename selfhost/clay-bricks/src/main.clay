@@ -28,6 +28,9 @@
 //   are (BrickFiles saveDeps); `init` writes a new file.
 
 import("../../clay-parser/src/main.clay")
+// the "clay" range (semver.c ports its satisfies); a file import, not
+// import("stdlib/semver"), which would read the project's brick.json
+import("../../../lib/stdlib/semver/src/main.clay")
 
 // --- brick.json and brick.lock: a minimal JSON-subset reader ---
 
@@ -191,6 +194,7 @@ BrickReader = Object clone {
 BrickManifest = Object clone {
     name = ""
     version = ""
+    clay = ""          // "clay": the Clay versions it needs ("" = any)
     description = ""
     mainFile = ""
     deps = nil         // [name, url] pairs, in file order
@@ -473,6 +477,7 @@ BrickFiles = Object clone {
         width = 0
         (key == "name") ifTrue { width = 128 }
         (key == "version") ifTrue { width = 64 }
+        (key == "clay") ifTrue { width = 64 }
         (key == "description") ifTrue { width = 256 }
         (key == "main") ifTrue { width = 1024 }
         (width == 0) ifTrue { return r skipValue }      // unknown key (any JSON value)
@@ -480,6 +485,7 @@ BrickFiles = Object clone {
         (s == nil) ifTrue { return false }
         (key == "name") ifTrue { m name = s }
         (key == "version") ifTrue { m version = s }
+        (key == "clay") ifTrue { m clay = s }
         (key == "description") ifTrue { m description = s }
         (key == "main") ifTrue { m mainFile = s }
         true
@@ -1193,9 +1199,9 @@ BrickRegistry = Object clone {
 
 // --- `bricks new`: the files of a new brick ---
 // The same files src/compiler/bricks.c writes (CTest clay_selfhost_bricks
-// compares what both create). @NAME@, @CAMEL@ and @PLUGIN@ stand for the
-// brick's name (foo-bar), its prototype name (FooBar) and its C identifier
-// (foo_bar).
+// compares what both create). @NAME@, @CAMEL@, @PLUGIN@ and @CLAY@ stand for
+// the brick's name (foo-bar), its prototype name (FooBar), its C identifier
+// (foo_bar) and the Clay version (for "clay": ">=...").
 
 BrickScaffold = Object clone {
     _pure_json() {
@@ -1203,6 +1209,7 @@ BrickScaffold = Object clone {
             "{",
             "  \"name\": \"@NAME@\",",
             "  \"version\": \"0.1.0\",",
+            "  \"clay\": \">=@CLAY@\",",
             "  \"description\": \"TODO: what @NAME@ does, in one line\",",
             "  \"main\": \"src/main.clay\",",
             "  \"deps\": {}",
@@ -1215,6 +1222,7 @@ BrickScaffold = Object clone {
             "{",
             "  \"name\": \"@NAME@\",",
             "  \"version\": \"0.1.0\",",
+            "  \"clay\": \">=@CLAY@\",",
             "  \"description\": \"TODO: what @NAME@ does, in one line\",",
             "  \"main\": \"src/main.clay\",",
             "  \"deps\": {},",
@@ -1637,7 +1645,7 @@ BrickScaffold = Object clone {
     cName(text) { text replace("-", "_") }
 
     fill(tpl, name, cm, pl) {
-        (((tpl replace("@NAME@", name)) replace("@CAMEL@", cm)) replace("@PLUGIN@", pl)) replace("@D@", "$")
+        ((((tpl replace("@NAME@", name)) replace("@CAMEL@", cm)) replace("@PLUGIN@", pl)) replace("@CLAY@", System version)) replace("@D@", "$")
     }
 }
 
@@ -1785,6 +1793,23 @@ Bricks = Object clone {
         nil
     }
 
+    // brick_clay_ok: does this Clay satisfy the manifest's "clay" range? who
+    // names the brick in the error ("" for the project's own brick.json)
+    _clayOk(m, who) {
+        (m clay == "") ifTrue { return true }
+        r = try { (Semver satisfies(System version, m clay)) ifTrue { 1 } ifFalse { 0 } } catch { |e| -1 }
+        (r == 1) ifTrue { return true }
+        pad = (who != "") ifTrue { "  " } ifFalse { "" }
+        (r < 0) ifTrue {
+            whose = (who != "") ifTrue { who + "'s " } ifFalse { "" }
+            self _err(pad + "error: " + whose + "brick.json has an invalid \"clay\" version range '" + m clay + "'")
+        } ifFalse {
+            subject = (who != "") ifTrue { who } ifFalse { "this project" }
+            self _err(pad + "error: " + subject + " needs Clay " + m clay + ", but this is Clay " + System version)
+        }
+        false
+    }
+
     // install_subdeps: the dependencies listed in <dir>/brick.json, if any
     _installSubdeps(dir, depName) {
         sub = BrickFiles load(dir + "/brick.json")
@@ -1793,6 +1818,7 @@ Bricks = Object clone {
             self _err("  error: invalid brick.json in " + depName)
             return false
         }
+        (self _clayOk(sub, depName)) ifFalse { return false }
         failed = 0
         (sub deps size > 0) ifTrue {
             self _say("  Installing dependencies of " + depName + "...")
@@ -1950,6 +1976,7 @@ Bricks = Object clone {
     cmdInstall() {
         m = self _project(self _initHint)
         (m == nil) ifTrue { return 1 }
+        (self _clayOk(m, "")) ifFalse { return 1 }
         (m deps size == 0) ifTrue {
             self _say("No dependencies to install.")
             return 0

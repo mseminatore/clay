@@ -119,7 +119,15 @@ commit(cyc-b one)
 file(WRITE "${WORK}/src/bad/brick.json"
      "{ \"name\": \"bad\", \"deps\": { \"x\": \"example.test/acme/x y\" } }\n")
 commit(bad one)
-foreach(name lib-a lib-b mono nat cyc-a cyc-b bad)
+# "clay": the Clay versions a brick needs
+file(WRITE "${WORK}/src/future/brick.json" "{ \"name\": \"future\", \"clay\": \">=99\" }\n")
+commit(future one)
+file(WRITE "${WORK}/src/current/brick.json"
+     "{ \"name\": \"current\", \"clay\": \">=0.3.3 <99\", \"deps\": { \"lib-b\": \"example.test/acme/lib-b\" } }\n")
+commit(current one)
+file(WRITE "${WORK}/src/oddrange/brick.json" "{ \"name\": \"oddrange\", \"clay\": \"^abc\" }\n")
+commit(oddrange one)
+foreach(name lib-a lib-b mono nat cyc-a cyc-b bad future current oddrange)
     publish(${name})
 endforeach()
 
@@ -408,6 +416,24 @@ both(update)
 both(add example.test/acme/lib-a)
 both(remove cyc-a)
 same_state("after a loosely written brick.json")
+
+# "clay" ranges: a dependency's, and the project's own
+write_both(brick.json "{ \"name\": \"p\" }\n")
+remove_both(bricks brick.lock)
+both(add example.test/acme/future)
+expect("error: future needs Clay >=99, but this is Clay ")
+expect("removed the partial install bricks/future")
+both(add example.test/acme/oddrange)
+expect("error: oddrange's brick.json has an invalid \"clay\" version range '^abc'")
+both(add example.test/acme/current)
+expect("Added 'current' to brick.json")
+same_state("after adding bricks with clay ranges")
+write_both(brick.json "{ \"name\": \"p\", \"clay\": \">=99\", \"deps\": { \"lib-b\": \"example.test/acme/lib-b\" } }\n")
+both(install)
+expect("error: this project needs Clay >=99, but this is Clay ")
+write_both(brick.json "{ \"name\": \"p\", \"clay\": \">=1.2.3.4\" }\n")
+both(install)
+expect("error: brick.json has an invalid \"clay\" version range")
 
 # invalid manifests
 write_both(brick.json "{ \"name\": \"p\", \"deps\": { \"x\": \"bad url\" } }\n")

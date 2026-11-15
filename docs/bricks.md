@@ -24,6 +24,7 @@ clay bricks info ann                          # what the registry says about one
 {
   "name": "my-project",
   "version": "0.1.0",
+  "clay": ">=0.3.3",
   "description": "A Clay project",
   "main": "src/main.clay",
   "deps": {
@@ -33,6 +34,18 @@ clay bricks info ann                          # what the registry says about one
 ```
 
 Dependencies are pinned to a Git tag, branch, or commit via `@ref`. URLs are automatically prefixed with `https://` if no protocol is specified.
+
+`"clay"` (optional) says which Clay versions the brick works with, as an npm-style semver range:
+`">=0.3.3"`, `"^0.3"`, `">=0.3.3 <0.5"`, `"0.3.x || >=1.0"`, the syntax of
+[`Semver satisfies`](#bundled-bricks). `clay bricks add` and `install` refuse a dependency whose
+range the running Clay doesn't satisfy, and `install` checks the project's own:
+
+```
+  error: ann needs Clay >=0.4.0, but this is Clay 0.3.3
+```
+
+`clay bricks new` writes `">=<this version>"`. Raise it when the brick starts using something
+newer, such as the `foo(args)` call syntax of 0.3.3. Clay versions before 0.3.3 ignore the field.
 
 A dependency's name — its key in `deps` — is what you import and the directory it installs into
 (`bricks/some-lib`). `clay bricks add` takes the name from the repository unless you give one, so a

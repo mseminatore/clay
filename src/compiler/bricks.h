@@ -37,6 +37,8 @@ typedef struct {
 typedef struct {
     char name[BRICK_MAX_NAME];
     char version[64];
+    char clay[64];              /* "clay": the Clay versions it needs, an npm-style
+                                 * range like ">=0.3.3" ("" = any) */
     char description[256];
     char main_file[BRICK_MAX_PATH];
     BrickDep deps[BRICK_MAX_DEPS];

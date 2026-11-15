@@ -943,6 +943,19 @@ static int is_known_slot(CodeGen *cg, const char *name) {
     return 0;
 }
 
+/* A bare name that resolves to self: `self name`, a message send (a method
+ * runs; a slot is read), as the VM's implicit self does. Inside a block within
+ * a method, self is the captured method self. */
+static void emit_self_send(CodeGen *cg, const char *t, const char *name) {
+    if (is_boxed(cg, "_method_self"))
+        fprintf(cg->out, "ClayValue %s = clay_self_get(_method_self_cell->value, \"%s\");\n",
+                t, name);
+    else
+        fprintf(cg->out, "ClayValue %s = clay_self_get(CLAY_VAL(%s), \"%s\");\n",
+                t, method_self_expr(cg), name);
+    push_owned_temp(cg, t);
+}
+
 static char *emit_ident(CodeGen *cg, AstNode *node) {
     char *t = temp_name(cg);
     emit_indent(cg);
@@ -954,14 +967,10 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
                 t, flag, method_self_expr(cg), node->as.ident.name, local);
     } else if (cg->in_method && cur_method_ctx && is_known_member(cg, node->as.ident.name) &&
                !is_fn_local(cg, node->as.ident.name) && !is_boxed(cg, node->as.ident.name)) {
-        /* A slot declared in the clone body wins over a top-level variable of
-         * the same name (bc_compiler.c and clay-codegen do the same) */
-        if (is_boxed(cg, "_method_self"))
-            fprintf(cg->out, "ClayValue %s = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"%s\");\n",
-                    t, node->as.ident.name);
-        else
-            fprintf(cg->out, "ClayValue %s = clay_get_slot(%s, \"%s\");\n",
-                    t, method_self_expr(cg), node->as.ident.name);
+        /* A slot or method declared in the clone body wins over a top-level
+         * variable of the same name (bc_compiler.c and clay-codegen do the
+         * same). Sent like the VM does, so a method runs and a slot is read. */
+        emit_self_send(cg, t, node->as.ident.name);
     } else if (is_boxed(cg, node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s_cell->value;\n", t, c_safe_name(node->as.ident.name));
     } else if (is_local(cg, node->as.ident.name)) {
@@ -969,14 +978,7 @@ static char *emit_ident(CodeGen *cg, AstNode *node) {
     } else if (is_builtin_global(node->as.ident.name)) {
         fprintf(cg->out, "ClayValue %s = %s;\n", t, builtin_c_expr(node->as.ident.name));
     } else if (cg->in_method && !is_local(cg, node->as.ident.name)) {
-        if (is_boxed(cg, "_method_self")) {
-            /* Inside a block within a method — use the captured method self */
-            fprintf(cg->out, "ClayValue %s = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"%s\");\n",
-                    t, node->as.ident.name);
-        } else {
-            fprintf(cg->out, "ClayValue %s = clay_get_slot(%s, \"%s\");\n",
-                    t, method_self_expr(cg), node->as.ident.name);
-        }
+        emit_self_send(cg, t, node->as.ident.name);
     } else {
         fprintf(cg->out, "ClayValue %s = %s;\n", t, c_safe_name(node->as.ident.name));
     }

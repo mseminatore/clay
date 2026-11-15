@@ -73,6 +73,23 @@ Kid = Base clone {
 check("inherited vs global", Kid viaCall, "global v")
 check("explicit self", Kid viaSelf, "inherited v")
 
+// Results chain like any message; a bare method name runs the method (it was
+// nil in native code before 0.3.3)
+Buf = Object clone {
+    items = [10, 20, 30]
+    getItem() { self }
+    peekAt(i) { items at(i) }
+    item(i) { self }
+    viaSelf() { self getItem peekAt(1) }
+    viaBare() { getItem peekAt(1) }
+    viaCall() { getItem() peekAt(1) }
+    chained() { item(0) item(1) peekAt(2) }
+}
+check("chain via self", Buf viaSelf, 20)
+check("chain via bare name", Buf viaBare, 20)
+check("chain via call", Buf viaCall, 20)
+check("chained calls", Buf chained, 30)
+
 // An unknown name inside a method is a message to self
 Lost = Object clone { go() { nosuch(1) } }
 r = try { Lost go } catch { |e| e type }

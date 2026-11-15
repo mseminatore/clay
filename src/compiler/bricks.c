@@ -32,6 +32,8 @@
 #define strdup _strdup
 #endif
 #include "bricks.h"
+#include "semver.h"
+#include "version.h"
 #include "cJSON.h"
 #ifdef _WIN32
 #include <io.h>
@@ -294,6 +296,8 @@ static int parse_manifest(const char *json, BrickManifest *m) {
             p = parse_string(p, m->name, sizeof(m->name));
         } else if (strcmp(key, "version") == 0) {
             p = parse_string(p, m->version, sizeof(m->version));
+        } else if (strcmp(key, "clay") == 0) {
+            p = parse_string(p, m->clay, sizeof(m->clay));
         } else if (strcmp(key, "description") == 0) {
             p = parse_string(p, m->description, sizeof(m->description));
         } else if (strcmp(key, "main") == 0) {
@@ -1014,6 +1018,21 @@ static const char *brick_locked_sha(const char *name, const char *url) {
 
 static int install_dep(const char *url, const char *name);
 
+/* Does this Clay satisfy the manifest's "clay" range? `who` names the brick
+ * in the error ("" for the project's own brick.json). */
+static int brick_clay_ok(const BrickManifest *m, const char *who) {
+    if (!m->clay[0]) return 1;
+    int r = semver_satisfies(CLAY_VERSION, m->clay);
+    if (r == 1) return 1;
+    if (r < 0)
+        fprintf(stderr, "%serror: %s%sbrick.json has an invalid \"clay\" version range '%s'\n",
+                who[0] ? "  " : "", who, who[0] ? "'s " : "", m->clay);
+    else
+        fprintf(stderr, "%serror: %s needs Clay %s, but this is Clay %s\n",
+                who[0] ? "  " : "", who[0] ? who : "this project", m->clay, CLAY_VERSION);
+    return 0;
+}
+
 /* Install the dependencies listed in <dir>/brick.json, if any */
 static int install_subdeps(const char *dir, const char *name) {
     char sub_manifest[BRICK_MAX_PATH];
@@ -1025,6 +1044,7 @@ static int install_subdeps(const char *dir, const char *name) {
         fprintf(stderr, "  error: invalid brick.json in %s\n", name);
         return -1;
     }
+    if (!brick_clay_ok(&sub, name)) return -1;
     int failed = 0;
     if (sub.dep_count > 0) {
         printf("  Installing dependencies of %s...\n", name);
@@ -1187,6 +1207,7 @@ static const char TPL_PURE_JSON[] =
     "{\n"
     "  \"name\": \"@NAME@\",\n"
     "  \"version\": \"0.1.0\",\n"
+    "  \"clay\": \">=@CLAY@\",\n"
     "  \"description\": \"TODO: what @NAME@ does, in one line\",\n"
     "  \"main\": \"src/main.clay\",\n"
     "  \"deps\": {}\n"
@@ -1196,6 +1217,7 @@ static const char TPL_NATIVE_JSON[] =
     "{\n"
     "  \"name\": \"@NAME@\",\n"
     "  \"version\": \"0.1.0\",\n"
+    "  \"clay\": \">=@CLAY@\",\n"
     "  \"description\": \"TODO: what @NAME@ does, in one line\",\n"
     "  \"main\": \"src/main.clay\",\n"
     "  \"deps\": {},\n"
@@ -1593,7 +1615,8 @@ static int brick_new_name_ok(const char *s) {
 
 /* a template with @NAME@, @CAMEL@ and @PLUGIN@ replaced (malloc'd) */
 static char *brick_fill(const char *tpl, const char *name, const char *camel, const char *plugin) {
-    size_t cap = strlen(tpl) + 1 + 64 * (strlen(name) + strlen(camel) + strlen(plugin));
+    size_t cap = strlen(tpl) + 1 + 64 * (strlen(name) + strlen(camel) + strlen(plugin) +
+                                         strlen(CLAY_VERSION));
     char *out = (char *)malloc(cap);
     if (!out) return NULL;
     size_t n = 0;
@@ -1603,6 +1626,7 @@ static char *brick_fill(const char *tpl, const char *name, const char *camel, co
         if (strncmp(c, "@NAME@", 6) == 0) { with = name; skip = 6; }
         else if (strncmp(c, "@CAMEL@", 7) == 0) { with = camel; skip = 7; }
         else if (strncmp(c, "@PLUGIN@", 8) == 0) { with = plugin; skip = 8; }
+        else if (strncmp(c, "@CLAY@", 6) == 0) { with = CLAY_VERSION; skip = 6; }   /* the "clay" range */
         else if (strncmp(c, "@D@", 3) == 0) { with = "$"; skip = 3; }      /* a dollar: Clay strings can't hold ${ */
         if (with) {
             size_t len = strlen(with);
@@ -1684,6 +1708,7 @@ static int cmd_install(void) {
         else fprintf(stderr, "error: brick.json is invalid\n");
         return 1;
     }
+    if (!brick_clay_ok(&m, "")) return 1;
     if (m.dep_count == 0) {
         printf("No dependencies to install.\n");
         return 0;

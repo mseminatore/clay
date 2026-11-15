@@ -338,6 +338,26 @@ ClayValue clay_send_owned(ClayValue receiver, const char *selector, int argc, Cl
     return own_result(clay_send_val(receiver, selector, argc, argv), receiver, argc, argv);
 }
 
+/* A bare name inside a method that resolves to self (generated C): the
+ * result of `self name`, owned. One walk by the nearest-definition rule
+ * (clay_lookup_nearest): a plain slot found first is returned directly; a
+ * method, a block slot (which runs) or a missing name takes the send. */
+ClayValue clay_self_get(ClayValue self, const char *name) {
+    if (CLAY_IS_OBJ(self) && self != CLAY_TRUE && self != CLAY_FALSE) {
+        for (ClayObject *cur = CLAY_OBJ(self); cur; cur = cur->parent) {
+            ht_value_t val;
+            if (cur->methods && ht_lookup(cur->methods, name, &val)) break;
+            if (!cur->slots || !ht_lookup(cur->slots, name, &val)) continue;
+            ClayValue v = (ClayValue)(uintptr_t)val;
+            if (!CLAY_IS_OBJ(v) || v == CLAY_TRUE || v == CLAY_FALSE) return v;
+            if (CLAY_OBJ(v)->type == CLAY_TYPE_BLOCK) break;
+            clay_retain(CLAY_OBJ(v));
+            return v;
+        }
+    }
+    return clay_send_owned(self, name, 0, NULL);
+}
+
 ClayValue clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
                                 const char *selector, int argc, ClayValue *argv) {
     return own_result(clay_send_super(receiver, defining_obj, selector, argc, argv),

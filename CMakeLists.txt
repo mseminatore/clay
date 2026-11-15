@@ -194,6 +194,7 @@ set(COMPILER_LIB_SOURCES
     src/compiler/codegen.c
     src/compiler/bc_compiler.c
     src/compiler/bricks.c
+    src/compiler/semver.c
     src/compiler/check.c
     src/compiler/native_bricks.c
     src/compiler/dap.c

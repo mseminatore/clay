@@ -667,6 +667,18 @@ CodeGen = Object clone {
         nil
     }
 
+    // a bare name that resolves to self: `self nm`, a send (a method runs, a
+    // slot is read), as the VM does (emit_self_send in codegen.c)
+    selfSend(t, nm) {
+        (self isBoxed("_method_self")) ifTrue {
+            self line("ClayValue " + t + " = clay_self_get(_method_self_cell->value, \"" + nm + "\");")
+        } ifFalse {
+            self line("ClayValue " + t + " = clay_self_get(CLAY_VAL(" + (self methodSelfExpr) + "), \"" + nm + "\");")
+        }
+        self pushOwnedTemp(t)
+        t
+    }
+
     ident(n) {
         nm = n name
         t = self tempName
@@ -678,12 +690,7 @@ CodeGen = Object clone {
         // a slot or method declared in the clone body wins over a top-level variable
         (inMethod && methodCtx && (self isKnownMember(nm)) && (self isFnLocal(nm)) == false &&
          (self isBoxed(nm)) == false) ifTrue {
-            (self isBoxed("_method_self")) ifTrue {
-                self line("ClayValue " + t + " = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"" + nm + "\");")
-            } ifFalse {
-                self line("ClayValue " + t + " = clay_get_slot(" + (self methodSelfExpr) + ", \"" + nm + "\");")
-            }
-            return t
+            return self selfSend(t, nm)
         }
         (self isBoxed(nm)) ifTrue {
             self line("ClayValue " + t + " = " + (self safe(nm)) + "_cell->value;")
@@ -698,12 +705,7 @@ CodeGen = Object clone {
             return t
         }
         inMethod ifTrue {
-            (self isBoxed("_method_self")) ifTrue {
-                self line("ClayValue " + t + " = clay_get_slot(CLAY_OBJ(_method_self_cell->value), \"" + nm + "\");")
-            } ifFalse {
-                self line("ClayValue " + t + " = clay_get_slot(" + (self methodSelfExpr) + ", \"" + nm + "\");")
-            }
-            return t
+            return self selfSend(t, nm)
         }
         self line("ClayValue " + t + " = " + (self safe(nm)) + ";")
         t
