@@ -1,9 +1,12 @@
 # Welcome to the Clay language
 [![CI](https://github.com/mseminatore/clay/actions/workflows/ci.yml/badge.svg)](https://github.com/mseminatore/clay/actions/workflows/ci.yml)
 
-Clay is a prototype-based, pure object-oriented programming language. Everything is an `Object`. Objects communicate via message passing. New objects are created by cloning existing ones and adding or modifying slots and methods.
+Clay is a prototype-based, pure object-oriented programming language. Like many pure OOP languages, everything is a descendant of `Object`. Objects communicate using message passing (message sends). Rather than defining static class hierarchies, new objects are created by cloning existing ones and adding or modifying slots (data members) and methods. 
 
-Clay programs run in an embedded bytecode VM, or compile to C for native executables.
+The Clay language borrows much of its syntax from Smalltalk. Particularly message sends, message chaining and blocks. But it is also influenced by Self, Io and elements of Ruby.
+
+Clay programs can run in an embedded bytecode VM, or compile to C for native executables.
+
 
 ```clay
 Animal = Object clone {
@@ -20,19 +23,25 @@ rex = Dog clone
 rex name = "Rex"
 rex speak                                    // Rex says Woof
 
-// Blocks are closures; collections take blocks
+// Blocks are closures (lambda functions)
 evens = (1..10) filter { |n| n % 2 == 0 }
+
+// Collections take blocks
 evens map { |n| n * n } println              // [4, 16, 36, 64, 100]
 
-// Errors are objects too
+// Definite loops
+5 times { |i| i println }                    // 1\n 2\n 3\n 4\n 5\n
+(1..5) each { |i| i println }                // 1\n 2\n 3\n 4\n 5\n
+
+// Error objects are raised and can be caught
 r = try { 10 / 0 } catch { |e| e type }
 r println                                    // DivisionByZero
 ```
 
-**Language Features:** 
-- message are sent to objects
+**Key Language Features:** 
+- messages are sent to objects
 - prototypes instead of classes
-- closures, fibers and threads
+- block closures, fibers and threads
 - standard library of bricks (JSON, CSV, HTTP
 server, ORM, templates, …)
 - a Git-based package manager
@@ -41,7 +50,7 @@ server, ORM, templates, …)
 
 ## Installing Clay
 
-Download the archive for your platform from the
+Download the right platform archive from the
 [releases page](https://github.com/mseminatore/clay/releases) (Linux x86_64 and arm64, macOS
 arm64, Windows x86_64), unpack it anywhere, and add its `bin` folder to your `PATH`:
 
@@ -53,12 +62,12 @@ clay --version
 ```
 
 The archive includes the standard library and web bricks, plus what `clay --compile` and native
-bricks link against (you supply the C compiler). [Getting started](docs/getting-started.md#installing)
+bricks link against (if you need to build native bricks you must have a C compiler). [Getting started](docs/getting-started.md#installing)
 covers which compiler to install, and the macOS and Windows download warnings.
 
 ## Building Clay
 
-Requires CMake 3.10+ and a C compiler. On Windows, Visual Studio is detected automatically.
+Requires CMake 3.10+ and a C compiler. On Windows, Visual Studio should be detected automatically.
 OpenSSL (HTTPS) and SDL2 (`Graphics`) are optional and picked up when installed.
 
 ```
@@ -69,8 +78,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-This produces `build/clay` (under `build/Debug/` with an `.exe` suffix on Windows and
-other multi-config generators).
+This produces `build/clay` (under `build/Debug/` as an `.exe` on Windows).
 
 ## Quick start
 
@@ -80,12 +88,13 @@ clay --compile hello.clay        # build a native executable ./hello
 clay                             # interactive REPL
 clay bricks install              # install dependencies from brick.json
 clay --version                   # the Clay version
-clay --help                      # all options
+clay --help                      # list all options
+clay bricks --help               # show brick subcommands
 ```
 
 ## Documentation
 
-The [Clay guide](docs/README.md) covers everything in detail:
+The [Clay guide](docs/README.md) covers a range of topics:
 
 - [Getting started](docs/getting-started.md) — building, a first program, the REPLs, example programs
 - [Language tour](docs/language-tour.md) — the syntax and object model
