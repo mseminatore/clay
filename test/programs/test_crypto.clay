@@ -40,6 +40,16 @@ T eq(r length, 32, "randomBytes length")
 T eq(Regex test(r, "^[0-9a-f]+$"), true, "randomBytes is hex")
 T eq(r == Crypto randomBytes(16), false, "randomBytes differ")
 T eq(try { Crypto randomBytes(0) } catch { |e| e type }, "ArgumentError", "randomBytes(0) raises")
+
+// Raw random bytes: a binary string of exactly n bytes
+b = Crypto randomByteString(8)
+T eq(b length, 8, "randomByteString length")
+T eq(b bytes size, 8, "randomByteString bytes size")
+T eq(((b bytes) filter { |x| x >= 0 && x <= 255 }) size, 8, "randomByteString bytes in range")
+T eq(Crypto randomByteString(32) == Crypto randomByteString(32), false, "randomByteString differ")
+T eq(Crypto randomByteString(65536) length, 65536, "randomByteString max")
+T eq(try { Crypto randomByteString(0) } catch { |e| e type }, "ArgumentError", "randomByteString(0) raises")
+T eq(try { Crypto randomByteString(65537) } catch { |e| e type }, "ArgumentError", "randomByteString too many raises")
 T eq(try { Crypto sha256(42) } catch { |e| e type }, "TypeError", "sha256 needs a string")
 
 T eq(Crypto constantTimeEquals("abc", "abc"), true, "constantTimeEquals same")

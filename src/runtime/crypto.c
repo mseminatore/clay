@@ -5,6 +5,7 @@
  *   Crypto sha1("hello")  Crypto md5("hello")
  *   Crypto hmacSha256("key", "data")  // hex
  *   Crypto randomBytes(16)            // 32 hex chars from the OS CSPRNG
+ *   Crypto randomByteString(8)        // 8 raw bytes as a binary string
  *   Crypto constantTimeEquals(a, b)   // compare secrets without timing leaks
  *
  * Pure C, no dependencies (promoted from examples/plugins/crypto_plugin.c).
@@ -395,25 +396,50 @@ static ClayValue crypto_hmac_sha256(ClayObject *self, int argc, ClayValue *argv)
 
 #define CRYPTO_MAX_RANDOM 65536
 
+/* n (1-65536) bytes from the OS CSPRNG in a malloc'd buffer; raises on a bad
+ * count or when no secure source is available. */
+static uint8_t *random_buffer(int argc, ClayValue *argv, const char *who, size_t *out_n) {
+    intptr_t n = clay_arg_integer(argc, argv, 0, who);
+    if (n <= 0 || n > CRYPTO_MAX_RANDOM)
+        clay_raise_argument_error(who, "count must be 1-65536");
+    uint8_t *buf = (uint8_t *)malloc((size_t)n);
+    if (!buf || secure_random(buf, (size_t)n) != 0) {
+        free(buf);
+        char msg[128];
+        snprintf(msg, sizeof msg, "%s: the system random number generator is unavailable", who);
+        clay_raise(CLAY_VAL(clay_error_new(msg, "RuntimeError")));
+        return NULL;
+    }
+    *out_n = (size_t)n;
+    return buf;
+}
+
+/* Crypto randomBytes(n) -> 2n lowercase hex characters */
 static ClayValue crypto_random_bytes(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
-    intptr_t n = clay_arg_integer(argc, argv, 0, "Crypto randomBytes");
-    if (n <= 0 || n > CRYPTO_MAX_RANDOM)
-        clay_raise_argument_error("Crypto randomBytes", "count must be 1-65536");
-    uint8_t *buf = (uint8_t *)malloc((size_t)n);
-    char *hex = (char *)malloc((size_t)n * 2 + 1);
-    if (!buf || !hex || secure_random(buf, (size_t)n) != 0) {
+    size_t n;
+    uint8_t *buf = random_buffer(argc, argv, "Crypto randomBytes", &n);
+    char *hex = (char *)malloc(n * 2 + 1);
+    if (!hex) {
         free(buf);
-        free(hex);
-        clay_raise(CLAY_VAL(clay_error_new(
-            "Crypto randomBytes: the system random number generator is unavailable",
-            "RuntimeError")));
+        clay_raise(CLAY_VAL(clay_error_new("Crypto randomBytes: out of memory", "RuntimeError")));
         return CLAY_NIL;
     }
-    bytes_to_hex(buf, (size_t)n, hex);
-    ClayValue result = CLAY_VAL(clay_string_new_len(hex, (size_t)n * 2));
+    bytes_to_hex(buf, n, hex);
+    ClayValue result = CLAY_VAL(clay_string_new_len(hex, n * 2));
     free(buf);
     free(hex);
+    return result;
+}
+
+/* Crypto randomByteString(n) -> a binary string of n raw random bytes
+ * (use `bytes` on it for an Array of integers 0-255) */
+static ClayValue crypto_random_byte_string(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    size_t n;
+    uint8_t *buf = random_buffer(argc, argv, "Crypto randomByteString", &n);
+    ClayValue result = CLAY_VAL(clay_string_new_len((const char *)buf, n));
+    free(buf);
     return result;
 }
 
@@ -436,5 +462,6 @@ void clay_crypto_init_methods(ClayObject *proto) {
     clay_set_method(proto, "md5",                crypto_md5);
     clay_set_method(proto, "hmacSha256",         crypto_hmac_sha256);
     clay_set_method(proto, "randomBytes",        crypto_random_bytes);
+    clay_set_method(proto, "randomByteString",   crypto_random_byte_string);
     clay_set_method(proto, "constantTimeEquals", crypto_constant_time_equals);
 }

@@ -22,7 +22,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Date | `now()`, `nowMillis()` (integer milliseconds since 1970), `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |
 | Regex | `match(str, pattern)`, `test(str, pattern)`, `replace(str, pattern, sub)`, `find(str, pattern)` |
-| Crypto | `sha256(str)`, `sha1(str)`, `md5(str)`, `hmacSha256(key, data)` (hex digests), `randomBytes(n)` (hex, from the OS), `constantTimeEquals(a, b)` |
+| Crypto | `sha256(str)`, `sha1(str)`, `md5(str)`, `hmacSha256(key, data)` (hex digests), `randomBytes(n)` (hex, from the OS), `randomByteString(n)` (raw bytes), `constantTimeEquals(a, b)` |
 | Process | `run(cmd, options)` → `stdout`, `stderr`, `exitCode`, `ok`; `stream(cmd, options) { \|line\| ... }` → exit code. `cmd` is an argv array, or a string with `#{"shell": true}`; options `shell`, `cwd`, `input` |
 | Fiber | `new(block)`, `resume()`, `isDone()`, `yield(value)` |
 | Db | `open(path)`, `exec(sql)`, `query(sql)`, `close()`, `escape(str)`, `lastInsertId()` |
@@ -257,13 +257,15 @@ Supports ERE (Extended Regular Expressions): `.`, `^`, `$`, `*`, `+`, `?`, `[...
 Crypto sha256("hello")       // "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 Crypto hmacSha256("secret", "message")   // hex HMAC-SHA256, e.g. to sign a cookie
 Crypto randomBytes(16)       // 32 hex characters: a session token, salt or nonce
+Crypto randomByteString(8)   // 8 raw bytes as a binary string, e.g. for a packet
+(Crypto randomByteString(8)) bytes   // the same as an Array of integers 0-255
 
 // Compare a received signature without leaking timing information
 sig = Crypto hmacSha256("secret", "message")
 Crypto constantTimeEquals(sig, Crypto hmacSha256("secret", "message"))   // true
 ```
 
-Digests are lowercase hex strings. `randomBytes` reads the operating system's secure random
+Digests are lowercase hex strings. `randomBytes` and `randomByteString` (1-65536 bytes) read the operating system's secure random
 number generator (`/dev/urandom`, or `BCryptGenRandom` on Windows) and raises `RuntimeError` if it
 is unavailable rather than falling back to a weaker source. `sha1` and `md5` are for checksums and
 older protocols; use `sha256` for anything security-related. Base64 lives in the standard library
