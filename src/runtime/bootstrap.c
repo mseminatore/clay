@@ -120,7 +120,7 @@ static ClayValue object_doesNotUnderstand(ClayObject *self, int argc, ClayValue 
 }
 
 /* The name `type` reports for an object: String, Array, ..., or the _name of a
- * user prototype, else Object. The pointer is valid while the object is alive. */
+ * user or plugin prototype, else Object. The pointer is valid while the object is alive. */
 const char *clay_type_name(ClayObject *self) {
     const char *name;
     if (self == &clay_true_obj || self == &clay_false_obj) {
@@ -136,7 +136,8 @@ const char *clay_type_name(ClayObject *self) {
             default:
                 /* Tagged ints are wrapped with parent=clay_Number */
                 if (self->parent == clay_Number) name = "Number";
-                else if (self->parent == clay_Error || self->type == CLAY_TYPE_OBJECT) {
+                else if (self->parent == clay_Error || self->type == CLAY_TYPE_OBJECT ||
+                         self->type == CLAY_TYPE_PLUGIN) {
                     /* Check if it's an Error by walking parent chain */
                     ClayObject *p = self->parent;
                     name = "Object";

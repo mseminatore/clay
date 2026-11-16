@@ -5,3 +5,8 @@ Stats = Object clone {
     doubled(xs, cols = 0) { StatsNative scale(xs, cols) }
     accumulator() { StatsAcc new }
 }
+
+// a Clay wrapper cloned from a plugin prototype, as `Image = ImageCore clone`
+Tally = StatsAcc clone {
+    meanOf(xs) { (self new add(xs)) mean }
+}

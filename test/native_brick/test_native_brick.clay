@@ -27,4 +27,11 @@ check value("make_bytes keeps NUL bytes", StatsNative reverseBytes(zeros), (Stri
 check value("every byte value crosses", (StatsNative counting(256)) bytes, (0..255) toArray)
 check value("an empty string crosses", StatsNative byteCount(""), 0)
 check value("to_bytes refuses a non-string", (try { StatsNative byteCount(5) } catch { |e| e type }), "ArgumentError")
+// type: a plugin object is named after its prototype, or the wrapper cloned from it
+check value("plugin prototype type", StatsAcc type, "StatsAcc")
+check value("plugin object type", Stats accumulator type, "StatsAcc")
+check value("plain plugin prototype type", StatsNative type, "StatsNative")
+check value("wrapper prototype type", Tally type, "Tally")
+check value("wrapper object type", Tally new type, "Tally")
+check value("wrapper keeps the C methods", Tally meanOf(4), 4)
 "native brick ok" println

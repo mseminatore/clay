@@ -11,8 +11,9 @@
  *
  *   static const ClayPluginAPI *api;
  *
- *   static ClayPluginValue my_sqrt(ClayPluginValue self, int argc, ClayPluginValue *argv) {
- *       (void)self;
+ *   static ClayPluginValue my_sqrt(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+ *       CLAY_UNUSED(self);
+ *       if (argc < 1) { api->raise("sqrt needs a number", "ArgumentError"); return CLAY_NIL; }
  *       float val = api->to_float(argv[0]);
  *       return api->make_float(sqrtf(val));
  *   }
@@ -38,6 +39,10 @@
  * fields: if (api->api_version >= 2) ... (version 1 had no api_version
  * field; Clay always passes a table of the current version).
  *
+ * Type names: `x type` on a plugin object is the name of the prototype it was
+ * cloned from (ClayPluginType.name, or the variable a Clay wrapper assigns it
+ * to, as in `Image = ImageCore clone { ... }`).
+ *
  * Ownership: make_* and the returned values of send/array_new/from_floats
  * are new references. Return one from a method, or release it. Arguments
  * and array_get results are borrowed: retain them to keep them.
@@ -55,6 +60,18 @@ extern "C" {
 /* Opaque handle types — plugins don't need Clay internals */
 typedef uintptr_t ClayPluginValue;
 typedef void*     ClayPluginObject;
+
+/* nil, e.g. `return CLAY_NIL;` after api->raise (raise does not return, but the
+ * compiler needs a return value) or from a method with no result. It is the
+ * same value as api->make_nil(). */
+#ifndef CLAY_NIL
+#define CLAY_NIL ((ClayPluginValue)0)
+#endif
+
+/* Mark a parameter a method does not use: CLAY_UNUSED(argc); */
+#ifndef CLAY_UNUSED
+#define CLAY_UNUSED(x) ((void)(x))
+#endif
 
 /* Method function signature */
 typedef ClayPluginValue (*ClayPluginMethodFunc)(

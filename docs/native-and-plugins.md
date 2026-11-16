@@ -103,8 +103,8 @@ and appear in Clay as ordinary objects:
 static const ClayPluginAPI *api;
 
 static ClayPluginValue mathex_sqrt(ClayPluginObject self, int argc, ClayPluginValue *argv) {
-    (void)self;
-    if (argc < 1) { api->raise("sqrt requires 1 argument", "ArgumentError"); return 0; }
+    CLAY_UNUSED(self);
+    if (argc < 1) { api->raise("sqrt requires 1 argument", "ArgumentError"); return CLAY_NIL; }
     return api->make_float(sqrtf(api->to_float(argv[0])));
 }
 
@@ -175,6 +175,12 @@ for anything that isn't text: socket data, files, images, compressed data. Check
 A C struct per object: register the type with a `free_fn`, `clone` the
 prototype in a constructor method, `set_data` the struct on the clone, and
 `get_data` it in the other methods; `free_fn` runs when the object is freed.
+
+`CLAY_NIL` is nil (a method's "no result", and the return after `api->raise`,
+which doesn't return), and `CLAY_UNUSED(x)` marks a parameter a method ignores.
+`type` on a plugin object is its prototype's name: the `ClayPluginType` name, or
+the name of a Clay wrapper cloned from it (`Image = ImageCore clone { ... }`
+makes `Image open(path) type` say `Image`).
 
 ## Native bricks
 

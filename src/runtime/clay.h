@@ -206,8 +206,10 @@ struct ClayObject {
 #define CLAY_OBJ(v)     ((ClayObject*)(v))
 #define CLAY_VAL(obj)   ((ClayValue)(uintptr_t)(obj))
 
-/* Nil value */
+/* Nil value (clay_plugin.h defines the same value for plugins) */
+#ifndef CLAY_NIL
 #define CLAY_NIL        ((ClayValue)0)
+#endif
 #define CLAY_IS_NIL(v)  ((v) == CLAY_NIL)
 
 /* True only for a real heap object (not nil, not a tagged int/float) — check

@@ -81,7 +81,7 @@ typedef struct { double total; long count; } Acc;
 static void acc_free(void *data) { free(data); }
 
 static ClayPluginValue acc_new(ClayPluginObject self, int argc, ClayPluginValue *argv) {
-    (void)argc; (void)argv;
+    CLAY_UNUSED(argc); CLAY_UNUSED(argv);
     ClayPluginObject obj = api->clone(self);
     api->set_data(obj, calloc(1, sizeof(Acc)));
     return (ClayPluginValue)obj;
@@ -89,7 +89,7 @@ static ClayPluginValue acc_new(ClayPluginObject self, int argc, ClayPluginValue 
 
 static ClayPluginValue acc_add(ClayPluginObject self, int argc, ClayPluginValue *argv) {
     Acc *a = (Acc *)api->get_data(self);
-    if (!a) { api->raise("use StatsAcc new", "RuntimeError"); return 0; }
+    if (!a) { api->raise("use StatsAcc new", "RuntimeError"); return CLAY_NIL; }
     for (int i = 0; i < argc; i++) { a->total += api->to_float(argv[i]); a->count++; }
     return (ClayPluginValue)self;
 }
