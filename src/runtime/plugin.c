@@ -332,6 +332,43 @@ static const char *api_to_bytes(ClayPluginValue v, size_t *len) {
     return NULL;
 }
 
+/* --- version 5 --- */
+
+static int api_is_dict(ClayPluginValue v) {
+    return CLAY_IS_TYPE((ClayValue)v, CLAY_TYPE_DICT);
+}
+
+static ClayPluginValue api_dict_new(void) {
+    return (ClayPluginValue)CLAY_VAL(clay_dict_new());
+}
+
+static void api_dict_set(ClayPluginValue d, const char *key, ClayPluginValue v) {
+    if (api_is_dict(d) && key) clay_dict_set(CLAY_OBJ((ClayValue)d), key, (ClayValue)v);
+}
+
+static ClayPluginValue api_dict_get(ClayPluginValue d, const char *key) {
+    if (!api_is_dict(d) || !key) return (ClayPluginValue)CLAY_NIL;
+    return (ClayPluginValue)clay_dict_get(CLAY_OBJ((ClayValue)d), key);
+}
+
+static int api_dict_has(ClayPluginValue d, const char *key) {
+    return api_is_dict(d) && key && clay_dict_has(CLAY_OBJ((ClayValue)d), key);
+}
+
+static size_t api_dict_size(ClayPluginValue d) {
+    return api_is_dict(d) ? clay_dict_size(CLAY_OBJ((ClayValue)d)) : 0;
+}
+
+static int api_dict_next(ClayPluginValue d, size_t *pos, const char **key, ClayPluginValue *v) {
+    if (!api_is_dict(d) || !pos) return 0;
+    const char *k = NULL;
+    ClayValue cv = CLAY_NIL;
+    if (!clay_dict_next(CLAY_OBJ((ClayValue)d), pos, &k, &cv)) return 0;
+    if (key) *key = k;
+    if (v) *v = (ClayPluginValue)cv;
+    return 1;
+}
+
 /* The global API vtable — single instance */
 static const ClayPluginAPI g_plugin_api = {
     .register_type    = api_register_type,
@@ -368,6 +405,13 @@ static const ClayPluginAPI g_plugin_api = {
     .write_output     = api_write_output,
     .make_bytes       = api_make_bytes,
     .to_bytes         = api_to_bytes,
+    .is_dict          = api_is_dict,
+    .dict_new         = api_dict_new,
+    .dict_set         = api_dict_set,
+    .dict_get         = api_dict_get,
+    .dict_has         = api_dict_has,
+    .dict_size        = api_dict_size,
+    .dict_next        = api_dict_next,
 };
 
 /* ------------------------------------------------------------------ */

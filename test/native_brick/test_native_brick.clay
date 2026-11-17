@@ -5,7 +5,7 @@ check = { |what, got, want|
     (got == want) ifFalse { raise("FAIL: " + what + ": " + got toString + " != " + want toString) }
 }
 
-check value("plugin API version", StatsNative apiVersion, 4)
+check value("plugin API version", StatsNative apiVersion, 5)
 check value("cflags for this platform only", StatsNative os, ((System platform) == "macos") ifTrue { 1 } ifFalse { ((System platform) == "linux") ifTrue { 2 } ifFalse { 3 } })
 check value("-I@/ is a directory in the brick", StatsNative extra, 7)
 check value("sum", Stats sum([1, 2, 3.5]), 6.5)
@@ -27,6 +27,23 @@ check value("make_bytes keeps NUL bytes", StatsNative reverseBytes(zeros), (Stri
 check value("every byte value crosses", (StatsNative counting(256)) bytes, (0..255) toArray)
 check value("an empty string crosses", StatsNative byteCount(""), 0)
 check value("to_bytes refuses a non-string", (try { StatsNative byteCount(5) } catch { |e| e type }), "ArgumentError")
+// API version 5: dicts
+sm = StatsNative summary([1, 2, 3])
+check value("dict_new makes a Dict", sm type, "Dict")
+check value("dict_set values", [sm get("count"), sm get("sum"), sm get("name")], [30, 6, "stats"])
+check value("dict_set replacing keeps the order", sm keys, ["count", "sum", "name"])
+d = Dict new
+d set("b", 2)
+d set("a", nil)
+d set("c", [1, 2])
+check value("dict_next walks in order", StatsNative dictKeys(d), ["b", "a", "c"])
+check value("dict_size, dict_has, dict_get", StatsNative dictLookup(d, "c"), [3, true, [1, 2]])
+check value("a key can hold nil", StatsNative dictLookup(d, "a"), [4, true, nil])
+check value("dict_set writes the caller's Dict", d get("seen"), true)
+check value("a missing key", StatsNative dictLookup(d, "zz"), [4, false, nil])
+check value("a non-Dict", StatsNative dictLookup([1], "a"), [0, false, nil])
+check value("dictKeys refuses a non-Dict", (try { StatsNative dictKeys(5) } catch { |e| e type }), "ArgumentError")
+
 // type: a plugin object is named after its prototype, or the wrapper cloned from it
 check value("plugin prototype type", StatsAcc type, "StatsAcc")
 check value("plugin object type", Stats accumulator type, "StatsAcc")

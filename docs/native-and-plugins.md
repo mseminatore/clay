@@ -172,6 +172,31 @@ NUL bytes, but `make_string` and `to_string` work with C strings and stop at the
 for anything that isn't text: socket data, files, images, compressed data. Check
 `api->api_version >= 4` first.
 
+### Plugin API version 5
+
+Version 5 (Clay 0.3.5) adds Dicts, whose keys are strings and keep the order
+they were added in:
+
+- `dict_new()` makes an empty Dict (a new reference);
+- `dict_set(d, key, v)` stores `v` under `key`, retaining `v` and copying the key;
+- `dict_get(d, key)` returns the value, borrowed, or nil if the key is missing;
+  `dict_has(d, key)` tells a missing key from one that holds nil;
+- `dict_size(d)` counts the entries, and `dict_next(d, &pos, &key, &v)` walks
+  them: start with `pos` 0; each call sets `key` and `v` (borrowed) and returns
+  1, or returns 0 after the last entry;
+- `is_dict(v)` checks a value first; the others ignore a value that isn't a Dict.
+
+```c
+ClayPluginValue info = api->dict_new();
+api->dict_set(info, "width", api->make_int(w));
+ClayPluginValue fmt = api->make_string("png");
+api->dict_set(info, "format", fmt);
+api->release(fmt);        /* dict_set retained it */
+return info;              /* Clay sees {"width": ..., "format": "png"} */
+```
+
+Check `api->api_version >= 5` first.
+
 A C struct per object: register the type with a `free_fn`, `clone` the
 prototype in a constructor method, `set_data` the struct on the clone, and
 `get_data` it in the other methods; `free_fn` runs when the object is freed.

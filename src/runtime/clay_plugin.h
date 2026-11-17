@@ -43,9 +43,10 @@
  * cloned from (ClayPluginType.name, or the variable a Clay wrapper assigns it
  * to, as in `Image = ImageCore clone { ... }`).
  *
- * Ownership: make_* and the returned values of send/array_new/from_floats
- * are new references. Return one from a method, or release it. Arguments
- * and array_get results are borrowed: retain them to keep them.
+ * Ownership: make_* and the returned values of send/array_new/from_floats/
+ * dict_new are new references. Return one from a method, or release it.
+ * Arguments and array_get/dict_get/dict_next results are borrowed: retain
+ * them to keep them.
  */
 #ifndef CLAY_PLUGIN_H
 #define CLAY_PLUGIN_H
@@ -175,9 +176,29 @@ typedef struct ClayPluginAPI {
      * Use them for anything that is not text: socket data, files, images. */
     ClayPluginValue (*make_bytes)(const void *data, size_t len);
     const char *    (*to_bytes)(ClayPluginValue v, size_t *len);
+
+    /* ---- version 5 ---- */
+
+    /* Dicts (string keys, kept in insertion order):
+     *   dict_new returns a new, empty Dict (a new reference);
+     *   dict_set stores v under key (retains v; the key is copied);
+     *   dict_get returns the value under key, borrowed, or nil if missing;
+     *   dict_has says whether key is present (a key can hold nil);
+     *   dict_next walks the entries: start with *pos = 0, and each call
+     *     sets *key and *v (both borrowed) and returns 1, or 0 at the end.
+     * On a value that is not a Dict, dict_set does nothing, dict_get returns
+     * nil, and dict_has, dict_size and dict_next return 0. */
+    int             (*is_dict)(ClayPluginValue v);
+    ClayPluginValue (*dict_new)(void);
+    void            (*dict_set)(ClayPluginValue d, const char *key, ClayPluginValue v);
+    ClayPluginValue (*dict_get)(ClayPluginValue d, const char *key);
+    int             (*dict_has)(ClayPluginValue d, const char *key);
+    size_t          (*dict_size)(ClayPluginValue d);
+    int             (*dict_next)(ClayPluginValue d, size_t *pos,
+                                 const char **key, ClayPluginValue *v);
 } ClayPluginAPI;
 
-#define CLAY_PLUGIN_API_VERSION 4
+#define CLAY_PLUGIN_API_VERSION 5
 
 /* Plugin entry point signature */
 typedef void (*ClayPluginInitFunc)(const ClayPluginAPI *api);

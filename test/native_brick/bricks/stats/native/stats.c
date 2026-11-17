@@ -1,6 +1,6 @@
-/* stats.c - a native brick test fixture: exercises plugin API version 2
+/* stats.c - a native brick test fixture: exercises plugin API versions 2-5
  * (arrays and float buffers in and out, native data with a free function,
- * errors) and a brick cflag (STATS_SCALE). */
+ * errors, binary strings, dicts) and a brick cflag (STATS_SCALE). */
 #include "clay_plugin.h"
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +75,54 @@ static ClayPluginValue stats_counting(ClayPluginObject self, int argc, ClayPlugi
     return result;
 }
 
+/* StatsNative summary(array): a new Dict {count, sum, name} (API version 5) */
+static ClayPluginValue stats_summary(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self);
+    if (argc < 1 || !api->is_array(argv[0])) { api->raise("summary needs an Array", "ArgumentError"); return CLAY_NIL; }
+    size_t n = api->to_floats(argv[0], NULL, 0);
+    float *buf = (float *)malloc((n ? n : 1) * sizeof(float));
+    api->to_floats(argv[0], buf, n);
+    float total = 0;
+    for (size_t i = 0; i < n; i++) total += buf[i];
+    free(buf);
+    ClayPluginValue d = api->dict_new();
+    api->dict_set(d, "count", api->make_int((intptr_t)n));
+    api->dict_set(d, "sum", api->make_float(total));
+    ClayPluginValue name = api->make_string("stats");
+    api->dict_set(d, "name", name);   /* dict_set retains, so drop ours */
+    api->release(name);
+    api->dict_set(d, "count", api->make_int((intptr_t)n * 10));  /* replace keeps its place */
+    return d;
+}
+
+/* StatsNative dictKeys(d): the keys in order, read with dict_next */
+static ClayPluginValue stats_dict_keys(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self);
+    if (argc < 1 || !api->is_dict(argv[0])) { api->raise("dictKeys needs a Dict", "ArgumentError"); return CLAY_NIL; }
+    ClayPluginValue keys = api->array_new();
+    size_t pos = 0;
+    const char *key;
+    ClayPluginValue v;
+    while (api->dict_next(argv[0], &pos, &key, &v)) {
+        ClayPluginValue k = api->make_string(key);
+        api->array_push(keys, k);
+        api->release(k);
+    }
+    return keys;
+}
+
+/* StatsNative dictLookup(d, key): [size, has, value] -- also on a non-Dict */
+static ClayPluginValue stats_dict_lookup(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self); CLAY_UNUSED(argc);
+    const char *key = api->to_string(argv[1]);
+    ClayPluginValue out = api->array_new();
+    api->array_push(out, api->make_int((intptr_t)api->dict_size(argv[0])));
+    api->array_push(out, api->make_bool(api->dict_has(argv[0], key)));
+    api->array_push(out, api->dict_get(argv[0], key));   /* borrowed: push retains */
+    api->dict_set(argv[0], "seen", api->make_bool(1));    /* no-op on a non-Dict */
+    return out;
+}
+
 /* An accumulator object holding a C struct */
 typedef struct { double total; long count; } Acc;
 
@@ -117,7 +165,8 @@ static ClayPluginValue stats_extra(ClayPluginObject self, int argc, ClayPluginVa
 
 static ClayPluginMethod stats_methods[] = {
     { "os", stats_os }, { "extra", stats_extra }, { "sum", stats_sum }, { "scale", stats_scale }, { "apiVersion", stats_version },
-    { "reverseBytes", stats_reverse_bytes }, { "byteCount", stats_byte_count }, { "counting", stats_counting }, { NULL, NULL }
+    { "reverseBytes", stats_reverse_bytes }, { "byteCount", stats_byte_count }, { "counting", stats_counting },
+    { "summary", stats_summary }, { "dictKeys", stats_dict_keys }, { "dictLookup", stats_dict_lookup }, { NULL, NULL }
 };
 static ClayPluginMethod acc_methods[] = {
     { "new", acc_new }, { "add", acc_add }, { "mean", acc_mean }, { NULL, NULL }
