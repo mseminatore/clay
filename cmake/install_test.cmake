@@ -123,9 +123,9 @@ run_exe("${WORK}/prog_native${exe_suffix}" "installed json\n\\[1, ?2\\]\nRouter"
 
 # 7. a native brick: its plugin built on first use (VM), and linked by --compile
 run_in("${WORK}" "" "bricks new --native" bricks new nat-kit --native)
-run_in("${WORK}/nat-kit" "nat-kit tests passed" "a native brick on the VM" tests/test_nat_kit.clay)
+run_in("${WORK}/nat-kit" "6 tests, 6 passed, 0 failed" "a native brick on the VM" tests/test_nat_kit.clay)
 run_in("${WORK}/nat-kit" "built" "--compile of a native brick"
        --compile -o "${WORK}/nat_kit_native${exe_suffix}" tests/test_nat_kit.clay)
-run_exe("${WORK}/nat_kit_native${exe_suffix}" "nat-kit tests passed" "the compiled native brick")
+run_exe("${WORK}/nat_kit_native${exe_suffix}" "6 tests, 6 passed, 0 failed" "the compiled native brick")
 
 message(STATUS "install_test: ok (${prefix})")

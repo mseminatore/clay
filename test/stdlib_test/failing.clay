@@ -1,0 +1,18 @@
+// stdlib/test with failing tests: the output (no color: not a terminal) and
+// the exit status 1 are checked by clay_stdlib_test_failing
+import("stdlib/test")
+
+Test describe("Math") {
+    Test it("adds") { Test assertEqual(1 + 1, 2) }
+    Test it("subtracts") { Test assertEqual(5 - 3, 3) }
+    Test describe("Division") {
+        Test it("divides by zero") { 1 / 0 }
+    }
+}
+Test it("top level") { Test assertTrue(nil) }
+Test describe("Broken") {
+    raise("not inside an it")
+}
+
+Test run
+"not reached" println

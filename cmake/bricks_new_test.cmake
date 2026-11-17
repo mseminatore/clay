@@ -38,7 +38,7 @@ foreach(want "runs-on: \${{ matrix.os }}" "ref: \${{ env.CLAY_REF }}" "CLAY_REF:
     endif()
 endforeach()
 run_ok("the tests of demo-kit" "${WORK}/demo-kit" "${CLAY}" tests/test_demo_kit.clay)
-if(NOT last_output MATCHES "demo-kit tests passed")
+if(NOT last_output MATCHES "1 test, 1 passed, 0 failed")
     message(FATAL_ERROR "demo-kit tests did not report success:\n${last_output}")
 endif()
 
@@ -50,7 +50,7 @@ foreach(f brick.json src/main.clay native/nat_kit.c tests/test_nat_kit.clay READ
     endif()
 endforeach()
 run_ok("the tests of nat-kit" "${WORK}/nat-kit" "${CLAY}" tests/test_nat_kit.clay)
-if(NOT last_output MATCHES "nat-kit tests passed")
+if(NOT last_output MATCHES "6 tests, 6 passed, 0 failed")
     message(FATAL_ERROR "nat-kit tests did not report success:\n${last_output}")
 endif()
 
@@ -59,7 +59,7 @@ set(exe "${WORK}/nat-kit/tests/nat_kit_test${CMAKE_EXECUTABLE_SUFFIX}")
 run_ok("clay --compile of the nat-kit tests" "${WORK}/nat-kit"
        "${CLAY}" --compile -o "${exe}" tests/test_nat_kit.clay)
 run_ok("the compiled nat-kit tests" "${WORK}/nat-kit" "${exe}")
-if(NOT last_output MATCHES "nat-kit tests passed")
+if(NOT last_output MATCHES "6 tests, 6 passed, 0 failed")
     message(FATAL_ERROR "compiled nat-kit tests did not report success:\n${last_output}")
 endif()
 

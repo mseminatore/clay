@@ -153,7 +153,10 @@ This makes a folder with a `brick.json`, a `src/main.clay` to fill in, a test, a
 `.gitignore` and a GitHub Actions workflow; `--native` adds `native/my_brick.c`, a small working plugin (a counter
 object with a C struct, a method that raises, and the `<name>_plugin_init` entry point),
 and the matching `native` section in `brick.json`. The tests pass as generated, so you
-start from something that works. A name is lowercase letters, digits and `-` and starts
+start from something that works. They use `stdlib/test`, which comes with Clay
+(`Test describe`, `Test it`, `assertEqual`, `assertRaises(block, "ArgumentError")`, ...;
+see its [README](../lib/stdlib/test/README.md)); `Test run` prints a summary and exits with
+status 1 when a test fails, which is what the workflow below checks. A name is lowercase letters, digits and `-` and starts
 with a letter, as the registry requires; the C identifier is the name with `-` as `_`.
 
 The workflow, `.github/workflows/test.yml`, runs the brick's `tests/test_*.clay` on Linux, macOS

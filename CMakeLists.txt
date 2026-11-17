@@ -458,6 +458,7 @@ add_test(NAME clay_test_dict_order COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_
 add_test(NAME clay_test_fs COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fs.clay)
 add_test(NAME clay_test_process COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_process.clay)
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)
+add_test(NAME clay_test_stdlib_test COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_stdlib_test.clay)
 add_test(NAME clay_test_new_methods COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_new_methods.clay)
 add_test(NAME clay_test_trailing_blocks COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_trailing_blocks.clay)
 add_test(NAME clay_test_return COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_return.clay)
@@ -683,6 +684,23 @@ foreach(err undefined_variable undefined_in_import)
     set_tests_properties(clay_error_${err} clay_error_${err}_native PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
+
+# stdlib/test with failing tests: the report (no color, since output is not a
+# terminal) and a non-zero exit, in the VM and native
+add_test(NAME clay_stdlib_test_failing
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DSRC=test/stdlib_test/failing.clay -DEXPECT_FAIL=1
+             -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/stdlib_test/failing.out
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_output.cmake)
+add_test(NAME clay_stdlib_test_failing_native
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DSRC=test/stdlib_test/failing.clay -DEXPECT_FAIL=1
+             -DOUT=${CMAKE_CURRENT_BINARY_DIR}/native_tests/stdlib_test_failing${CMAKE_EXECUTABLE_SUFFIX}
+             -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/test/stdlib_test/failing.out
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/native_test.cmake)
+set_tests_properties(clay_stdlib_test_failing clay_stdlib_test_failing_native PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(clay_stdlib_test_failing_native PROPERTIES LABELS "native")
 
 # Runtime errors: a program that ends with an uncaught error prints exactly
 # test/errors/<name>.out (the error and its traceback), in the VM and native

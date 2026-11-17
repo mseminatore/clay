@@ -1,0 +1,48 @@
+// stdlib/test: a passing suite (exit 0 is the test) that also checks the
+// asserts themselves. test/stdlib_test/failing.clay checks failure reporting
+// and the non-zero exit.
+import("stdlib/test")
+
+Test describe("asserts that pass") {
+    Test it("assertEqual") { Test assertEqual(1 + 1, 2) }
+    Test it("assertNotEqual") { Test assertNotEqual("a", "b") }
+    Test it("assertTrue") { Test assertTrue(3 > 1) }
+    Test it("assertFalse") { Test assertFalse(1 > 3) }
+    Test it("assertRaises, any error") { Test assertRaises({ 1 / 0 }) }
+    Test it("assertRaises, by type") { Test assertRaises({ 1 / 0 }, "DivisionByZero") }
+    Test it("assertRaises returns the error") {
+        Test assertEqual((Test assertRaises({ raise("boom") })) message, "boom")
+    }
+}
+
+Test describe("asserts that fail") {
+    Test it("assertEqual") {
+        e = Test assertRaises({ Test assertEqual(1, 2) })
+        Test assertEqual(e message, "expected 2 but got 1")
+    }
+    Test it("assertEqual quotes strings") {
+        e = Test assertRaises({ Test assertEqual(1, "1") })
+        Test assertEqual(e message, "expected \"1\" but got 1")
+    }
+    Test it("assertNotEqual") { Test assertRaises({ Test assertNotEqual(1, 1) }) }
+    Test it("assertTrue rejects nil") { Test assertRaises({ Test assertTrue(nil) }) }
+    Test it("assertTrue rejects a truthy non-boolean") { Test assertRaises({ Test assertTrue(1) }) }
+    Test it("assertFalse rejects nil") { Test assertRaises({ Test assertFalse(nil) }) }
+    Test it("assertRaises with no error") {
+        e = Test assertRaises({ Test assertRaises({ 1 }) })
+        Test assertEqual(e message, "expected an error but none was raised")
+    }
+    Test it("assertRaises with the wrong type") {
+        e = Test assertRaises({ Test assertRaises({ 1 / 0 }, "TypeError") })
+        Test assertEqual(e message, "expected TypeError but got DivisionByZero: division by zero")
+    }
+}
+
+Test describe("outer") {
+    Test describe("inner") {
+        Test it("nests") { Test assertTrue(true) }
+    }
+    Test it("restores the suite name") { Test assertEqual(Test _suite, "outer") }
+}
+
+Test run
