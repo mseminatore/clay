@@ -29,5 +29,6 @@ void    parser_free_imports(Parser *parser);
 /* The directory of bundled bricks (lib/stdlib, lib/web, ...) that brick
  * imports fall back to after every bricks/ directory; NULL or "" for none. */
 void    parser_set_lib_dir(const char *dir);
+const char *parser_lib_dir(void);  /* "" if unknown */
 
 #endif /* CLAY_PARSER_H */

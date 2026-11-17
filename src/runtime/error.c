@@ -34,6 +34,39 @@ const char *clay_intern_file(const char *path) {
     return found;
 }
 
+/* Where the bundled bricks live (lib/), so tracebacks can show their files
+ * as "stdlib/test/src/main.clay" instead of a long absolute path. Set by
+ * clay's driver, and by a compiled program that uses a bundled brick. */
+static char *g_lib_dir = NULL;
+
+void clay_set_lib_dir(const char *dir) {
+    free(g_lib_dir);
+    g_lib_dir = NULL;
+    if (!dir || !dir[0]) return;
+    g_lib_dir = strdup(dir);
+}
+
+/* The rest of path after dir and its separator, or NULL if path is not
+ * inside dir ('/' and '\\' count as the same) */
+const char *clay_path_under(const char *dir, const char *path) {
+    if (!dir || !dir[0] || !path) return NULL;
+    size_t n = strlen(dir);
+    while (n > 1 && (dir[n - 1] == '/' || dir[n - 1] == '\\')) n--;
+    const char *p = path;
+    for (size_t i = 0; i < n; i++, p++) {
+        int ds = (dir[i] == '/' || dir[i] == '\\'), ps = (*p == '/' || *p == '\\');
+        if (ds ? !ps : dir[i] != *p) return NULL;
+    }
+    if (*p != '/' && *p != '\\') return NULL;
+    while (*p == '/' || *p == '\\') p++;
+    return *p ? p : NULL;
+}
+
+const char *clay_display_file(const char *path) {
+    const char *rest = clay_path_under(g_lib_dir, path);
+    return rest ? rest : path;
+}
+
 /* Output hook for DAP */
 void (*clay_output_fn)(const char *text) = NULL;
 
@@ -54,7 +87,7 @@ static size_t trace_line(char *buf, size_t cap, size_t pos, const char *file, in
     else if (in->kind == CLAY_FRAME_BLOCK) snprintf(what, sizeof(what), "in block");
     else snprintf(what, sizeof(what), "in %s", in->selector ? in->selector : "?");
     if (file && line > 0)
-        pos += (size_t)snprintf(buf + pos, cap - pos, "  at %s:%d %s\n", file, line, what);
+        pos += (size_t)snprintf(buf + pos, cap - pos, "  at %s:%d %s\n", clay_display_file(file), line, what);
     else if (line > 0)
         pos += (size_t)snprintf(buf + pos, cap - pos, "  at line %d %s\n", line, what);
     else
@@ -71,7 +104,7 @@ ClayObject *clay_error_new(const char *message, const char *type) {
         clay_set_slot(err, "_line", clay_int(clay_source_line));
     }
     if (clay_source_file) {
-        clay_set_slot_take(err, "_file", CLAY_VAL(clay_string_new(clay_source_file)));
+        clay_set_slot_take(err, "_file", CLAY_VAL(clay_string_new(clay_display_file(clay_source_file))));
     }
 
     /* Capture the stack trace from the shadow call stack, newest first: one

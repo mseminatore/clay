@@ -903,7 +903,8 @@ The first line is the error's type and message, and the file and line it was rai
 each line is a place in the code, newest first, and the method or block it is in: the error
 was raised on line 6 in `check`, which was called on line 5 in `step` (from the block it gives
 `each`), which was called on line 4 in `run`, which the top level called on line 8. In a program
-of several files, each line names its own file. So that what matters stays visible, the report
+of several files, each line names its own file; a file of a brick bundled with Clay is named
+from its brick (`stdlib/test/src/main.clay`) instead of by its full path. So that what matters stays visible, the report
 leaves out a block's line when the next line is the same place (a block written on the line
 that runs it), shows a repeated line once with a count (`[previous line repeated 62 more
 times]`, which is what a runaway recursion looks like), and when it is still longer than about

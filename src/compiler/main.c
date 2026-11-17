@@ -215,7 +215,7 @@ static int find_installed_lib(char *out, size_t sz) {
 /* Where the bundled bricks live: $CLAY_LIB, else the lib/ next to the
  * executable (installed layout), else <clay checkout>/lib.
  * selfhost/clay-parser's libDir mirrors this. */
-static void resolve_lib_dir(void) {
+static void find_lib_dir(void) {
     const char *env = getenv("CLAY_LIB");
     if (env && env[0]) {
         parser_set_lib_dir(env);
@@ -230,6 +230,12 @@ static void resolve_lib_dir(void) {
         snprintf(lib, sizeof(lib), "%s/lib", clay_dir);
         parser_set_lib_dir(lib);
     }
+}
+
+/* ...and tracebacks show the files under it relative to it */
+static void resolve_lib_dir(void) {
+    find_lib_dir();
+    clay_set_lib_dir(parser_lib_dir());
 }
 
 /* --- Native compile configuration (clay-native.cfg next to the binary) ---

@@ -150,6 +150,8 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   per body; codegen writes `clay_source_file = clay_files[k];` per statement when a program has
   several files; `VM run` units carry `[offset, path]` file marks. The selfhost ports (`setLoc`,
   `fileMarks`, `emitLine`) must match — `--bytecode` prints the files, so parity checks cover it.
+  Files under the bundled `lib/` are *shown* relative to it (`clay_display_file`; the lib dir comes
+  from `resolve_lib_dir`, a compiled program's `clay_set_lib_dir` call, or clayc's `VM setLibDir`).
 - **Call syntax `foo(args)`**: parsed as `Send(Ident foo, "value", args)` with `is_call` set
   (`Call(foo)` in `--ast`). A compiler sends `self foo(args)` instead when `foo` would resolve to self
   like a bare name (`bc_name_is_self_slot` / `call_targets_self`; selfhost `selfSlotName` /

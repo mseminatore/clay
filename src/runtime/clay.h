@@ -529,6 +529,10 @@ extern CLAY_THREAD_LOCAL const char *clay_source_file;
  * clay_source_file, trace frames and compiled code point at, since they
  * outlive the parser's strings. */
 const char *clay_intern_file(const char *path);
+/* Bundled-brick files shown relative to lib/ in errors and tracebacks */
+void clay_set_lib_dir(const char *dir);
+const char *clay_display_file(const char *path);
+const char *clay_path_under(const char *dir, const char *path);
 
 /* Output hook — when set, all println/print calls route through this
  * instead of writing to stdout. Used by DAP to send output events. */

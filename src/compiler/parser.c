@@ -1264,6 +1264,8 @@ void parser_set_lib_dir(const char *dir) {
     snprintf(g_lib_dir, sizeof(g_lib_dir), "%s", dir ? dir : "");
 }
 
+const char *parser_lib_dir(void) { return g_lib_dir; }
+
 /* Parse an imported file and return its statements */
 static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     char *resolved = NULL;

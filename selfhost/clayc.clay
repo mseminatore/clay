@@ -177,6 +177,7 @@ Clayc = Object clone {
     runProgram(program) {
         unit = (BcGen new(source, true)) compile(program)
         (unit == nil) ifTrue { self fail("bytecode compilation failed") }
+        VM setLibDir(Parser libDir)   // errors show bundled-brick files relative to lib/
         ok = try { VM run(unit, progArgs)
                    true } catch { |e|
             self report(e)

@@ -2050,6 +2050,17 @@ static ClayValue vm_run(ClayObject *self, int argc, ClayValue *argv) {
 
 /* VM hasGlobal(name) — is name a global of the VM (a builtin, plugin
  * prototype or variable a program has set)? */
+/* VM setLibDir(dir): where the bundled bricks live, so errors show their
+ * files relative to it (clayc passes its lib/) */
+static ClayValue vm_setLibDir(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    if (argc >= 1 && CLAY_IS_TYPE(argv[0], CLAY_TYPE_STRING))
+        clay_set_lib_dir(clay_string_data(CLAY_OBJ(argv[0])));
+    else
+        clay_set_lib_dir(NULL);
+    return CLAY_NIL;
+}
+
 static ClayValue vm_hasGlobal(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     vm_host_check();
@@ -2073,5 +2084,6 @@ static ClayValue vm_counts(ClayObject *self, int argc, ClayValue *argv) {
 void clay_vm_init_methods(ClayObject *proto) {
     clay_set_method(proto, "run", vm_run);
     clay_set_method(proto, "hasGlobal", vm_hasGlobal);
+    clay_set_method(proto, "setLibDir", vm_setLibDir);
     clay_set_method(proto, "counts", vm_counts);
 }

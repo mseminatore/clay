@@ -96,6 +96,47 @@ static const char *dap_full_path(const char *file) {
     return full;   /* (leaks past the cache size; a program has few files) */
 }
 
+/* A stack frame's name: what the code at that place is in, as tracebacks
+ * say it (error.c) -- the method, "<block>", or "<top level>" */
+static const char *dap_frame_name(const ClayTraceFrame *in) {
+    if (!in) return "<top level>";
+    if (in->kind == CLAY_FRAME_BLOCK) return "<block>";
+    return in->selector ? in->selector : "<block>";
+}
+
+static void dap_add_frame(cJSON *frames, int id, const char *name, const char *file, int line) {
+    cJSON *fr = cJSON_CreateObject();
+    cJSON_AddNumberToObject(fr, "id", id);
+    cJSON_AddStringToObject(fr, "name", name);
+    cJSON *src = cJSON_AddObjectToObject(fr, "source");
+    cJSON_AddStringToObject(src, "name", file ? clay_display_file(file) : "<unknown>");
+    if (file) cJSON_AddStringToObject(src, "path", dap_full_path(file));
+    cJSON_AddNumberToObject(fr, "line", line);
+    cJSON_AddNumberToObject(fr, "column", 1);
+    cJSON_AddItemToArray(frames, fr);
+}
+
+/* The stack, newest first: the stopped place (if file/line are given), then
+ * each call site, named by the code it is in. Call sites inside a built-in
+ * (each running its block) are left out, as in tracebacks. Returns the count. */
+static int dap_add_frames(cJSON *frames, const char *file, int line) {
+    int n = 0, depth = clay_call_trace.depth;
+    if (depth > CLAY_MAX_TRACE_DEPTH) depth = CLAY_MAX_TRACE_DEPTH;
+    if (line > 0) {
+        const ClayTraceFrame *in = depth > 0 ? &clay_call_trace.frames[depth - 1] : NULL;
+        dap_add_frame(frames, 0, dap_frame_name(in), file, line);
+        n++;
+    }
+    for (int i = depth - 1; i >= 0; i--) {
+        const ClayTraceFrame *tf = &clay_call_trace.frames[i];
+        const ClayTraceFrame *in = i > 0 ? &clay_call_trace.frames[i - 1] : NULL;
+        if (in && in->kind == CLAY_FRAME_CALL) continue;
+        dap_add_frame(frames, depth - i, dap_frame_name(in), tf->file, tf->line);
+        n++;
+    }
+    return n;
+}
+
 static int dap_same_path(const char *a, const char *b) {
     if (!a || !b) return 0;
 #ifdef _WIN32
@@ -631,34 +672,9 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             cJSON *body = cJSON_AddObjectToObject(resp, "body");
             cJSON *frames = cJSON_AddArrayToObject(body, "stackFrames");
 
-            /* Current location is frame 0 */
-            cJSON *f0 = cJSON_CreateObject();
-            cJSON_AddNumberToObject(f0, "id", 0);
-            cJSON_AddStringToObject(f0, "name", "<main>");
-            cJSON *src0 = cJSON_AddObjectToObject(f0, "source");
             const char *file0 = g_dap.stop_file ? g_dap.stop_file : g_dap.source_file;
-            cJSON_AddStringToObject(src0, "name", file0 ? file0 : "<unknown>");
-            if (file0)
-                cJSON_AddStringToObject(src0, "path", dap_full_path(file0));
-            cJSON_AddNumberToObject(f0, "line", line);
-            cJSON_AddNumberToObject(f0, "column", 1);
-            cJSON_AddItemToArray(frames, f0);
-
-            /* Walk call trace for remaining frames */
-            for (int i = clay_call_trace.depth - 1; i >= 0; i--) {
-                ClayTraceFrame *tf = &clay_call_trace.frames[i];
-                cJSON *fr = cJSON_CreateObject();
-                cJSON_AddNumberToObject(fr, "id", clay_call_trace.depth - i);
-                cJSON_AddStringToObject(fr, "name", tf->selector ? tf->selector : "<block>");
-                cJSON *src = cJSON_AddObjectToObject(fr, "source");
-                cJSON_AddStringToObject(src, "name", tf->file ? tf->file : "<unknown>");
-                if (tf->file) cJSON_AddStringToObject(src, "path", dap_full_path(tf->file));
-                cJSON_AddNumberToObject(fr, "line", tf->line);
-                cJSON_AddNumberToObject(fr, "column", 1);
-                cJSON_AddItemToArray(frames, fr);
-            }
-
-            cJSON_AddNumberToObject(body, "totalFrames", clay_call_trace.depth + 1);
+            int nframes = dap_add_frames(frames, file0, line > 0 ? line : 1);
+            cJSON_AddNumberToObject(body, "totalFrames", nframes);
             dap_send(resp);
         } else if (strcmp(command, "scopes") == 0) {
             cJSON *resp = dap_base_response(msg, 1);
@@ -1233,19 +1249,8 @@ int dap_run(const char *filename) {
                             cJSON *resp = dap_base_response(req, 1);
                             cJSON *body = cJSON_AddObjectToObject(resp, "body");
                             cJSON *frames = cJSON_AddArrayToObject(body, "stackFrames");
-                            for (int i = clay_call_trace.depth - 1; i >= 0; i--) {
-                                ClayTraceFrame *tf = &clay_call_trace.frames[i];
-                                cJSON *fr = cJSON_CreateObject();
-                                cJSON_AddNumberToObject(fr, "id", clay_call_trace.depth - i);
-                                cJSON_AddStringToObject(fr, "name", tf->selector ? tf->selector : "<block>");
-                                cJSON *src = cJSON_AddObjectToObject(fr, "source");
-                                cJSON_AddStringToObject(src, "name", tf->file ? tf->file : "<unknown>");
-                                if (tf->file) cJSON_AddStringToObject(src, "path", dap_full_path(tf->file));
-                                cJSON_AddNumberToObject(fr, "line", tf->line);
-                                cJSON_AddNumberToObject(fr, "column", 1);
-                                cJSON_AddItemToArray(frames, fr);
-                            }
-                            cJSON_AddNumberToObject(body, "totalFrames", clay_call_trace.depth);
+                            int nframes = dap_add_frames(frames, NULL, 0);
+                            cJSON_AddNumberToObject(body, "totalFrames", nframes);
                             dap_send(resp);
                         } else {
                             cJSON *resp = dap_base_response(req, 1);

@@ -1,6 +1,7 @@
 # dap_test.cmake — drive `clay --dap` with a scripted session and check what
 # it answers: a breakpoint in an imported file stops there (not at the same
-# line of the main file), and the stack frame names that file.
+# line of the main file), and the stack frames name that file and the code
+# they are in.
 #
 #   cmake -DCLAY=<clay binary> -DROOT=<source dir> -DWORK=<scratch dir> -P dap_test.cmake
 #
@@ -48,6 +49,13 @@ endif()
 # frame 0: the imported file, line 4, with an absolute path
 if(NOT out MATCHES "\"stackFrames\":\\[{\"id\":0,\"name\":\"[^\"]*\",\"source\":{\"name\":\"[^\"]*lib\\.clay\",\"path\":\"[^\"]*lib\\.clay\"},\"line\":4")
     message(FATAL_ERROR "frame 0 is not lib.clay line 4:\n${out}")
+endif()
+# frames are named by the code they are in, as tracebacks say it
+if(NOT out MATCHES "{\"id\":0,\"name\":\"twice\"")
+    message(FATAL_ERROR "frame 0 is not named after its method (twice):\n${out}")
+endif()
+if(NOT out MATCHES "\"name\":\"<top level>\",\"source\":{\"name\":\"main\\.clay\"")
+    message(FATAL_ERROR "frame 1 is not main.clay at top level:\n${out}")
 endif()
 # the program ran to the end after continuing
 if(NOT out MATCHES "42")

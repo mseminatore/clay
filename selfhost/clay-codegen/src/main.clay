@@ -158,6 +158,18 @@ CNames = Object clone {
 
     // The source path inside a C string: \ → /, " escaped
     pathBody(s) { (s replace("\\", "/")) replace("\"", "\\\"") }
+
+    // Whether path is a file inside dir ('/' and '\\' alike; clay_path_under)
+    isUnder(dir, path) {
+        ((dir == nil) || dir == "" || path == nil) ifTrue { return false }
+        d = dir replace("\\", "/")
+        { (d length > 1) && (d endsWith("/")) } whileTrue { d = d slice(0, d length - 1) }
+        p = path replace("\\", "/")
+        (p startsWith(d + "/")) ifFalse { return false }
+        rest = p slice(d length, p length)
+        { rest startsWith("/") } whileTrue { rest = rest slice(1, rest length) }
+        rest length > 0
+    }
 }
 
 // A function to emit: a method, or a block (with the variables it captures)
@@ -1466,6 +1478,11 @@ CodeGen = Object clone {
         out push("    clay_bootstrap();\n")
         out push("    clay_set_args(argc - 1, argv + 1);\n")
         out push("    clay_source_file = \"" + (CNames pathBody(sourceFile)) + "\";\n")
+        lib = Parser libDir
+        ((sourceFiles find { |f| CNames isUnder(lib, f) }) != nil) ifTrue {
+            // tracebacks show bundled-brick files relative to lib/
+            out push("    clay_set_lib_dir(\"" + (CNames pathBody(lib)) + "\");\n")
+        }
         (pluginExePath != nil && pluginExePath != "") ifTrue {
             out push("    clay_plugin_auto_load(\"" + (CNames pathBody(pluginExePath)) + "\");\n")
         }

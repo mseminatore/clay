@@ -10,6 +10,7 @@
  *   - #line directives map back to .clay source
  */
 #include "codegen.h"
+#include "parser.h"
 #include "range.h"
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,16 @@ static void emit_path(CodeGen *cg, const char *path) {
 }
 
 static void emit_source_path(CodeGen *cg) { emit_path(cg, cg->source_file); }
+
+/* Whether the program has a file from the bundled bricks (lib/): the one
+ * clay_display_file shortens */
+static int uses_lib_dir(CodeGen *cg) {
+    const char *lib = parser_lib_dir();
+    int found = 0;
+    for (int i = 0; i < cg->file_count && !found; i++)
+        found = clay_path_under(lib, cg->files[i]) != NULL;
+    return found;
+}
 
 /* The index of path in cg->files, or -1 */
 static int file_index(CodeGen *cg, const char *path) {
@@ -2370,6 +2381,12 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
     fprintf(cg->out, "    clay_source_file = \"");
     emit_source_path(cg);
     fprintf(cg->out, "\";\n");
+    if (uses_lib_dir(cg)) {
+        /* tracebacks show bundled-brick files relative to lib/ */
+        fprintf(cg->out, "    clay_set_lib_dir(\"");
+        emit_path(cg, parser_lib_dir());
+        fprintf(cg->out, "\");\n");
+    }
     if (cg->plugin_exe_path && cg->plugin_exe_path[0]) {
         /* Load the same plugins/ folder as the clay that compiled this program */
         fprintf(cg->out, "    clay_plugin_auto_load(\"");
