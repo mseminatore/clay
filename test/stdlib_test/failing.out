@@ -1,0 +1,15 @@
+  Math
+    ✓ adds
+    ✗ subtracts
+    Division
+      ✗ divides by zero
+  ✗ top level
+  Broken
+
+5 tests, 1 passed, 4 failed
+
+Failures:
+    FAIL: Math > subtracts - expected 3 but got 2
+    FAIL: Math > Division > divides by zero - division by zero
+    FAIL: top level - expected true but got nil
+    FAIL: Broken > (outside a test) - not inside an it
