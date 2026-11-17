@@ -1601,7 +1601,7 @@ NativeBricks = Object clone {
     _build(b, cfg, clayDir, libPath, stampPath, stamp) {
         dir = b at(0)
         File mkdir(dir + "/build")
-        tmp = libPath + "." + (Crypto randomBytes(4)) + ".tmp"
+        tmp = libPath + "." + (Crypto randomHex(4)) + ".tmp"
         cmd = "\"" + (cfg get("cc")) + "\" " + ((cfg get("cflags")) ?? "") + " -O2 -fPIC -shared -w " +
               "-I\"" + clayDir + "/src/runtime\" "
         (b at(3)) each { |f| cmd = cmd + (self expandFlag(f, dir)) + " " }

@@ -4,8 +4,8 @@
  *   Crypto sha256("hello")            // "2cf24dba5fb0a30e..." (hex)
  *   Crypto sha1("hello")  Crypto md5("hello")
  *   Crypto hmacSha256("key", "data")  // hex
- *   Crypto randomBytes(16)            // 32 hex chars from the OS CSPRNG
- *   Crypto randomByteString(8)        // 8 raw bytes as a binary string
+ *   Crypto randomBytes(8)             // 8 raw bytes from the OS CSPRNG
+ *   Crypto randomHex(16)              // 16 random bytes as 32 hex chars
  *   Crypto constantTimeEquals(a, b)   // compare secrets without timing leaks
  *
  * Pure C, no dependencies (promoted from examples/plugins/crypto_plugin.c).
@@ -414,15 +414,15 @@ static uint8_t *random_buffer(int argc, ClayValue *argv, const char *who, size_t
     return buf;
 }
 
-/* Crypto randomBytes(n) -> 2n lowercase hex characters */
-static ClayValue crypto_random_bytes(ClayObject *self, int argc, ClayValue *argv) {
+/* Crypto randomHex(n) -> n random bytes as 2n lowercase hex characters */
+static ClayValue crypto_random_hex(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     size_t n;
-    uint8_t *buf = random_buffer(argc, argv, "Crypto randomBytes", &n);
+    uint8_t *buf = random_buffer(argc, argv, "Crypto randomHex", &n);
     char *hex = (char *)malloc(n * 2 + 1);
     if (!hex) {
         free(buf);
-        clay_raise(CLAY_VAL(clay_error_new("Crypto randomBytes: out of memory", "RuntimeError")));
+        clay_raise(CLAY_VAL(clay_error_new("Crypto randomHex: out of memory", "RuntimeError")));
         return CLAY_NIL;
     }
     bytes_to_hex(buf, n, hex);
@@ -432,12 +432,12 @@ static ClayValue crypto_random_bytes(ClayObject *self, int argc, ClayValue *argv
     return result;
 }
 
-/* Crypto randomByteString(n) -> a binary string of n raw random bytes
+/* Crypto randomBytes(n) -> a binary string of n raw random bytes
  * (use `bytes` on it for an Array of integers 0-255) */
-static ClayValue crypto_random_byte_string(ClayObject *self, int argc, ClayValue *argv) {
+static ClayValue crypto_random_bytes(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     size_t n;
-    uint8_t *buf = random_buffer(argc, argv, "Crypto randomByteString", &n);
+    uint8_t *buf = random_buffer(argc, argv, "Crypto randomBytes", &n);
     ClayValue result = CLAY_VAL(clay_string_new_len((const char *)buf, n));
     free(buf);
     return result;
@@ -462,6 +462,8 @@ void clay_crypto_init_methods(ClayObject *proto) {
     clay_set_method(proto, "md5",                crypto_md5);
     clay_set_method(proto, "hmacSha256",         crypto_hmac_sha256);
     clay_set_method(proto, "randomBytes",        crypto_random_bytes);
-    clay_set_method(proto, "randomByteString",   crypto_random_byte_string);
+    clay_set_method(proto, "randomHex",          crypto_random_hex);
+    /* deprecated (Clay 0.3.5): the old name of randomBytes; to be removed */
+    clay_set_method(proto, "randomByteString",   crypto_random_bytes);
     clay_set_method(proto, "constantTimeEquals", crypto_constant_time_equals);
 }

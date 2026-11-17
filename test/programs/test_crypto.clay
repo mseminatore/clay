@@ -34,22 +34,25 @@ T eq(Crypto hmacSha256("key", "The quick brown fox jumps over the lazy dog"),
 T eq(Crypto hmacSha256("k" repeat(100), "data"),
      "09380ee4b802da2363bc96e8e0d133ba275458ea8ddbc564f986fc12b31f8cb1", "hmac long key")
 
-// Random bytes: hex of the requested length, and different each time
-r = Crypto randomBytes(16)
-T eq(r length, 32, "randomBytes length")
-T eq(Regex test(r, "^[0-9a-f]+$"), true, "randomBytes is hex")
-T eq(r == Crypto randomBytes(16), false, "randomBytes differ")
-T eq(try { Crypto randomBytes(0) } catch { |e| e type }, "ArgumentError", "randomBytes(0) raises")
+// Random hex: 2n hex characters, different each time
+r = Crypto randomHex(16)
+T eq(r length, 32, "randomHex length")
+T eq(Regex test(r, "^[0-9a-f]+$"), true, "randomHex is hex")
+T eq(r == Crypto randomHex(16), false, "randomHex differ")
+T eq(try { Crypto randomHex(0) } catch { |e| e type }, "ArgumentError", "randomHex(0) raises")
+T eq(try { Crypto randomHex(65537) } catch { |e| e type }, "ArgumentError", "randomHex too many raises")
 
 // Raw random bytes: a binary string of exactly n bytes
-b = Crypto randomByteString(8)
-T eq(b length, 8, "randomByteString length")
-T eq(b bytes size, 8, "randomByteString bytes size")
-T eq(((b bytes) filter { |x| x >= 0 && x <= 255 }) size, 8, "randomByteString bytes in range")
-T eq(Crypto randomByteString(32) == Crypto randomByteString(32), false, "randomByteString differ")
-T eq(Crypto randomByteString(65536) length, 65536, "randomByteString max")
-T eq(try { Crypto randomByteString(0) } catch { |e| e type }, "ArgumentError", "randomByteString(0) raises")
-T eq(try { Crypto randomByteString(65537) } catch { |e| e type }, "ArgumentError", "randomByteString too many raises")
+b = Crypto randomBytes(8)
+T eq(b length, 8, "randomBytes length")
+T eq(b bytes size, 8, "randomBytes bytes size")
+T eq(((b bytes) filter { |x| x >= 0 && x <= 255 }) size, 8, "randomBytes bytes in range")
+T eq(Crypto randomBytes(32) == Crypto randomBytes(32), false, "randomBytes differ")
+T eq(Crypto randomBytes(65536) length, 65536, "randomBytes max")
+T eq(try { Crypto randomBytes(0) } catch { |e| e type }, "ArgumentError", "randomBytes(0) raises")
+T eq(try { Crypto randomBytes(65537) } catch { |e| e type }, "ArgumentError", "randomBytes too many raises")
+// randomByteString: the deprecated name of randomBytes
+T eq((Crypto randomByteString(8)) length, 8, "randomByteString still works")
 T eq(try { Crypto sha256(42) } catch { |e| e type }, "TypeError", "sha256 needs a string")
 
 T eq(Crypto constantTimeEquals("abc", "abc"), true, "constantTimeEquals same")
