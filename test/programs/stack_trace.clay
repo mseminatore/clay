@@ -19,12 +19,14 @@ trace = try {
   e stackTrace()
 }
 (trace == nil) ifTrue { raise("no error was raised") }
-// every frame, innermost first: the calls on lines 7, 11 and 15, then the
-// try block itself, called at the try's line
+// every place, innermost first, with the code it is in: the raise on line 3
+// and the calls on lines 7, 11 and 15, each in a block, then the try block
+// itself, called at the try's line from the top level
 lines = trace split("\n")
 // (file names are as the program was run: relative or absolute)
-expect = ["stack_trace.clay:7 in value()", "stack_trace.clay:11 in value()",
-          "stack_trace.clay:15 in value()", "stack_trace.clay:14 in value()"]
+expect = ["stack_trace.clay:3 in block", "stack_trace.clay:7 in block",
+          "stack_trace.clay:11 in block", "stack_trace.clay:15 in block",
+          "stack_trace.clay:14 at top level"]
 i = 0
 expect each { |want|
   frame = (lines at(i)) trim

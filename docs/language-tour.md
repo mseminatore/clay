@@ -876,34 +876,41 @@ try {
 } catch { |e|
   e stackTrace println
   // Output:
-  //   at example.clay:1 in value()
-  //   at example.clay:2 in value()
-  //   at example.clay:5 in value()
+  //   at example.clay:1 in block
+  //   at example.clay:2 in block
+  //   at example.clay:5 in block
+  //   at example.clay:4 at top level
 }
 ```
 
-`stackTrace()` is every call that was recorded, newest first, and `toString()` includes it.
+Each line is a place in the code and what that place is in: a method (`in check`), a block
+(`in block`), or the top level. `stackTrace()` is every place that was recorded, newest first,
+and `toString()` includes it.
 
 An error nothing catches ends the program with a report on stderr: the error and the line
 it was raised on, then the calls that led to it, newest first (`clay`, `clayc` and
 compiled programs print the same):
 
 ```
-app.clay:6: Error: bad value 2
-  at app.clay:5 in check()
-  at app.clay:5 in each()
-  at app.clay:4 in step()
-  at app.clay:8 in run()
+app.clay:6: RuntimeError: bad value 2
+  at app.clay:6 in check
+  at app.clay:5 in step
+  at app.clay:4 in run
+  at app.clay:8 at top level
 ```
 
-A line says where a call was made (`at app.clay:5 in check()`: `check` was called on line 5).
-So that what matters stays visible, the report leaves out the calls that only run blocks
-(`value`, `ifTrue`, `ifFalse`, `whileTrue`, `whileFalse`), shows a repeated line once with
-a count (`[previous line repeated 62 more times]`, which is what a runaway recursion looks
-like), and when it is still longer than about two dozen lines keeps the first twelve (where it
-went wrong) and the last twelve (where it started) with a "not shown" line between. The shadow
-stack records the first 64 nested calls; deeper ones are counted in a line at the top.
-`e traceback` is this text for an error you caught.
+The first line is the error's type and message, and the file and line it was raised on. Then
+each line is a place in the code, newest first, and the method or block it is in: the error
+was raised on line 6 in `check`, which was called on line 5 in `step` (from the block it gives
+`each`), which was called on line 4 in `run`, which the top level called on line 8. In a program
+of several files, each line names its own file. So that what matters stays visible, the report
+leaves out a block's line when the next line is the same place (a block written on the line
+that runs it), shows a repeated line once with a count (`[previous line repeated 62 more
+times]`, which is what a runaway recursion looks like), and when it is still longer than about
+two dozen lines keeps the first twelve (where it went wrong) and the last twelve (where it
+started) with a "not shown" line between. The shadow stack records the first 64 nested calls;
+deeper ones are counted in a line at the top. `e traceback` is this text for an error you
+caught.
 
 An error raised in a [Fiber](core-objects.md#fibers-coroutines) that nothing in the fiber catches ends the
 fiber and comes out of `resume`, where a `try` can catch it.

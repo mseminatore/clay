@@ -991,7 +991,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
             ClayValue err = clay_error_stack.current_error;
             if (!CLAY_IS_NIL(err) && CLAY_IS_PTR(err)) {
                 ClayValue msg = clay_send_val(err, "message", 0, NULL);
-                fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
+                fprintf(stderr, "%s%s%s: %s%s\n", C(C_BOLD), C(C_RED), clay_error_kind(err),
                         clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
                 clay_release(CLAY_OBJ(msg));
                 char *tb = clay_error_traceback(err);
@@ -1232,7 +1232,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
                 fprintf(stderr, "%s:%ld: ", clay_string_data(CLAY_OBJ(file)),
                         (long)clay_to_int(line));
             }
-            fprintf(stderr, "%s%sError: %s%s\n", C(C_BOLD), C(C_RED),
+            fprintf(stderr, "%s%s%s: %s%s\n", C(C_BOLD), C(C_RED), clay_error_kind(err),
                     clay_string_data(CLAY_OBJ(msg)), C(C_RESET));
             clay_release(CLAY_OBJ(msg));
             char *tb = clay_error_traceback(err);

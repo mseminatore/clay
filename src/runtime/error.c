@@ -41,6 +41,27 @@ void (*clay_output_fn)(const char *text) = NULL;
 CLAY_THREAD_LOCAL ClayCallTrace clay_call_trace = { .depth = 0 };
 CLAY_THREAD_LOCAL int clay_trace_enabled = 1; /* can be disabled for benchmarking */
 
+/* One traceback line: a place in the code and what it is in (the frame that
+ * ran that code, or NULL for the top level). A place "in" a built-in is where
+ * the built-in called back into Clay (each running its block, sort calling
+ * <): that is the built-in's own line, already the next line, so it is left
+ * out. */
+static size_t trace_line(char *buf, size_t cap, size_t pos, const char *file, int line,
+                         const ClayTraceFrame *in) {
+    if (in && in->kind == CLAY_FRAME_CALL) return pos;
+    char what[160];
+    if (!in) snprintf(what, sizeof(what), "at top level");
+    else if (in->kind == CLAY_FRAME_BLOCK) snprintf(what, sizeof(what), "in block");
+    else snprintf(what, sizeof(what), "in %s", in->selector ? in->selector : "?");
+    if (file && line > 0)
+        pos += (size_t)snprintf(buf + pos, cap - pos, "  at %s:%d %s\n", file, line, what);
+    else if (line > 0)
+        pos += (size_t)snprintf(buf + pos, cap - pos, "  at line %d %s\n", line, what);
+    else
+        pos += (size_t)snprintf(buf + pos, cap - pos, "  %s\n", what);
+    return pos;
+}
+
 /* Create an Error object with message and type slots */
 ClayObject *clay_error_new(const char *message, const char *type) {
     ClayObject *err = clay_clone(clay_Error);
@@ -53,13 +74,18 @@ ClayObject *clay_error_new(const char *message, const char *type) {
         clay_set_slot_take(err, "_file", CLAY_VAL(clay_string_new(clay_source_file)));
     }
 
-    /* Capture stack trace from shadow call stack: one line per frame, most
-     * recent first. The shadow stack keeps the first CLAY_MAX_TRACE_DEPTH
-     * calls; deeper ones (the newest) are only counted, which the first line
-     * says. */
+    /* Capture the stack trace from the shadow call stack, newest first: one
+     * line per place in the code, "at <file>:<line> in <what>", where <what>
+     * is the code that place is in: the method or block that the next older
+     * frame ran (its kind), or "top level". The
+     * first line is where the error was made, when the newest call ran Clay
+     * code (otherwise that call made the error, and its own line says where).
+     * The shadow stack keeps the first CLAY_MAX_TRACE_DEPTH calls; deeper
+     * ones (the newest) are only counted, which the first line says. */
     if (clay_call_trace.depth > 0) {
-        size_t cap = 96;
-        for (int i = 0; i < clay_call_trace.depth; i++) {
+        int depth = clay_call_trace.depth;
+        size_t cap = 128 + (clay_source_file ? strlen(clay_source_file) : 0);
+        for (int i = 0; i < depth; i++) {
             ClayTraceFrame *f = &clay_call_trace.frames[i];
             cap += (f->file ? strlen(f->file) : 0) + (f->selector ? strlen(f->selector) : 1) + 48;
         }
@@ -69,19 +95,13 @@ ClayObject *clay_error_new(const char *message, const char *type) {
             if (clay_call_trace.overflow > 0)
                 pos += (size_t)snprintf(trace_buf + pos, cap - pos,
                     "  ... %d more calls not recorded\n", clay_call_trace.overflow);
-            /* Walk frames from most recent to oldest */
-            for (int i = clay_call_trace.depth - 1; i >= 0; i--) {
+            else if (clay_call_trace.frames[depth - 1].kind != CLAY_FRAME_CALL && clay_source_line > 0)
+                pos = trace_line(trace_buf, cap, pos, clay_source_file, clay_source_line,
+                                 &clay_call_trace.frames[depth - 1]);
+            for (int i = depth - 1; i >= 0; i--) {
                 ClayTraceFrame *f = &clay_call_trace.frames[i];
-                const char *sel = f->selector ? f->selector : "?";
-                if (f->file && f->line > 0)
-                    pos += (size_t)snprintf(trace_buf + pos, cap - pos,
-                        "  at %s:%d in %s()\n", f->file, f->line, sel);
-                else if (f->line > 0)
-                    pos += (size_t)snprintf(trace_buf + pos, cap - pos,
-                        "  at line %d in %s()\n", f->line, sel);
-                else if (f->selector)
-                    pos += (size_t)snprintf(trace_buf + pos, cap - pos,
-                        "  in %s()\n", f->selector);
+                pos = trace_line(trace_buf, cap, pos, f->file, f->line,
+                                 i > 0 ? &clay_call_trace.frames[i - 1] : NULL);
             }
             if (pos > 0) {
                 if (trace_buf[pos - 1] == '\n') trace_buf[--pos] = '\0';     /* no trailing newline */
@@ -98,8 +118,9 @@ ClayObject *clay_error_new(const char *message, const char *type) {
  *
  * An error's _trace (Error stackTrace) is every recorded call, newest first.
  * What is printed when an error ends a program is that list made readable:
- *   - the calls that only run blocks (value, ifTrue, whileTrue, ...) are left
- *     out: the lines that matter are the methods the program wrote;
+ *   - a block's line is left out when the next line is the same place (a
+ *     block written on the line that runs it: `(x > 1) ifTrue { raise(...) }`
+ *     would say line 4 twice, "in block" and "in check");
  *   - the same line repeated (a recursion) is shown once with a count;
  *   - a long trace keeps its first and last lines, the newest, where it went
  *     wrong, and the oldest, where it started, and says how many it left out. */
@@ -108,18 +129,13 @@ ClayObject *clay_error_new(const char *message, const char *type) {
 
 typedef struct { const char *p; size_t len; } TbLine;
 
-/* the method name in "  at file:12 in name()" (or "  in name()") */
-static int tb_is_plumbing(const TbLine *l) {
-    static const char *names[] = { "value", "ifTrue", "ifFalse", "whileTrue", "whileFalse" };
-    const char *end = l->p + l->len;
-    const char *in = NULL;
-    for (const char *c = l->p; c + 4 <= end; c++)
-        if (memcmp(c, " in ", 4) == 0) in = c + 4;
-    if (!in || end - in < 2 || end[-1] != ')' || end[-2] != '(') return 0;
-    size_t n = (size_t)(end - 2 - in);
-    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-        if (strlen(names[i]) == n && memcmp(in, names[i], n) == 0) return 1;
-    return 0;
+/* "  at <place> in block" followed by a line at the same place */
+static int tb_is_redundant(const TbLine *l, const TbLine *next) {
+    static const char tail[] = " in block";
+    size_t tl = sizeof(tail) - 1;
+    if (!next || l->len <= tl || memcmp(l->p + l->len - tl, tail, tl) != 0) return 0;
+    size_t place = l->len - tl;                  /* "  at <file>:<line>" */
+    return next->len > place && memcmp(next->p, l->p, place) == 0 && next->p[place] == ' ';
 }
 
 /* The trace as printed (every line ends in a newline), or NULL if empty.
@@ -143,8 +159,8 @@ char *clay_traceback_format(const char *trace) {
         }
     }
     int k = 0;
-    for (int i = 0; i < n; i++) if (!tb_is_plumbing(&all[i])) kept[k++] = all[i];
-    if (k == 0) { memcpy(kept, all, sizeof(TbLine) * (size_t)n); k = n; }   /* nothing else to show */
+    for (int i = 0; i < n; i++)
+        if (!tb_is_redundant(&all[i], i + 1 < n ? &all[i + 1] : NULL)) kept[k++] = all[i];
 
     /* runs of the same line, then the cap: build the output in one pass */
     size_t cap = total + 256 + (size_t)k * 48;
@@ -185,6 +201,15 @@ char *clay_traceback_format(const char *trace) {
     free(all);
     out[pos] = '\0';
     return out;
+}
+
+const char *clay_error_kind(ClayValue err) {
+    if (CLAY_IS_PTR(err) && !CLAY_IS_NIL(err)) {
+        ClayValue t = clay_get_slot(CLAY_OBJ(err), "_type");
+        if (CLAY_IS_TYPE(t, CLAY_TYPE_STRING) && clay_string_data(CLAY_OBJ(t))[0])
+            return clay_string_data(CLAY_OBJ(t));
+    }
+    return "Error";
 }
 
 /* The traceback of an Error object as printed (see clay_traceback_format), or
@@ -273,9 +298,9 @@ void clay_raise(ClayValue error) {
         }
         /* the same report `clay` makes for an error that ends a program */
         if (!CLAY_IS_NIL(msg)) {
-            fprintf(stderr, "Error: %s\n", clay_string_data(CLAY_OBJ(msg)));
+            fprintf(stderr, "%s: %s\n", clay_error_kind(error), clay_string_data(CLAY_OBJ(msg)));
         } else {
-            fprintf(stderr, "Error\n");
+            fprintf(stderr, "%s\n", clay_error_kind(error));
         }
         char *tb = clay_error_traceback(error);
         if (tb) { fputs(tb, stderr); free(tb); }
@@ -349,8 +374,8 @@ static ClayValue error_stackTrace(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 /* Error traceback() — the stack trace as printed when an error ends a program:
- * without the calls that only run blocks, repeats counted, a long trace cut in
- * the middle. "" if there is none. (stackTrace() is every recorded call.) */
+ * repeats counted, a long trace cut in the middle. "" if there is none.
+ * (stackTrace() is every recorded call.) */
 static ClayValue error_traceback(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
     char *tb = clay_error_traceback(CLAY_VAL(self));

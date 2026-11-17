@@ -164,7 +164,9 @@ Clayc = Object clone {
     report(e) {
         where = ""
         (e file != nil && e line != nil) ifTrue { where = e file + ":" + e line toString + ": " }
-        Console error(where + "Error: " + e message + "\n")
+        kind = try { e type } catch { |x| nil }
+        ((kind == nil) || (kind type != "String") || kind == "") ifTrue { kind = "Error" }
+        Console error(where + kind + ": " + e message + "\n")
         // the traceback, as clay prints it (the runtime's Error traceback)
         ((e hasMethod("traceback")) || (e parent) != nil) ifTrue {
             tb = try { e traceback } catch { |x| nil }

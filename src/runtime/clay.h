@@ -545,18 +545,29 @@ ClayObject *clay_error_new(const char *message, const char *type);
 const char *clay_type_name(ClayObject *obj);
 
 /* The traceback printed when an error ends a program: an Error's stack trace
- * without the block-running calls, repeats counted, long ones cut in the
- * middle. Both return a malloc'd string of whole lines, or NULL. */
+ * with repeats counted and long ones cut in the middle. Both return a
+ * malloc'd string of whole lines, or NULL. */
 char *clay_traceback_format(const char *trace);
 char *clay_error_traceback(ClayValue err);
+/* What an uncaught error's report calls it: its type ("RuntimeError",
+ * "MethodNotFound", ...), or "Error". Valid while err is alive. */
+const char *clay_error_kind(ClayValue err);
 
 /* --- Call trace (shadow call stack for stack traces) --- */
 #define CLAY_MAX_TRACE_DEPTH 64
+
+/* A frame is a call: where it was made and the message sent. kind says what
+ * the call ran, so a traceback can name the code each line is in: a method
+ * or block body marks the frame that called it when it starts. */
+#define CLAY_FRAME_CALL   0   /* a built-in (or not entered): no Clay code */
+#define CLAY_FRAME_METHOD 1   /* a method written in Clay */
+#define CLAY_FRAME_BLOCK  2   /* a block (value, each, ifTrue, ...) */
 
 typedef struct {
     const char *file;
     int line;
     const char *selector;
+    int kind;       /* CLAY_FRAME_* */
 } ClayTraceFrame;
 
 typedef struct {
@@ -575,9 +586,19 @@ static inline void clay_trace_push(const char *file, int line, const char *sel) 
         f->file = file;
         f->line = line;
         f->selector = sel;
+        f->kind = CLAY_FRAME_CALL;
     } else {
         clay_call_trace.overflow++;   /* keep pushes and pops balanced */
     }
+}
+
+/* A method or block body starting: mark the call that ran it. A block only
+ * marks a call nothing has claimed, so a block run directly by its method
+ * (no call of its own) leaves the method's frame a method. */
+static inline void clay_trace_enter(int kind) {
+    if (!clay_trace_enabled || clay_call_trace.overflow > 0 || clay_call_trace.depth == 0) return;
+    ClayTraceFrame *f = &clay_call_trace.frames[clay_call_trace.depth - 1];
+    if (kind == CLAY_FRAME_METHOD || f->kind == CLAY_FRAME_CALL) f->kind = kind;
 }
 
 static inline void clay_trace_pop(void) {

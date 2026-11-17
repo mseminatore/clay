@@ -1,3 +1,4 @@
 first
-test/errors/uncaught_fiber.clay:7: Error: second
-  at test/errors/uncaught_fiber.clay:8 in resume()
+test/errors/uncaught_fiber.clay:7: RuntimeError: second
+  at test/errors/uncaught_fiber.clay:7 in block
+  at test/errors/uncaught_fiber.clay:8 at top level
