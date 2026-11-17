@@ -24,6 +24,12 @@ foreach(var CLAY ROOT CHECK)
     endif()
 endforeach()
 
+# Both sides find the bundled bricks (lib/) at the same path, so the file
+# names in their output (#line, bytecode file maps, tracebacks) agree: a
+# native Clay tool looks for lib/ from the current directory and finds it
+# as ./lib, where clay uses the absolute path next to its executable.
+set(ENV{CLAY_LIB} "${ROOT}/lib")
+
 if(CHECK STREQUAL "lexer")
     set(flag --tokens)
     set(tool "${ROOT}/selfhost/clay-lexer/tools/tokens.clay")

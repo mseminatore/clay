@@ -29,6 +29,7 @@ typedef struct {
     int     local_count;       /* total locals (params + temps) in this chunk */
     int     has_block_return;  /* method whose blocks `return` from it (non-local return) */
     int    *line_map;    /* source line map: line_map[offset] = source line */
+    const char *file;    /* the source file of the body (interned), or NULL */
 } BcChunk;
 
 /* Local variable tracking for compile-time scope resolution */
@@ -97,6 +98,15 @@ typedef struct {
     /* Source line map: line_map[offset] = source line number */
     int line_map[BC_MAX_CODE];
     int current_line;
+    /* Source file map for the top-level code, which mixes the files imports
+     * splice in: file_map[offset] = 1 + an index into files, 0 = unknown
+     * (heap-allocated on first use: BcCompiler is often on the stack, and a
+     * thread worker's never compiles). A chunk is one
+     * body from one file, so it records just BcChunk.file. */
+    uint16_t *file_map;
+    uint16_t current_file;
+    const char **files;   /* interned paths */
+    int file_count, file_capacity;
     const char *source_file; /* filename for error messages */
 
     /* Local variable tracking for current compilation scope */
@@ -121,6 +131,10 @@ typedef struct {
 } BcCompiler;
 
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm);
+/* 1 + the index of path in bc->files (added if new), or 0 for NULL */
+uint16_t bc_file_index(BcCompiler *bc, const char *path);
+/* The file of top-level code offset ip, or NULL */
+const char *bc_file_at(BcCompiler *bc, size_t ip);
 void bc_vm_add_plugin_globals(clayvm_vm_t *vm);
 
 /* Register a compiled method: returns its method-slot index (the constant

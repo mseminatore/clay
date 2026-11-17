@@ -1,0 +1,5 @@
+// Debugger fixture (cmake/dap_test.cmake): a breakpoint in an imported file
+import("lib.clay")
+
+r = Lib twice(21)
+r println

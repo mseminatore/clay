@@ -7,6 +7,11 @@
 typedef struct {
     FILE *out;
     const char *source_file;
+    /* The program's source files, from its top-level statements (imports are
+     * spliced in). With more than one, each statement also sets
+     * clay_source_file from the clay_files[] table. */
+    const char **files;
+    int file_count;
     int indent;
     int temp_counter;
     int method_counter;

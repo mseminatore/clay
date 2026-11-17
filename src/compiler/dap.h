@@ -24,6 +24,7 @@ typedef struct {
 
 typedef struct {
     char *file;            /* source file path */
+    char *full;            /* its absolute path, to match the running file */
     DapBreakpointSet bp;   /* breakpoints for this file */
 } DapSource;
 
@@ -45,8 +46,11 @@ typedef struct {
     int terminate;         /* disconnect received */
     int step_mode;         /* 0=run, 1=next, 2=stepIn, 3=stepOut */
     int step_line;         /* line we stepped from (for "next") */
+    const char *step_file; /* ...and its file (interned, like all files here) */
     int step_depth;        /* trace depth when step started */
     int last_stopped_line; /* line where we last stopped (avoid re-triggering) */
+    const char *last_stopped_file;
+    const char *stop_file; /* file of the current stop (stack frame 0) */
     int pause_requested;   /* set by "pause" request, checked by step callback */
     const char *source;    /* source text */
     const char *source_file;

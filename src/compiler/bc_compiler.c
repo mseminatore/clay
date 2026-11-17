@@ -19,9 +19,17 @@
 
 /* --- Bytecode emission helpers --- */
 
+/* The source location the next bytes come from: node's line and file */
+static void bc_set_loc(BcCompiler *bc, AstNode *node) {
+    bc->current_line = node->line;
+    if (node->file) bc->current_file = bc_file_index(bc, node->file);
+}
+
 static void emit_byte(BcCompiler *bc, uint8_t b) {
     if (bc->len >= BC_MAX_CODE) { bc->had_error = 1; return; }
     bc->line_map[bc->len] = bc->current_line;
+    if (!bc->file_map) bc->file_map = (uint16_t *)calloc(BC_MAX_CODE, sizeof(uint16_t));
+    if (bc->file_map) bc->file_map[bc->len] = bc->current_file;
     bc->code[bc->len++] = b;
 }
 
@@ -619,6 +627,8 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
 
     /* Allocate chunk on heap */
     BcChunk *chunk = (BcChunk *)calloc(1, sizeof(BcChunk));
+    /* a body is all from one file: the file of the block or method node */
+    chunk->file = bc->current_file ? bc->files[bc->current_file - 1] : NULL;
 
     /* Record param names (strdup since AST may be freed).
      * Default params (NODE_ASSIGN) encode name in assign.name. */
@@ -634,14 +644,20 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     /* Save current bytecode, line map, and local scope */
     uint8_t *outer_buf = NULL;
     int *outer_line_map = NULL;
+    uint16_t *outer_file_map = NULL;
     size_t saved_len = bc->len;
     if (saved_len > 0) {
         outer_buf = (uint8_t *)malloc(saved_len);
         memcpy(outer_buf, bc->code, saved_len);
         outer_line_map = (int *)malloc(saved_len * sizeof(int));
         memcpy(outer_line_map, bc->line_map, saved_len * sizeof(int));
+        if (bc->file_map) {
+            outer_file_map = (uint16_t *)malloc(saved_len * sizeof(uint16_t));
+            memcpy(outer_file_map, bc->file_map, saved_len * sizeof(uint16_t));
+        }
     }
     int saved_current_line = bc->current_line;
+    uint16_t saved_current_file = bc->current_file;
 
     /* Save outer local state */
     BcLocal saved_locals[BC_MAX_LOCALS];
@@ -826,7 +842,12 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
         memcpy(bc->line_map, outer_line_map, saved_len * sizeof(int));
         free(outer_line_map);
     }
+    if (outer_file_map) {
+        memcpy(bc->file_map, outer_file_map, saved_len * sizeof(uint16_t));
+        free(outer_file_map);
+    }
     bc->current_line = saved_current_line;
+    bc->current_file = saved_current_file;
 
     /* Free chunk-local names (they were strdup'd by bc_add_local) */
     for (int i = 0; i < bc->local_count; i++) {
@@ -874,7 +895,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             return;
         }
     }
-    bc->current_line = node->line;
+    bc_set_loc(bc, node);
 
     switch (node->type) {
         case NODE_INT_LIT: {
@@ -1328,7 +1349,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             }
             /* the call takes the try's line (not the catch/finally block's
              * just compiled), for the try block's stack-trace frame */
-            bc->current_line = node->line;
+            bc_set_loc(bc, node);
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
             emit_u16(bc, (uint16_t)bc->native_try_catch);
             emit_byte(bc, 3);
@@ -1374,7 +1395,7 @@ static int is_clone_expr(AstNode *node) {
 
 static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     if (!node || bc->had_error) return;
-    bc->current_line = node->line;
+    bc_set_loc(bc, node);
 
     if (node->type == NODE_ASSIGN) {
         /* Check if assigning to an existing local */

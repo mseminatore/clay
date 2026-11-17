@@ -1,0 +1,4 @@
+test/errors/helper_import_trace.clay:4: Error: too big: 5
+  at test/errors/helper_import_trace.clay:8 in parse()
+  at test/errors/uncaught_import.clay:6 in run()
+  at test/errors/uncaught_import.clay:8 in check()

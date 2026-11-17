@@ -525,6 +525,11 @@ int       clay_return_matches(ClayValue error, ClayValue id, ClayValue *value_ou
 extern CLAY_THREAD_LOCAL int clay_source_line;
 extern CLAY_THREAD_LOCAL const char *clay_source_file;
 
+/* A permanent copy of a source path, the same pointer for equal paths: what
+ * clay_source_file, trace frames and compiled code point at, since they
+ * outlive the parser's strings. */
+const char *clay_intern_file(const char *path);
+
 /* Output hook — when set, all println/print calls route through this
  * instead of writing to stdout. Used by DAP to send output events. */
 extern void (*clay_output_fn)(const char *text);

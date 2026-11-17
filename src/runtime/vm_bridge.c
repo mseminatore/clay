@@ -130,6 +130,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
         while (g_vm->running && g_vm->ip < g_vm->code_len) {
             if (chunk->line_map && g_vm->ip < chunk->len) {
                 clay_source_line = chunk->line_map[g_vm->ip];
+                if (chunk->file) clay_source_file = chunk->file;
             }
 
             uint8_t opcode = g_vm->code[g_vm->ip++];
@@ -523,6 +524,7 @@ static ClayValue bc_method_dispatch(ClayObject *self, int argc, ClayValue *argv)
         /* Update source line from chunk's line_map for error reporting and debugging */
         if (chunk->line_map && g_vm->ip < chunk->len) {
             clay_source_line = chunk->line_map[g_vm->ip];
+            if (chunk->file) clay_source_file = chunk->file;
         }
         uint8_t opcode = g_vm->code[g_vm->ip++];
         if (opcode >= CLAYVM_OP_COUNT) { g_vm->running = 0; break; }
@@ -648,6 +650,8 @@ static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
     /* Update source line for error messages (only for main code, not chunks) */
     if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
+        const char *f = bc_file_at(g_bc, vm->ip);
+        if (f) clay_source_file = f;
     }
     ClayValue receiver = vm_to_clay(a);
     ClayValue arg = vm_to_clay(b);
@@ -709,6 +713,8 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     /* Update source line for error messages (only for main code, not chunks) */
     if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
+        const char *f = bc_file_at(g_bc, vm->ip);
+        if (f) clay_source_file = f;
     }
 
     /* The operands stay in the stack array after popping; during the call
@@ -1348,6 +1354,8 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
      * this CALL_NATIVE; its last byte carries the try's line. */
     if (g_bc && vm->code == g_bc->code && vm->ip > 0 && vm->ip <= (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip - 1];
+        const char *f = bc_file_at(g_bc, vm->ip - 1);
+        if (f) clay_source_file = f;
     }
 
     VmTryRegs st;
@@ -1400,6 +1408,8 @@ static int native_raise_fn(clayvm_vm_t *vm, int argc) {
     /* Update source line for error messages (only for main code, not chunks) */
     if (g_bc && vm->code == g_bc->code && vm->ip < (size_t)g_bc->len) {
         clay_source_line = g_bc->line_map[vm->ip];
+        const char *f = bc_file_at(g_bc, vm->ip);
+        if (f) clay_source_file = f;
     }
     clayvm_value_t val_vm = clayvm_vm_pop(vm);
     ClayValue val = vm_to_clay(val_vm);
@@ -1640,6 +1650,29 @@ void bc_set_main_compiler(BcCompiler *bc) {
     g_main_bc = bc;
 }
 
+uint16_t bc_file_index(BcCompiler *bc, const char *path) {
+    if (!path) return 0;
+    const char *f = clay_intern_file(path);
+    for (int i = 0; i < bc->file_count; i++)
+        if (bc->files[i] == f) return (uint16_t)(i + 1);
+    if (bc->file_count >= 65535) return 0;
+    if (bc->file_count == bc->file_capacity) {
+        int cap = bc->file_capacity ? bc->file_capacity * 2 : 8;
+        const char **grown = (const char **)realloc((void *)bc->files, sizeof(char *) * (size_t)cap);
+        if (!grown) return 0;
+        bc->files = grown;
+        bc->file_capacity = cap;
+    }
+    bc->files[bc->file_count++] = f;
+    return (uint16_t)bc->file_count;
+}
+
+const char *bc_file_at(BcCompiler *bc, size_t ip) {
+    if (!bc->file_map || ip >= BC_MAX_CODE) return NULL;
+    uint16_t i = bc->file_map[ip];
+    return (i > 0 && i <= bc->file_count) ? bc->files[i - 1] : NULL;
+}
+
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     memset(bc, 0, sizeof(*bc));
     bc->vm = vm;
@@ -1847,7 +1880,8 @@ static void vm_check_base(int base, int have, const char *what) {
     }
 }
 
-/* [code, lines, paramNames, captureNames, captureSlots, localCount, hasBlockReturn] */
+/* [code, lines, paramNames, captureNames, captureSlots, localCount, hasBlockReturn, file]
+ * (file, the body's source path, is optional) */
 static BcChunk *vm_load_chunk(ClayValue v) {
     ClayObject *a = vm_arg_array(v, "a chunk");
     if (clay_array_size(a) < 7)
@@ -1869,15 +1903,19 @@ static BcChunk *vm_load_chunk(ClayValue v) {
     }
     chunk->local_count = vm_arg_int(clay_array_at(a, 5), "localCount");
     chunk->has_block_return = clay_array_at(a, 6) == CLAY_TRUE;
+    if (clay_array_size(a) > 7 && CLAY_IS_TYPE(clay_array_at(a, 7), CLAY_TYPE_STRING))
+        chunk->file = clay_intern_file(clay_string_data(CLAY_OBJ(clay_array_at(a, 7))));
     return chunk;
 }
 
 /* VM run(unit) / run(unit, args) — load a compiled program and run its
  * top-level code; returns the value of its last expression. args (an Array of
  * Strings) become the program's System args from then on. unit is
- *   [constBase, constants, chunkBase, chunks, methodBase, methods, code, lines, file]
+ *   [constBase, constants, chunkBase, chunks, methodBase, methods, code, lines, file, files]
  * where the bases are the VM's counts the program was compiled against and
- * constants/chunks/methods are the ones it adds. Errors propagate. */
+ * constants/chunks/methods are the ones it adds. files (optional) maps the
+ * top-level code to source files: [[offset, path], ...], each path running
+ * from its offset to the next one's. Errors propagate. */
 static ClayValue vm_run(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
     vm_host_check();
@@ -1937,6 +1975,29 @@ static ClayValue vm_run(ClayObject *self, int argc, ClayValue *argv) {
     memcpy(bc->code, code, code_len);
     memcpy(bc->line_map, lines, code_len * sizeof(int));
     bc->len = code_len;
+    if (!bc->file_map) bc->file_map = (uint16_t *)calloc(BC_MAX_CODE, sizeof(uint16_t));
+    if (bc->file_map) {
+        memset(bc->file_map, 0, code_len * sizeof(uint16_t));
+        ClayValue fm = clay_array_size(unit) > 9 ? clay_array_at(unit, 9) : CLAY_NIL;
+        if (CLAY_IS_TYPE(fm, CLAY_TYPE_ARRAY)) {
+            ClayObject *marks = CLAY_OBJ(fm);
+            size_t n = clay_array_size(marks);
+            for (size_t m = 0; m < n; m++) {
+                ClayObject *mark = vm_arg_array(clay_array_at(marks, m), "a file mark");
+                if (clay_array_size(mark) < 2) continue;
+                int from = vm_arg_int(clay_array_at(mark, 0), "a file mark's offset");
+                ClayValue path = clay_array_at(mark, 1);
+                size_t to = code_len;
+                if (m + 1 < n) {
+                    ClayObject *next = vm_arg_array(clay_array_at(marks, m + 1), "a file mark");
+                    if (clay_array_size(next) > 0) to = (size_t)vm_arg_int(clay_array_at(next, 0), "a file mark's offset");
+                }
+                if (from < 0 || !CLAY_IS_TYPE(path, CLAY_TYPE_STRING)) continue;
+                uint16_t idx = bc_file_index(bc, clay_string_data(CLAY_OBJ(path)));
+                for (size_t i = (size_t)from; i < to && i < code_len; i++) bc->file_map[i] = idx;
+            }
+        }
+    }
     free(code);
     free(lines);
 

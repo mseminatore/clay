@@ -8,6 +8,10 @@
  * for breakpoints and stepping.
  */
 
+/* glibc declares realpath() only with _DEFAULT_SOURCE (see main.c) */
+#if defined(__linux__) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +57,53 @@ static int dap_handle_request(cJSON *msg);
 /* ------------------------------------------------------------------ */
 
 static DapState g_dap;
+
+/* ------------------------------------------------------------------ */
+/*  Source paths                                                       */
+/* ------------------------------------------------------------------ */
+
+/* A path made absolute and canonical (malloc'd), as VS Code names files */
+static char *dap_absolute(const char *path) {
+    if (!path) return NULL;
+#ifdef _WIN32
+    char buf[1024];
+    if (_fullpath(buf, path, sizeof(buf))) {
+        for (char *c = buf; *c; c++) if (*c == '/') *c = '\\';
+        return strdup(buf);
+    }
+#else
+    char *rp = realpath(path, NULL);
+    if (rp) return rp;
+#endif
+    return strdup(path);
+}
+
+/* The absolute path of a running file (interned, so cached by pointer) */
+#define DAP_PATH_CACHE 64
+static struct { const char *file; char *full; } g_dap_paths[DAP_PATH_CACHE];
+static int g_dap_path_count = 0;
+
+static const char *dap_full_path(const char *file) {
+    if (!file) return NULL;
+    for (int i = 0; i < g_dap_path_count; i++)
+        if (g_dap_paths[i].file == file) return g_dap_paths[i].full;
+    char *full = dap_absolute(file);
+    if (g_dap_path_count < DAP_PATH_CACHE) {
+        g_dap_paths[g_dap_path_count].file = file;
+        g_dap_paths[g_dap_path_count].full = full;
+        g_dap_path_count++;
+    }
+    return full;   /* (leaks past the cache size; a program has few files) */
+}
+
+static int dap_same_path(const char *a, const char *b) {
+    if (!a || !b) return 0;
+#ifdef _WIN32
+    return _stricmp(a, b) == 0;
+#else
+    return strcmp(a, b) == 0;
+#endif
+}
 
 /* DAP protocol uses a saved copy of stdout; program output goes to stderr */
 static FILE *g_dap_out = NULL;
@@ -257,8 +308,10 @@ static int dap_condition_truthy(const char *condition) {
     return CLAY_IS_TRUTHY(cv);
 }
 
-static int dap_has_breakpoint(int line) {
+static int dap_has_breakpoint(const char *file, int line) {
+    const char *full = dap_full_path(file);
     for (int s = 0; s < g_dap.source_count; s++) {
+        if (!dap_same_path(g_dap.sources[s].full, full)) continue;
         for (int i = 0; i < g_dap.sources[s].bp.count; i++) {
             if (g_dap.sources[s].bp.lines[i] == line) {
                 /* Check hit count */
@@ -451,15 +504,22 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
      * When inside a block/method chunk, the trampoline has already set
      * clay_source_line from the chunk's line_map before calling us. */
     int line;
+    const char *file;
     if (vm->code == bc->code) {
-        /* Main code — look up from the main compiler's line map */
+        /* Main code — look up from the main compiler's line and file maps */
         if (ip >= (size_t)bc->len) return;
         line = bc->line_map[ip];
+        file = bc_file_at(bc, ip);
     } else {
-        /* Inside a chunk — use clay_source_line set by the trampoline */
+        /* Inside a chunk — use clay_source_line/file set by the trampoline */
         line = clay_source_line;
+        file = clay_source_file;
     }
     if (line <= 0) return;
+    if (!file) file = g_dap.source_file;
+    /* the location moved since the step began / since the last stop */
+    int moved_step = line != g_dap.step_line || file != g_dap.step_file;
+    int moved_stop = line != g_dap.last_stopped_line || file != g_dap.last_stopped_file;
 
     /* Check if we should stop */
     int should_stop = 0;
@@ -472,30 +532,31 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
         reason = "pause";
     } else if (g_dap.step_mode == 1) {
         /* Step Next — stop when line changes at same or shallower depth */
-        if (line != g_dap.step_line && clay_call_trace.depth <= g_dap.step_depth) {
+        if (moved_step && clay_call_trace.depth <= g_dap.step_depth) {
             should_stop = 1;
             reason = "step";
         }
     } else if (g_dap.step_mode == 2) {
         /* Step In — stop on any new line (including inside called methods/blocks) */
-        if (line != g_dap.step_line || clay_call_trace.depth > g_dap.step_depth) {
+        if (moved_step || clay_call_trace.depth > g_dap.step_depth) {
             should_stop = 1;
             reason = "step";
         }
     } else if (g_dap.step_mode == 3) {
         /* Step Out — stop when trace depth decreases */
-        if (clay_call_trace.depth < g_dap.step_depth && line != g_dap.step_line) {
+        if (clay_call_trace.depth < g_dap.step_depth && moved_step) {
             should_stop = 1;
             reason = "step";
         }
     } else if (g_dap.step_mode == 0) {
         /* Running — check breakpoints (skip if still on the line we continued from) */
-        if (line != g_dap.last_stopped_line && dap_has_breakpoint(line)) {
+        if (moved_stop && dap_has_breakpoint(file, line)) {
             should_stop = 1;
             reason = "breakpoint";
-        } else if (line != g_dap.last_stopped_line) {
-            /* Line changed — clear the skip guard */
+        } else if (moved_stop) {
+            /* Location changed — clear the skip guard */
             g_dap.last_stopped_line = 0;
+            g_dap.last_stopped_file = NULL;
         }
     }
 
@@ -505,6 +566,8 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
     g_dap.stopped = 1;
     g_dap.step_mode = 0;
     g_dap.last_stopped_line = line;
+    g_dap.last_stopped_file = file;
+    g_dap.stop_file = file;
     dap_var_refs_reset();
     dap_send_stopped(reason, NULL);
 
@@ -536,6 +599,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             g_dap.stopped = 0;
             g_dap.step_mode = 1;
             g_dap.step_line = line;
+            g_dap.step_file = file;
             g_dap.step_depth = clay_call_trace.depth;
         } else if (strcmp(command, "stepIn") == 0) {
             cJSON *resp = dap_base_response(msg, 1);
@@ -543,6 +607,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             g_dap.stopped = 0;
             g_dap.step_mode = 2;
             g_dap.step_line = line;
+            g_dap.step_file = file;
             g_dap.step_depth = clay_call_trace.depth;
         } else if (strcmp(command, "stepOut") == 0) {
             cJSON *resp = dap_base_response(msg, 1);
@@ -550,6 +615,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             g_dap.stopped = 0;
             g_dap.step_mode = 3;
             g_dap.step_line = line;
+            g_dap.step_file = file;
             g_dap.step_depth = clay_call_trace.depth;
         } else if (strcmp(command, "threads") == 0) {
             cJSON *resp = dap_base_response(msg, 1);
@@ -570,9 +636,10 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             cJSON_AddNumberToObject(f0, "id", 0);
             cJSON_AddStringToObject(f0, "name", "<main>");
             cJSON *src0 = cJSON_AddObjectToObject(f0, "source");
-            cJSON_AddStringToObject(src0, "name", g_dap.source_file ? g_dap.source_file : "<unknown>");
-            if (g_dap.source_file)
-                cJSON_AddStringToObject(src0, "path", g_dap.source_file);
+            const char *file0 = g_dap.stop_file ? g_dap.stop_file : g_dap.source_file;
+            cJSON_AddStringToObject(src0, "name", file0 ? file0 : "<unknown>");
+            if (file0)
+                cJSON_AddStringToObject(src0, "path", dap_full_path(file0));
             cJSON_AddNumberToObject(f0, "line", line);
             cJSON_AddNumberToObject(f0, "column", 1);
             cJSON_AddItemToArray(frames, f0);
@@ -585,7 +652,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
                 cJSON_AddStringToObject(fr, "name", tf->selector ? tf->selector : "<block>");
                 cJSON *src = cJSON_AddObjectToObject(fr, "source");
                 cJSON_AddStringToObject(src, "name", tf->file ? tf->file : "<unknown>");
-                if (tf->file) cJSON_AddStringToObject(src, "path", tf->file);
+                if (tf->file) cJSON_AddStringToObject(src, "path", dap_full_path(tf->file));
                 cJSON_AddNumberToObject(fr, "line", tf->line);
                 cJSON_AddNumberToObject(fr, "column", 1);
                 cJSON_AddItemToArray(frames, fr);
@@ -728,6 +795,7 @@ static void dap_step_callback(void *vm_ptr, size_t ip) {
             if (si < 0 && g_dap.source_count < DAP_MAX_SOURCES) {
                 si = g_dap.source_count++;
                 g_dap.sources[si].file = path ? strdup(path) : NULL;
+                g_dap.sources[si].full = dap_absolute(path);
             }
 
             /* Clear and set breakpoints */
@@ -877,6 +945,7 @@ static int dap_handle_request(cJSON *msg) {
         if (si < 0 && g_dap.source_count < DAP_MAX_SOURCES) {
             si = g_dap.source_count++;
             g_dap.sources[si].file = path ? strdup(path) : NULL;
+            g_dap.sources[si].full = dap_absolute(path);
         }
 
         /* Clear and set breakpoints */
@@ -1052,11 +1121,12 @@ int dap_run(const char *filename) {
     }
 
     g_dap.source = source;
-    g_dap.source_file = filename;
+    /* interned: every file the debugger compares is, so == compares paths */
+    g_dap.source_file = clay_intern_file(filename);
 
     /* Bootstrap runtime */
     clay_bootstrap();
-    clay_source_file = filename;
+    clay_source_file = g_dap.source_file;
 
     /* Set up VM */
     clayvm_vm_t vm;
@@ -1170,7 +1240,7 @@ int dap_run(const char *filename) {
                                 cJSON_AddStringToObject(fr, "name", tf->selector ? tf->selector : "<block>");
                                 cJSON *src = cJSON_AddObjectToObject(fr, "source");
                                 cJSON_AddStringToObject(src, "name", tf->file ? tf->file : "<unknown>");
-                                if (tf->file) cJSON_AddStringToObject(src, "path", tf->file);
+                                if (tf->file) cJSON_AddStringToObject(src, "path", dap_full_path(tf->file));
                                 cJSON_AddNumberToObject(fr, "line", tf->line);
                                 cJSON_AddNumberToObject(fr, "column", 1);
                                 cJSON_AddItemToArray(frames, fr);

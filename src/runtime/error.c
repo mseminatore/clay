@@ -11,6 +11,29 @@ CLAY_THREAD_LOCAL ClayErrorStack clay_error_stack = { .head = NULL, .current_err
 CLAY_THREAD_LOCAL int clay_source_line = 0;
 CLAY_THREAD_LOCAL const char *clay_source_file = NULL;
 
+/* Interned source paths (a handful per program; never freed). Interning
+ * happens when code is compiled or loaded, which is on the main thread. */
+static const char **g_files = NULL;
+static int g_file_count = 0, g_file_capacity = 0;
+
+const char *clay_intern_file(const char *path) {
+    if (!path) return NULL;
+    const char *found = NULL;
+    for (int i = 0; i < g_file_count && !found; i++)
+        if (g_files[i] == path || strcmp(g_files[i], path) == 0) found = g_files[i];
+    if (!found) {
+        if (g_file_count == g_file_capacity) {
+            int cap = g_file_capacity ? g_file_capacity * 2 : 16;
+            const char **grown = (const char **)realloc((void *)g_files, sizeof(char *) * (size_t)cap);
+            if (grown) { g_files = grown; g_file_capacity = cap; }
+        }
+        char *copy = strdup(path);
+        if (copy && g_file_count < g_file_capacity) g_files[g_file_count++] = copy;
+        found = copy;
+    }
+    return found;
+}
+
 /* Output hook for DAP */
 void (*clay_output_fn)(const char *text) = NULL;
 

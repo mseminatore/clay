@@ -196,6 +196,7 @@ CodeGen = Object clone {
     methodLocalBase = 0
     toplevelCount = 0
     toplevelFiles = nil     // top-level variable name -> the files that assign it
+    sourceFiles = nil       // the program's source files (codegen.c files)
     boxed = nil
     knownSlots = nil
     knownMembers = nil      // slot and method names of the enclosing clone body
@@ -232,6 +233,7 @@ CodeGen = Object clone {
     init(source, pluginExe = nil, plugins = nil) {
         out = []
         sourceFile = source
+        sourceFiles = []
         pluginExePath = pluginExe
         pluginGlobals = plugins ?? (System pluginGlobals)
         indent = 1
@@ -268,9 +270,15 @@ CodeGen = Object clone {
     }
     safe(n) { CNames safe(n) }
 
-    emitLine(l) {
-        out push("#line " + l toString + " \"" + (CNames pathBody(sourceFile)) + "\"\n")
-        self line("clay_source_line = " + l toString + ";")
+    // codegen.c emit_line: in a program of several files, also set
+    // clay_source_file from the clay_files[] table
+    emitLine(n) {
+        f = n file ?? sourceFile
+        out push("#line " + n line toString + " \"" + (CNames pathBody(f)) + "\"\n")
+        at = "clay_source_line = " + n line toString + ";"
+        fi = (sourceFiles size > 1) ifTrue { sourceFiles indexOf(f) } ifFalse { -1 }
+        (fi >= 0) ifTrue { at = at + " clay_source_file = clay_files[" + fi toString + "];" }
+        self line(at)
     }
 
     tempName() {
@@ -744,7 +752,7 @@ CodeGen = Object clone {
         args = []
         n items each { |a| args push(self expr(a)) }
         t = self tempName
-        self emitLine(n line)
+        self emitLine(n)
         argc = args size
         list = "{" + (args map { |a| a ?? "(null)" } join(", ")) + "}"
         (n isSuper && superProto != nil) ifTrue {
@@ -772,7 +780,7 @@ CodeGen = Object clone {
         left = self expr(n left)
         (left == nil) ifTrue { return nil }
         t = self tempName
-        self emitLine(n line)
+        self emitLine(n)
         self line("ClayValue " + t + ";")
         (op == "??") ifTrue {
             self line("if (" + left + " != CLAY_NIL) {")
@@ -842,7 +850,7 @@ CodeGen = Object clone {
             right = self expr(n right)
             (right == nil) ifTrue { return nil }
             t = self tempName
-            self emitLine(n line)
+            self emitLine(n)
             self line("ClayValue " + t + " = CLAY_VAL(clay_range_new(clay_to_int(" + left + "), clay_to_int(" +
                       right + "), 1));")
             self pushOwnedTemp(t)
@@ -853,7 +861,7 @@ CodeGen = Object clone {
         (left == nil || right == nil) ifTrue { return nil }
         t = self tempName
         dispatch = t + " = clay_send_owned(" + left + ", \"" + op + "\", 1, (ClayValue[]){" + right + "});"
-        self emitLine(n line)
+        self emitLine(n)
         self line("ClayValue " + t + ";")
         self line("if (CLAY_IS_INT(" + left + ") && CLAY_IS_INT(" + right + ")) {")
         indent = indent + 1
@@ -932,7 +940,7 @@ CodeGen = Object clone {
 
     tryCatch(n) {
         // the try's own line: calling the try block records it in the trace
-        self emitLine(n line)
+        self emitLine(n)
         t = self tempName
         tryTmp = self tempName
         errTmp = self tempName
@@ -1094,7 +1102,7 @@ CodeGen = Object clone {
 
     fnAssign(s, isMethod) {
         nm = s name
-        self emitLine(s line)
+        self emitLine(s)
         v = self expr(s value)
         (v == nil) ifTrue { return nil }
         o = self own(v)
@@ -1123,7 +1131,7 @@ CodeGen = Object clone {
     }
 
     fnExprStmt(s) {
-        self emitLine(s line)
+        self emitLine(s)
         v = self expr(s)
         (v == nil) ifTrue { return nil }
         self retains(v, 1 - (self own(v)))
@@ -1160,7 +1168,7 @@ CodeGen = Object clone {
         (n == nil) ifTrue { return nil }
         k = n kind
         (k == "Assign") ifTrue {
-            self emitLine(n line)
+            self emitLine(n)
             v = self expr(n value)
             (v == nil) ifTrue { return nil }
             self varStore(n name, v, 1 - (self own(v)))
@@ -1175,7 +1183,7 @@ CodeGen = Object clone {
             return nil
         }
         (k == "Return") ifTrue {
-            self emitLine(n line)
+            self emitLine(n)
             (fnIsBlock && (self isBoxed("__ret_id"))) ifTrue {
                 v = (n expr == nil) ifTrue { nil } ifFalse { self expr(n expr) }
                 (v != nil) ifTrue { self retains(v, 1 - (self own(v))) }
@@ -1200,17 +1208,17 @@ CodeGen = Object clone {
             return nil
         }
         (k == "Break") ifTrue {
-            self emitLine(n line)
+            self emitLine(n)
             self line("clay_raise(CLAY_VAL(clay_BreakSignal));")
             return nil
         }
         (k == "Continue") ifTrue {
-            self emitLine(n line)
+            self emitLine(n)
             self line("clay_raise(CLAY_VAL(clay_ContinueSignal));")
             return nil
         }
         (k == "SlotAssign") ifTrue {
-            self emitLine(n line)
+            self emitLine(n)
             recv = self expr(n recv)
             v = self expr(n value)
             (recv != nil && v != nil) ifTrue {
@@ -1234,7 +1242,7 @@ CodeGen = Object clone {
         (proto == nil) ifTrue { return nil }
         // the variable's C name (_Foo is reserved in C: _cv__Foo)
         cv = CNames safe(varName)
-        self emitLine(n line)
+        self emitLine(n)
         self line("/* " + varName + " = ... clone({ ... }) */")
         self line(cv + " = CLAY_VAL(clay_clone(CLAY_OBJ(" + proto + ")));")
         slotNames = []
@@ -1406,6 +1414,10 @@ CodeGen = Object clone {
             }
         }
         toplevelCount = locals size
+        sourceFiles = []
+        program items each { |s|
+            (s file != nil && (sourceFiles indexOf(s file)) < 0) ifTrue { sourceFiles push(s file) }
+        }
 
         header = "/* Generated by Clay compiler */\n#include \"clay.h\"\n#include \"range.h\"\n\n"
         ((nativePlugins ?? []) size > 0) ifTrue {
@@ -1413,6 +1425,11 @@ CodeGen = Object clone {
             header = header + "#include \"clay_plugin.h\"\n"
             nativePlugins each { |p| header = header + "void " + p + "_plugin_init(const ClayPluginAPI *api);\n" }
             header = header + "\n"
+        }
+        (sourceFiles size > 1) ifTrue {
+            header = header + "static const char *const clay_files[] = {\n"
+            sourceFiles each { |f| header = header + "    \"" + (CNames pathBody(f)) + "\",\n" }
+            header = header + "};\n\n"
         }
 
         // main's statements first (they collect the functions to emit)

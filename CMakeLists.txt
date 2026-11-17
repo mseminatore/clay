@@ -702,10 +702,17 @@ set_tests_properties(clay_stdlib_test_failing clay_stdlib_test_failing_native PR
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(clay_stdlib_test_failing_native PROPERTIES LABELS "native")
 
+# The debugger (clay --dap), driven by a scripted session: a breakpoint in an
+# imported file stops there, and the stack frame names that file
+add_test(NAME clay_dap_breakpoint_import
+         COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
+             -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/dap_test
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dap_test.cmake)
+
 # Runtime errors: a program that ends with an uncaught error prints exactly
 # test/errors/<name>.out (the error and its traceback), in the VM and native
 # (clayc is checked against clay in cmake/selfhost_run.cmake)
-foreach(err uncaught_trace uncaught_deep uncaught_fiber)
+foreach(err uncaught_trace uncaught_deep uncaught_fiber uncaught_import)
     add_test(NAME clay_error_${err}
              COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
                  -DSRC=test/errors/${err}.clay

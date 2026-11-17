@@ -14,6 +14,12 @@ foreach(var CLAY ROOT CLAYC)
     endif()
 endforeach()
 
+# Both sides find the bundled bricks (lib/) at the same path, so the file
+# names in their output (#line, bytecode file maps, tracebacks) agree: a
+# native Clay tool looks for lib/ from the current directory and finds it
+# as ./lib, where clay uses the absolute path next to its executable.
+set(ENV{CLAY_LIB} "${ROOT}/lib")
+
 execute_process(COMMAND "${CLAY}" --compile -o "${CLAYC}" "${ROOT}/selfhost/clayc.clay"
                 RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(NOT rc EQUAL 0)

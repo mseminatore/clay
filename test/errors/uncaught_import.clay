@@ -1,0 +1,8 @@
+// An error raised in an imported file: the traceback names that file for its
+// frames, and this one for the frames here.
+import("helper_import_trace.clay")
+
+Checker = Object clone {
+    check(v) { Parser run(v) }
+}
+Checker check(5)

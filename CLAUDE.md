@@ -143,6 +143,12 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.
+- **Source locations**: runtime errors, tracebacks and the debugger use `clay_source_line` *and*
+  `clay_source_file`, set from each AST node's `file` (imports are spliced into one program). The
+  VM keeps a per-offset `file_map` for top-level code (which mixes files) and one `BcChunk.file`
+  per body; codegen writes `clay_source_file = clay_files[k];` per statement when a program has
+  several files; `VM run` units carry `[offset, path]` file marks. The selfhost ports (`setLoc`,
+  `fileMarks`, `emitLine`) must match — `--bytecode` prints the files, so parity checks cover it.
 - **Call syntax `foo(args)`**: parsed as `Send(Ident foo, "value", args)` with `is_call` set
   (`Call(foo)` in `--ast`). A compiler sends `self foo(args)` instead when `foo` would resolve to self
   like a bare name (`bc_name_is_self_slot` / `call_targets_self`; selfhost `selfSlotName` /

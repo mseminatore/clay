@@ -1135,6 +1135,13 @@ static int dump_bytecode(const char *filename) {
         } else printf("?\n");
     }
     dump_code("code", bc.code, bc.len, bc.line_map);
+    printf("files");
+    for (size_t i = 0; i < bc.len; i++)
+        if (i == 0 || bc.file_map[i] != bc.file_map[i - 1]) {
+            const char *f = bc_file_at(&bc, i);
+            printf(" %zu:%s", i, f ? f : "?");
+        }
+    printf("\n");
     for (int c = 0; c < bc.chunk_count; c++) {
         BcChunk *ch = bc.chunks[c];
         printf("chunk %d locals %d blockReturn %d\n", c, ch->local_count, ch->has_block_return);
@@ -1144,6 +1151,7 @@ static int dump_bytecode(const char *filename) {
         for (int i = 0; i < ch->capture_count; i++) printf(" %s@%d", ch->capture_names[i], ch->capture_slots[i]);
         printf("\n");
         dump_code("code", ch->code, ch->len, ch->line_map);
+        printf("file %s\n", ch->file ? ch->file : "?");
     }
     for (int m = 0; m < bc_method_slot_count(); m++) {
         int chunk_id, params;

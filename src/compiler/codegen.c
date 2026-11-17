@@ -24,23 +24,37 @@ static void emit_indent(CodeGen *cg) {
     for (int i = 0; i < cg->indent; i++) fprintf(cg->out, "    ");
 }
 
-/* Write the source path as a C string body (forward slashes, quotes escaped) */
-static void emit_source_path(CodeGen *cg) {
-    for (const char *p = cg->source_file; *p; p++) {
+/* Write a source path as a C string body (forward slashes, quotes escaped) */
+static void emit_path(CodeGen *cg, const char *path) {
+    for (const char *p = path; *p; p++) {
         if (*p == '\\') fputc('/', cg->out);
         else if (*p == '"') fputs("\\\"", cg->out);
         else fputc(*p, cg->out);
     }
 }
 
-static void emit_line(CodeGen *cg, int line) {
-    /* #line maps the C debugger back to Clay source; clay_source_line gives
-     * runtime errors and stack traces the same file:line the VM reports. */
-    fprintf(cg->out, "#line %d \"", line);
-    emit_source_path(cg);
+static void emit_source_path(CodeGen *cg) { emit_path(cg, cg->source_file); }
+
+/* The index of path in cg->files, or -1 */
+static int file_index(CodeGen *cg, const char *path) {
+    for (int i = 0; path && i < cg->file_count; i++)
+        if (cg->files[i] == path || strcmp(cg->files[i], path) == 0) return i;
+    return -1;
+}
+
+static void emit_line(CodeGen *cg, AstNode *node) {
+    /* #line maps the C debugger back to Clay source; clay_source_line (and,
+     * in a program of several files, clay_source_file) give runtime errors
+     * and stack traces the same file:line the VM reports. */
+    const char *file = node->file ? node->file : cg->source_file;
+    fprintf(cg->out, "#line %d \"", node->line);
+    emit_path(cg, file);
     fprintf(cg->out, "\"\n");
     emit_indent(cg);
-    fprintf(cg->out, "clay_source_line = %d;\n", line);
+    fprintf(cg->out, "clay_source_line = %d;", node->line);
+    int fi = cg->file_count > 1 ? file_index(cg, file) : -1;
+    if (fi >= 0) fprintf(cg->out, " clay_source_file = clay_files[%d];", fi);
+    fprintf(cg->out, "\n");
 }
 
 static char *temp_name(CodeGen *cg) {
@@ -1020,7 +1034,7 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
     }
 
     char *t = temp_name(cg);
-    emit_line(cg, node->line);
+    emit_line(cg, node);
     emit_indent(cg);
     if (node->as.send.is_super && cg->super_proto) {
         /* super send: start lookup from defining prototype's parent */
@@ -1066,7 +1080,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         char *left = emit_expr(cg, node->as.binary.left);
         if (!left) return NULL;
         char *t = temp_name(cg);
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s;\n", t);
         emit_indent(cg);
@@ -1094,7 +1108,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         char *left = emit_expr(cg, node->as.binary.left);
         if (!left) return NULL;
         char *t = temp_name(cg);
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s;\n", t);
         emit_indent(cg);
@@ -1123,7 +1137,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         char *left = emit_expr(cg, node->as.binary.left);
         if (!left) return NULL;
         char *t = temp_name(cg);
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s;\n", t);
         emit_indent(cg);
@@ -1155,7 +1169,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
         char *right = emit_expr(cg, node->as.binary.right);
         if (!right) { free(left); return NULL; }
         char *t = temp_name(cg);
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s = CLAY_VAL(clay_range_new(clay_to_int(%s), clay_to_int(%s), 1));\n",
                 t, left, right);
@@ -1170,7 +1184,7 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
     if (!left || !right) return NULL;
 
     char *t = temp_name(cg);
-    emit_line(cg, node->line);
+    emit_line(cg, node);
     emit_indent(cg);
 
     /* For tagged ints, we can optimize common operations */
@@ -1378,7 +1392,7 @@ static char *emit_dict_lit(CodeGen *cg, AstNode *node) {
 static char *emit_try_catch(CodeGen *cg, AstNode *node) {
     /* the try's own line: calling the try block records it in the trace
      * (a bare `try` statement otherwise keeps the previous statement's) */
-    emit_line(cg, node->line);
+    emit_line(cg, node);
     char *t = temp_name(cg);
     char *try_tmp = temp_name(cg);
     char *err_tmp = temp_name(cg);
@@ -1685,7 +1699,7 @@ static void emit_flagged_write(CodeGen *cg, const char *name, const char *val, i
  * body, including __rv bookkeeping and temp cleanup. */
 static void emit_fn_assign(CodeGen *cg, AstNode *stmt, int is_method) {
     const char *name = stmt->as.assign.name;
-    emit_line(cg, stmt->line);
+    emit_line(cg, stmt);
     char *val = emit_expr(cg, stmt->as.assign.value);
     if (!val) return;
     int own = is_owned_temp(cg, val);
@@ -1716,7 +1730,7 @@ static void emit_fn_assign(CodeGen *cg, AstNode *stmt, int is_method) {
 
 /* An expression statement in a method/block body: its value becomes __rv */
 static void emit_fn_expr_stmt(CodeGen *cg, AstNode *stmt) {
-    emit_line(cg, stmt->line);
+    emit_line(cg, stmt);
     char *val = emit_expr(cg, stmt);
     if (!val) return;
     emit_retains(cg, val, 1 - is_owned_temp(cg, val));
@@ -1760,7 +1774,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
     if (!node) return;
 
     if (node->type == NODE_ASSIGN) {
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         char *val = emit_expr(cg, node->as.assign.value);
         if (!val) return;
         /* The variable takes a reference (an owned temp's, or a new one) */
@@ -1784,7 +1798,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
 
     /* Destructuring: [a, b, c] = expr */
     if (node->type == NODE_DESTRUCTURE) {
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         char *src = emit_expr(cg, node->as.destructure.value);
         if (!src) return;
         /* Store source in a temp to avoid re-evaluation */
@@ -1809,7 +1823,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
 
     /* Return: emit expression and early return from method/block */
     if (node->type == NODE_RETURN) {
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         if (cg->fn_is_block && is_boxed(cg, "__ret_id")) {
             /* `return` in a block: return from the enclosing method by raising
              * a ReturnSignal (which takes our reference to the value) */
@@ -1848,7 +1862,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
 
     /* Break: raise BreakSignal */
     if (node->type == NODE_BREAK) {
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         emit_indent(cg);
         fprintf(cg->out, "clay_raise(CLAY_VAL(clay_BreakSignal));\n");
         return;
@@ -1856,7 +1870,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
 
     /* Continue: raise ContinueSignal */
     if (node->type == NODE_CONTINUE) {
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         emit_indent(cg);
         fprintf(cg->out, "clay_raise(CLAY_VAL(clay_ContinueSignal));\n");
         return;
@@ -1864,7 +1878,7 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
 
     /* Slot assignment: receiver slot = value */
     if (node->type == NODE_SLOT_ASSIGN) {
-        emit_line(cg, node->line);
+        emit_line(cg, node);
         char *recv = emit_expr(cg, node->as.slot_assign.receiver);
         char *val = emit_expr(cg, node->as.slot_assign.value);
         if (recv && val) {
@@ -1901,7 +1915,7 @@ static void emit_clone(CodeGen *cg, AstNode *node, const char *var_name) {
      * `_cv__Foo`); copied because c_safe_name's buffers rotate */
     char *cvar = strdup(c_safe_name(var_name));
 
-    emit_line(cg, node->line);
+    emit_line(cg, node);
     emit_indent(cg);
     fprintf(cg->out, "/* %s = ... clone({ ... }) */\n", var_name);
     emit_indent(cg);
@@ -2177,6 +2191,8 @@ static void emit_method_bodies(CodeGen *cg) {
 void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->out = out;
     cg->source_file = source_file;
+    cg->files = NULL;
+    cg->file_count = 0;
     cg->indent = 1;
     cg->temp_counter = 0;
     cg->method_counter = 0;
@@ -2266,6 +2282,18 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
     }
     cg->toplevel_local_count = cg->local_count;
 
+    /* The source files, in the order their statements come */
+    free(cg->files);
+    cg->files = NULL;
+    cg->file_count = 0;
+    for (int i = 0; i < program->as.program.stmts.count; i++) {
+        const char *f = program->as.program.stmts.items[i]->file;
+        if (f && file_index(cg, f) < 0) {
+            cg->files = (const char **)realloc((void *)cg->files, sizeof(char *) * (size_t)(cg->file_count + 1));
+            cg->files[cg->file_count++] = f;
+        }
+    }
+
     /* Emit header */
     fprintf(cg->out, "/* Generated by Clay compiler */\n");
     fprintf(cg->out, "#include \"clay.h\"\n");
@@ -2276,6 +2304,15 @@ void codegen_emit(CodeGen *cg, AstNode *program) {
         for (int i = 0; i < cg->native_plugin_count; i++)
             fprintf(cg->out, "void %s_plugin_init(const ClayPluginAPI *api);\n", cg->native_plugins[i]);
         fprintf(cg->out, "\n");
+    }
+    if (cg->file_count > 1) {
+        fprintf(cg->out, "static const char *const clay_files[] = {\n");
+        for (int i = 0; i < cg->file_count; i++) {
+            fprintf(cg->out, "    \"");
+            emit_path(cg, cg->files[i]);
+            fprintf(cg->out, "\",\n");
+        }
+        fprintf(cg->out, "};\n\n");
     }
 
     /* Buffer main code in a temp file so we can emit method bodies first */

@@ -144,6 +144,8 @@ BcGen = Object clone {
     buf = nil              // bytes of the current chunk (or top-level code)
     bufLines = nil         // source line of each byte
     curLine = 0
+    bufFiles = nil         // source file of each byte (bc_compiler.c file_map)
+    curFile = nil
     locs = nil             // BcLocal of the current chunk
     depth = 0
     inMeth = false         // inside a method body (or a block within one)
@@ -170,11 +172,18 @@ BcGen = Object clone {
         }
         g buf = []
         g bufLines = []
+        g bufFiles = []
         g locs = []
         g
     }
 
     // --- emission ---
+
+    // The source location the next bytes come from (bc_set_loc)
+    setLoc(n) {
+        curLine = n line
+        (n file != nil) ifTrue { curFile = n file }
+    }
 
     emitByte(b) {
         (buf size >= MAX_CODE) ifTrue {
@@ -183,6 +192,7 @@ BcGen = Object clone {
         }
         buf push(b)
         bufLines push(curLine)
+        bufFiles push(curFile)
     }
 
     emitU16(v) {
@@ -550,7 +560,8 @@ BcGen = Object clone {
     // Returns the chunk id.
     compileChunk(body, params, caps, isMethod) {
         id = chunkBase + chunkList size
-        rec = [nil, nil, [], [], [], 0, false]
+        // a body is all from one file: the file of the block or method node
+        rec = [nil, nil, [], [], [], 0, false, curFile]
         chunkList push(rec)
         pnames = rec at(2)
         params each { |p| pnames push(p name) }
@@ -558,6 +569,8 @@ BcGen = Object clone {
         outerBuf = buf
         outerLines = bufLines
         outerLine = curLine
+        outerFiles = bufFiles
+        outerFile = curFile
         outerLocs = locs
         outerDepth = depth
         outerInMeth = inMeth
@@ -565,6 +578,7 @@ BcGen = Object clone {
 
         buf = []
         bufLines = []
+        bufFiles = []
         locs = []
         depth = 0
         isMethod ifTrue { inMeth = true }
@@ -682,6 +696,8 @@ BcGen = Object clone {
         buf = outerBuf
         bufLines = outerLines
         curLine = outerLine
+        bufFiles = outerFiles
+        curFile = outerFile
         locs = outerLocs
         depth = outerDepth
         inMeth = outerInMeth
@@ -693,7 +709,7 @@ BcGen = Object clone {
 
     expr(n) {
         (n == nil || failed) ifTrue { return nil }
-        curLine = n line
+        self setLoc(n)
         k = n kind
         (k == "Int") ifTrue { return self pushConst(self constInt(n value)) }
         (k == "Float") ifTrue { return self pushConst(self addConstant(n value, "float")) }
@@ -752,7 +768,7 @@ BcGen = Object clone {
             (n catchBlock != nil) ifTrue { self expr(n catchBlock) } ifFalse { self pushNil }
             (n finallyBlock != nil) ifTrue { self expr(n finallyBlock) } ifFalse { self pushNil }
             // the call takes the try's line (bc_compiler.c), for its trace frame
-            curLine = n line
+            self setLoc(n)
             return self native(N_TRY_CATCH, 3)
         }
         (k == "Raise") ifTrue {
@@ -944,7 +960,7 @@ BcGen = Object clone {
 
     stmt(n) {
         (n == nil || failed) ifTrue { return nil }
-        curLine = n line
+        self setLoc(n)
         k = n kind
         (k == "Assign") ifTrue { return self assignStmt(n) }
         (k == "SlotAssign") ifTrue {
@@ -1020,12 +1036,14 @@ BcGen = Object clone {
     // --- programs ---
 
     // Compile a Program node (bc_compile). Returns the unit for `VM run`:
-    //   [constBase, constants, chunkBase, chunks, methodBase, methods, code, lines, file]
-    // holding what this compile added, or nil after a compile error.
+    //   [constBase, constants, chunkBase, chunks, methodBase, methods, code, lines, file, files]
+    // holding what this compile added, or nil after a compile error. files
+    // marks where the top-level code's source file changes: [[offset, path], ...]
     compile(program) {
         failed = false
         buf = []
         bufLines = []
+        bufFiles = []
         stmts = program items
         stmts each { |st|
             (st kind == "Assign" && (self isBuiltin(st name)) == false) ifTrue {
@@ -1047,7 +1065,7 @@ BcGen = Object clone {
         unit = [constBase + constMark, cpool slice(constMark, cpool size),
                 chunkBase + chunkMark, chunkList slice(chunkMark, chunkList size),
                 methodBase + methodMark, methodList slice(methodMark, methodList size),
-                buf, bufLines, srcFile]
+                buf, bufLines, srcFile, self fileMarks(bufFiles)]
         constMark = cpool size
         chunkMark = chunkList size
         methodMark = methodList size
@@ -1084,6 +1102,17 @@ BcGen = Object clone {
         kind + " " + v toString
     }
 
+    // [[offset, path], ...] where the file changes (nil: unknown)
+    fileMarks(files) {
+        marks = []
+        i = 0
+        { i < files size } whileTrue {
+            (i == 0 || (files at(i)) != (files at(i - 1))) ifTrue { marks push([i, files at(i)]) }
+            i = i + 1
+        }
+        marks
+    }
+
     dumpCode(out, code, lines) {
         out push("code " + code size toString)
         i = 0
@@ -1114,6 +1143,9 @@ BcGen = Object clone {
             i = i + 1
         }
         self dumpCode(out, buf, bufLines)
+        fl = ["files"]
+        (self fileMarks(bufFiles)) each { |m| fl push((m at(0)) toString + ":" + ((m at(1)) ?? "?")) }
+        out push(fl join(" "))
         i = 0
         { i < chunkList size } whileTrue {
             rec = chunkList at(i)
@@ -1132,6 +1164,7 @@ BcGen = Object clone {
             }
             out push(cs join(" "))
             self dumpCode(out, rec at(0), rec at(1))
+            out push("file " + ((rec at(7)) ?? "?"))
             i = i + 1
         }
         i = 0

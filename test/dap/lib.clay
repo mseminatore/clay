@@ -1,0 +1,6 @@
+// imported by main.clay; line 4 is code here and in main.clay
+Lib = Object clone {
+    twice(x) {
+        x * 2
+    }
+}

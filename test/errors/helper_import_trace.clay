@@ -1,0 +1,10 @@
+// imported by uncaught_import.clay: the error is raised in this file
+Parser = Object clone {
+    parse(x) {
+        (x > 1) ifTrue { raise("too big: ${x}") }
+        x
+    }
+    run(x) {
+        self parse(x)
+    }
+}
