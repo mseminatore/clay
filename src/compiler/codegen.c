@@ -1083,8 +1083,103 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
     return t;
 }
 
+/* Box a local in a cell here, unless it already is: from now on the function
+ * reads and writes it through `<name>_cell`. */
+static void box_local(CodeGen *cg, const char *name) {
+    if (is_boxed(cg, name)) return;
+    emit_indent(cg);
+    if (strcmp(name, "_method_self") == 0) {
+        /* Capture the method's self (ClayObject* → ClayValue) */
+        fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(CLAY_VAL(self));\n", name);
+    } else {
+        fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(%s);\n", c_safe_name(name), c_safe_name(name));
+    }
+    push_boxed(cg, name);
+    fn_track_cell(cg, name);
+}
+
+/* Box now the locals that blocks inside `node` capture. Cells are otherwise
+ * made where a block is created, and stay in use for the rest of the
+ * function; when that is inside a C branch (the right side of &&, || or ??)
+ * the cell would go out of scope while the function still uses it, so the
+ * branches box their right side's captures before opening. */
+static void prebox_captures_list(CodeGen *cg, NodeList *list);
+
+static void prebox_captures(CodeGen *cg, AstNode *node) {
+    if (!node) return;
+    switch (node->type) {
+        case NODE_BLOCK: {
+            int pc = node->as.block.params.count;
+            char **params = NULL;
+            if (pc > 0) {
+                params = (char **)malloc(sizeof(char *) * (size_t)pc);
+                for (int i = 0; i < pc; i++)
+                    params[i] = node->as.block.params.items[i]->as.ident.name;
+            }
+            CaptureList caps;
+            capture_init(&caps);
+            scan_free_vars_list(&node->as.block.body, params, pc, &caps, cg);
+            for (int i = 0; i < caps.count; i++) box_local(cg, caps.names[i]);
+            capture_free(&caps);
+            free(params);
+            break;
+        }
+        case NODE_SEND:
+            prebox_captures(cg, node->as.send.receiver);
+            prebox_captures_list(cg, &node->as.send.args);
+            break;
+        case NODE_BINARY:
+            prebox_captures(cg, node->as.binary.left);
+            prebox_captures(cg, node->as.binary.right);
+            break;
+        case NODE_ASSIGN:
+            prebox_captures(cg, node->as.assign.value);
+            break;
+        case NODE_SLOT_ASSIGN:
+            prebox_captures(cg, node->as.slot_assign.receiver);
+            prebox_captures(cg, node->as.slot_assign.value);
+            break;
+        case NODE_ARRAY_LIT:
+            prebox_captures_list(cg, &node->as.array_lit.elements);
+            break;
+        case NODE_DICT_LIT:
+            prebox_captures_list(cg, &node->as.dict_lit.values);
+            break;
+        case NODE_CLONE:
+            prebox_captures(cg, node->as.clone.proto);
+            for (int i = 0; i < node->as.clone.members.count; i++) {
+                AstNode *m = node->as.clone.members.items[i];
+                if (m && m->type == NODE_SLOT_DEF) prebox_captures(cg, m->as.slot_def.value);
+            }
+            break;
+        case NODE_TRY_CATCH:
+            prebox_captures(cg, node->as.try_catch.try_block);
+            prebox_captures(cg, node->as.try_catch.catch_block);
+            prebox_captures(cg, node->as.try_catch.finally_block);
+            break;
+        case NODE_RAISE:
+            prebox_captures(cg, node->as.raise.expr);
+            break;
+        case NODE_RETURN:
+            prebox_captures(cg, node->as.return_stmt.expr);
+            break;
+        case NODE_DESTRUCTURE:
+            prebox_captures(cg, node->as.destructure.value);
+            break;
+        default:
+            break;
+    }
+}
+
+static void prebox_captures_list(CodeGen *cg, NodeList *list) {
+    for (int i = 0; i < list->count; i++) prebox_captures(cg, list->items[i]);
+}
+
 static char *emit_binary(CodeGen *cg, AstNode *node) {
     const char *op = node->as.binary.op;
+
+    if (strcmp(op, "&&") == 0 || strcmp(op, "||") == 0 || strcmp(op, "??") == 0)
+        prebox_captures(cg, node->as.binary.right);
 
     /* Short-circuit && and || */
     if (strcmp(op, "&&") == 0) {
@@ -1327,20 +1422,8 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
     MethodDef *md = collected_methods; /* it's the most recent one */
     if (md->captures.count > 0) {
         /* Create cells for each captured variable (reuse existing cells) */
-        for (int i = 0; i < md->captures.count; i++) {
-            const char *name = md->captures.names[i];
-            if (!is_boxed(cg, name)) {
-                emit_indent(cg);
-                if (strcmp(name, "_method_self") == 0) {
-                    /* Capture the method's self (ClayObject* → ClayValue) */
-                    fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(CLAY_VAL(self));\n", name);
-                } else {
-                    fprintf(cg->out, "ClayCell *%s_cell = clay_cell_new(%s);\n", c_safe_name(name), c_safe_name(name));
-                }
-                push_boxed(cg, name);
-                fn_track_cell(cg, name);
-            }
-        }
+        for (int i = 0; i < md->captures.count; i++)
+            box_local(cg, md->captures.names[i]);
         /* Build env array with cell pointers */
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s_env[] = {", t);

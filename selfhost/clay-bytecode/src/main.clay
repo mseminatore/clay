@@ -488,6 +488,15 @@ BcGen = Object clone {
         }
         (k == "Return") ifTrue { return self prescan(n expr) }
         (k == "DictLit") ifTrue { return self prescanList(n vals) }
+        (k == "Array") ifTrue { return self prescanList(n items) }
+        (k == "Raise") ifTrue { return self prescan(n expr) }
+        (k == "Destructure") ifTrue { return self prescan(n value) }
+        (k == "Clone") ifTrue {
+            // slot values run in this scope; method bodies are their own
+            self prescan(n recv)
+            n items each { |m| (m kind == "SlotDef") ifTrue { self prescan(m value) } }
+            return nil
+        }
         nil
     }
 

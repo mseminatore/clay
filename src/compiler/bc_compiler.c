@@ -551,6 +551,24 @@ static void bc_prescan_node(BcCompiler *bc, AstNode *node) {
         case NODE_DICT_LIT:
             bc_prescan_list(bc, &node->as.dict_lit.values);
             break;
+        case NODE_ARRAY_LIT:
+            bc_prescan_list(bc, &node->as.array_lit.elements);
+            break;
+        case NODE_RAISE:
+            bc_prescan_node(bc, node->as.raise.expr);
+            break;
+        case NODE_DESTRUCTURE:
+            bc_prescan_node(bc, node->as.destructure.value);
+            break;
+        case NODE_CLONE:
+            /* Slot values run in this scope; method bodies are their own */
+            bc_prescan_node(bc, node->as.clone.proto);
+            for (int i = 0; i < node->as.clone.members.count; i++) {
+                AstNode *m = node->as.clone.members.items[i];
+                if (m && m->type == NODE_SLOT_DEF)
+                    bc_prescan_node(bc, m->as.slot_def.value);
+            }
+            break;
         default:
             break;
     }

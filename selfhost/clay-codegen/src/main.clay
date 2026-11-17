@@ -787,8 +787,68 @@ CodeGen = Object clone {
         t
     }
 
+    // Box a local in a cell here, unless it already is: from now on the
+    // function reads and writes it through `<name>_cell`
+    boxLocal(nm) {
+        (self isBoxed(nm)) ifTrue { return nil }
+        (nm == "_method_self") ifTrue {
+            self line("ClayCell *" + nm + "_cell = clay_cell_new(CLAY_VAL(self));")
+        } ifFalse {
+            self line("ClayCell *" + (self safe(nm)) + "_cell = clay_cell_new(" + (self safe(nm)) + ");")
+        }
+        boxed push(nm)
+        self trackCell(nm)
+    }
+
+    // Box now the locals that blocks inside n capture. Cells are otherwise
+    // made where a block is created and stay in use for the rest of the
+    // function; inside a C branch (the right side of &&, || or ??) the cell
+    // would go out of scope while the function still uses it.
+    preboxCaptures(n) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Block") ifTrue {
+            caps = []
+            params = n params map { |p| p name }
+            n body each { |s| self scan(s, params, caps) }
+            caps each { |nm| self boxLocal(nm) }
+            return nil
+        }
+        (k == "Send") ifTrue {
+            self preboxCaptures(n recv)
+            n items each { |a| self preboxCaptures(a) }
+            return nil
+        }
+        (k == "Binary") ifTrue {
+            self preboxCaptures(n left)
+            return self preboxCaptures(n right)
+        }
+        (k == "Assign") ifTrue { return self preboxCaptures(n value) }
+        (k == "SlotAssign") ifTrue {
+            self preboxCaptures(n recv)
+            return self preboxCaptures(n value)
+        }
+        (k == "Array") ifTrue { n items each { |a| self preboxCaptures(a) }; return nil }
+        (k == "DictLit") ifTrue { n vals each { |a| self preboxCaptures(a) }; return nil }
+        (k == "Clone") ifTrue {
+            self preboxCaptures(n recv)
+            n items each { |m| (m kind == "SlotDef") ifTrue { self preboxCaptures(m value) } }
+            return nil
+        }
+        (k == "TryCatch") ifTrue {
+            self preboxCaptures(n tryBlock)
+            self preboxCaptures(n catchBlock)
+            return self preboxCaptures(n finallyBlock)
+        }
+        (k == "Raise") ifTrue { return self preboxCaptures(n expr) }
+        (k == "Return") ifTrue { return self preboxCaptures(n expr) }
+        (k == "Destructure") ifTrue { return self preboxCaptures(n value) }
+        nil
+    }
+
     // a ? b : c for the three short-circuit operators
     shortCircuit(n, op) {
+        self preboxCaptures(n right)
         left = self expr(n left)
         (left == nil) ifTrue { return nil }
         t = self tempName
@@ -928,17 +988,7 @@ CodeGen = Object clone {
 
         t = self tempName
         (caps size > 0) ifTrue {
-            caps each { |nm|
-                (self isBoxed(nm)) ifFalse {
-                    (nm == "_method_self") ifTrue {
-                        self line("ClayCell *" + nm + "_cell = clay_cell_new(CLAY_VAL(self));")
-                    } ifFalse {
-                        self line("ClayCell *" + (self safe(nm)) + "_cell = clay_cell_new(" + (self safe(nm)) + ");")
-                    }
-                    boxed push(nm)
-                    self trackCell(nm)
-                }
-            }
+            caps each { |nm| self boxLocal(nm) }
             env = caps map { |nm| "(ClayValue)(uintptr_t)" + (self safe(nm)) + "_cell" }
             self line("ClayValue " + t + "_env[] = {" + (env join(", ")) + "};")
             self line("ClayValue " + t + " = CLAY_VAL(clay_block_new_cells(" + fname + ", " + t + "_env, " +

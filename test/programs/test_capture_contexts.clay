@@ -1,0 +1,76 @@
+// Blocks that capture a variable from inside other expressions: an array
+// literal, a destructuring's value, a clone body's slot value, and the right
+// side of &&, || and ??. The VM must box the variable before the expression
+// (its prescan once skipped array literals, destructuring and clone slots),
+// and native code must make the variable's cell outside the C branch of a
+// short-circuit operator, since the function keeps using the cell afterwards.
+// failures are counted, and the program exits 1 if there were any
+
+failures = 0
+check = { |what, got, want|
+    (got == want) ifTrue { ("PASS: " + what) println } ifFalse {
+        ("FAIL: " + what + ": got " + got toString + ", want " + want toString) println
+        failures = failures + 1
+    }
+}
+
+// in blocks
+inArray = (1..3) map { |e| [(e < 2) ifTrue { 0 } ifFalse { e }] }
+check value("array literal in a block", inArray, [[0], [2], [3]])
+
+inDestructure = { |e|
+    [a, b] = [(e < 2) ifTrue { 0 } ifFalse { e }, 1]
+    a + b
+}
+check value("destructuring value in a block", inDestructure value(5), 6)
+
+inClone = { |e|
+    o = Object clone { v = (e < 2) ifTrue { 0 } ifFalse { e } }
+    o v
+}
+check value("clone slot value in a block", inClone value(5), 5)
+
+coalesceBlock = { |a, o|
+    nums = a
+    lo = o ?? ((nums size > 0) ifTrue { nums first } ifFalse { 0 })
+    nums = [7]
+    [lo, nums]
+}
+check value("?? in a block, variable used after", coalesceBlock value([5], nil), [5, [7]])
+
+// in methods
+M = Object clone {
+    arr(e) { [(e < 2) ifTrue { 0 } ifFalse { e }] }
+    coalesce(o, a) {
+        nums = a
+        lo = o ?? ((nums size > 0) ifTrue { nums first } ifFalse { 0 })
+        nums = [9]
+        [lo, nums]
+    }
+    andAlso(a, b) {
+        n = a
+        r = b && (true ifTrue { n } ifFalse { 0 })
+        n = n + 1
+        [r, n]
+    }
+    orElse(a, b) {
+        n = a
+        r = b || (([1] map { |x| n + x }) first == 5)
+        n = n * 2
+        [r, n]
+    }
+    nested(o) {
+        k = 3
+        r = o ?? (nil ?? ([k] map { |x| x + k }) first)
+        k = k + 1
+        [r, k]
+    }
+}
+check value("array literal in a method", M arr(5), [5])
+check value("?? in a method", M coalesce(nil, [5]), [5, [9]])
+check value("?? in a method, left side used", M coalesce(1, [5]), [1, [9]])
+check value("&& in a method", M andAlso(4, true), [true, 5])
+check value("|| in a method", M orElse(4, false), [true, 8])
+check value("nested ?? in a method", M nested(nil), [6, 4])
+
+(failures > 0) ifTrue { System exit(1) }
