@@ -1,50 +1,66 @@
-// Test clay-base64 brick
+// stdlib/base64: encoding, decoding, binary data and bad input
+import("stdlib/test")
 import("stdlib/base64")
 
-// Test encoding
-// failures are counted, and the program exits 1 if there were any
-TestFails = Object clone {
-    count = 0
-    fail(msg) {
-        msg println
-        self count = self count + 1
+Test describe("encode") {
+    Test it("encodes text") {
+        Test assertEqual(Base64 encode("Hello, World!"), "SGVsbG8sIFdvcmxkIQ==")
+        Test assertEqual(Base64 encode(""), "")
+    }
+    Test it("pads short groups") {
+        Test assertEqual(Base64 encode("A"), "QQ==")
+        Test assertEqual(Base64 encode("AB"), "QUI=")
+        Test assertEqual(Base64 encode("ABC"), "QUJD")
+    }
+    Test it("encodes bytes above 127") {
+        Test assertEqual(Base64 encode(String fromBytes([0, 200, 255])), "AMj/")
+        Test assertEqual(Base64 encode("héllo"), "aMOpbGxv")
+        Test assertEqual(Base64 encode(String fromBytes([251, 255])), "+/8=")
+    }
+    Test it("raises on a non-string") {
+        Test assertRaises({ Base64 encode(42) })
     }
 }
 
-result = Base64 encode("Hello, World!")
-(result == "SGVsbG8sIFdvcmxkIQ==") ifTrue { "PASS: encode Hello, World!" println } ifFalse { TestFails fail(("FAIL: encode got " + result)) }
-
-// Test decoding
-decoded = Base64 decode("SGVsbG8sIFdvcmxkIQ==")
-(decoded == "Hello, World!") ifTrue { "PASS: decode Hello, World!" println } ifFalse { TestFails fail(("FAIL: decode got " + decoded)) }
-
-// Test roundtrip
-original = "Clay is awesome"
-(Base64 decode(Base64 encode(original)) == original) ifTrue { "PASS: roundtrip" println } ifFalse { TestFails fail("FAIL: roundtrip") }
-
-// Test empty string
-(Base64 encode("") == "") ifTrue { "PASS: encode empty" println } ifFalse { TestFails fail("FAIL: encode empty") }
-(Base64 decode("") == "") ifTrue { "PASS: decode empty" println } ifFalse { TestFails fail("FAIL: decode empty") }
-
-// Test single char (padding)
-r1 = Base64 encode("A")
-(r1 == "QQ==") ifTrue { "PASS: encode A" println } ifFalse { TestFails fail(("FAIL: encode A got " + r1)) }
-
-// Test two chars (padding)
-r2 = Base64 encode("AB")
-(r2 == "QUI=") ifTrue { "PASS: encode AB" println } ifFalse { TestFails fail(("FAIL: encode AB got " + r2)) }
-
-// Test three chars (no padding)
-r3 = Base64 encode("ABC")
-(r3 == "QUJD") ifTrue { "PASS: encode ABC" println } ifFalse { TestFails fail(("FAIL: encode ABC got " + r3)) }
-
-// Test decode single char
-(Base64 decode("QQ==") == "A") ifTrue { "PASS: decode A" println } ifFalse { TestFails fail("FAIL: decode A") }
-
-// Test decode two chars
-(Base64 decode("QUI=") == "AB") ifTrue { "PASS: decode AB" println } ifFalse { TestFails fail("FAIL: decode AB") }
-
-(TestFails count > 0) ifTrue {
-    ((TestFails count) toString + " failed") println
-    System exit(1)
+Test describe("decode") {
+    Test it("decodes text") {
+        Test assertEqual(Base64 decode("SGVsbG8sIFdvcmxkIQ=="), "Hello, World!")
+        Test assertEqual(Base64 decode(""), "")
+        Test assertEqual(Base64 decode("QQ=="), "A")
+        Test assertEqual(Base64 decode("QUI="), "AB")
+    }
+    Test it("decodes bytes above 127") {
+        Test assertEqual(Base64 decode("AMj/") bytes, [0, 200, 255])
+        Test assertEqual(Base64 decode("+/8=") bytes, [251, 255])
+    }
+    Test it("accepts missing padding and line breaks") {
+        Test assertEqual(Base64 decode("QQ"), "A")
+        Test assertEqual(Base64 decode("QUI"), "AB")
+        Test assertEqual(Base64 decode("SGVs\r\nbG8=\n"), "Hello")
+    }
+    Test it("raises on bad input") {
+        e = Test assertRaises({ Base64 decode("SGV$sbG8=") })
+        Test assertTrue(e message contains("invalid character $"))
+        Test assertRaises({ Base64 decode("Q") })
+        Test assertRaises({ Base64 decode("QQ=A") })
+        Test assertRaises({ Base64 decode("QQ=") })
+        Test assertRaises({ Base64 decode("QQ===") })
+    }
 }
+
+Test describe("round trip") {
+    Test it("keeps every byte value") {
+        all = []
+        i = 0
+        { i < 256 } whileTrue { all push(i); i = i + 1 }
+        data = String fromBytes(all)
+        Test assertEqual(Base64 decode(Base64 encode(data)), data)
+    }
+    Test it("keeps every length mod 3") {
+        ["", "a", "ab", "abc", "abcd", "Clay is awesome"] each { |s|
+            Test assertEqual(Base64 decode(Base64 encode(s)), s)
+        }
+    }
+}
+
+Test run
