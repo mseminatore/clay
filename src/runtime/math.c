@@ -88,6 +88,35 @@ static ClayValue math_cos(ClayObject *self, int argc, ClayValue *argv) {
     return clay_float_tag(cosf(get_float_arg("Math cos")));
 }
 
+static ClayValue math_tan(ClayObject *self, int argc, ClayValue *argv) {
+    return clay_float_tag(tanf(get_float_arg("Math tan")));
+}
+
+/* Math atan2(y, x): the angle of the point (x, y), in -pi..pi */
+static ClayValue math_atan2(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    float y = clay_arg_float(argc, argv, 0, "Math atan2");
+    float x = clay_arg_float(argc, argv, 1, "Math atan2");
+    return clay_float_tag(atan2f(y, x));
+}
+
+static ClayValue math_exp(ClayObject *self, int argc, ClayValue *argv) {
+    return clay_float_tag(expf(get_float_arg("Math exp")));
+}
+
+/* Math log(x): the natural logarithm; Math log(x, base) in another base (as
+ * Python's math.log). IEEE results at the edges: log(0) is -inf, log of a
+ * negative number nan. Worked in double so log(1000, 10) is exactly 3. */
+static ClayValue math_log(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self;
+    double x = clay_arg_float(argc, argv, 0, "Math log");
+    if (argc >= 2 && !CLAY_IS_NIL(argv[1])) {
+        double base = clay_arg_float(argc, argv, 1, "Math log");
+        return clay_float_tag((float)(log(x) / log(base)));
+    }
+    return clay_float_tag((float)log(x));
+}
+
 /* Per-thread xorshift32 PRNG — thread-safe, no shared state */
 static CLAY_THREAD_LOCAL uint32_t g_random_state = 0;
 
@@ -177,6 +206,10 @@ void clay_math_init(ClayObject *proto) {
     clay_set_method(proto, "round",  math_round);
     clay_set_method(proto, "sin",    math_sin);
     clay_set_method(proto, "cos",    math_cos);
+    clay_set_method(proto, "tan",    math_tan);
+    clay_set_method(proto, "atan2",  math_atan2);
+    clay_set_method(proto, "exp",    math_exp);
+    clay_set_method(proto, "log",    math_log);
     clay_set_method(proto, "random", math_random);
 
     /* Constants as slots */
