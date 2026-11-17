@@ -17,7 +17,35 @@ and add its `bin` folder to your `PATH`. It contains `bin/clay` and the bundled 
   downloaded it with a browser, macOS will refuse to open it. Download with `curl -LO`, or remove
   the quarantine flag once: `xattr -dr com.apple.quarantine clay-<version>-macos-arm64`.
 - **Windows**: SmartScreen may warn about an unrecognized app. Choose **More info**, then **Run
-  anyway**, or run `Unblock-File` on the zip in PowerShell before unpacking it.
+  anyway**, or run `Unblock-File` on the zip in PowerShell before unpacking it. Or skip the
+  manual steps and use the install script (see below).
+
+### Windows install script
+
+`tools/install.ps1` installs or updates Clay in one step. It downloads the latest Windows zip,
+checks it against `SHA256SUMS`, installs it into `%LOCALAPPDATA%\Programs\clay` (no admin rights
+needed) and adds its `bin` folder to your user `PATH`:
+
+```powershell
+irm https://raw.githubusercontent.com/mseminatore/clay/main/tools/install.ps1 | iex
+```
+
+Run the same command to update; it does nothing when you already have the latest version. It
+replaces the whole install folder, and keeps the old install until the new `clay` runs, so a
+failed update leaves the old version in place. To pass options, run it as a script block:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/mseminatore/clay/main/tools/install.ps1))) -Version 0.3.5
+```
+
+| Option | Meaning |
+|---|---|
+| `-Version x.y.z` | install this release instead of the latest |
+| `-Prefix <dir>` | install somewhere else (gets `bin\`, `lib\clay\`, `share\`) |
+| `-Force` | reinstall even if that version is already installed |
+| `-NoModifyPath` | leave `PATH` alone |
+
+From a clone of the repo: `powershell -ExecutionPolicy Bypass -File tools\install.ps1`.
 
 Release builds have HTTPS but not `Graphics` (SDL2). `clay --compile` and native bricks
 work from a release: `lib/clay/native/` holds the runtime headers and prebuilt libraries, and

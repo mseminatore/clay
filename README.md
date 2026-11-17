@@ -61,6 +61,13 @@ export PATH="$PWD/clay-<version>-macos-arm64/bin:$PATH"
 clay --version
 ```
 
+On Windows, one PowerShell command downloads the latest release, verifies it, installs it into
+`%LOCALAPPDATA%\Programs\clay` and adds it to your `PATH` (run it again later to update):
+
+```powershell
+irm https://raw.githubusercontent.com/mseminatore/clay/main/tools/install.ps1 | iex
+```
+
 The archive includes the standard library and web bricks, plus what `clay --compile` and native
 bricks link against (if you need to build native bricks you must have a C compiler). [Getting started](docs/getting-started.md#installing)
 covers which compiler to install, and the macOS and Windows download warnings.
