@@ -1,0 +1,34 @@
+// Array sort: numbers in numeric order (integers and floats together, NaN
+// last), strings byte by byte, numbers before strings. Floats once sorted as
+// text, which put 2e-05 after 0.5 and 10 before 9.5.
+// failures are counted, and the program exits 1 if there were any
+
+failures = 0
+check = { |what, got, want|
+    (got == want) ifTrue { ("PASS: " + what) println } ifFalse {
+        ("FAIL: " + what + ": got " + got toString + ", want " + want toString) println
+        failures = failures + 1
+    }
+}
+
+check value("integers", [3, -1, 10, 2] sort, [-1, 2, 3, 10])
+check value("floats", [0.5, 0.25, 1.5, -0.75] sort, [-0.75, 0.25, 0.5, 1.5])
+check value("small floats", [0.0001, 0.00009, 0.5, 0.00002, 0.3] sort, [0.00002, 0.00009, 0.0001, 0.3, 0.5])
+check value("large floats", [1e10, 2e9, 3.5] sort, [3.5, 2e9, 1e10])
+check value("integers with floats", [10, 9.5, 2, 2.5] sort, [2, 2.5, 9.5, 10])
+check value("descending, by reverse", [0.1, 0.00003, 2] sort reverse, [2, 0.1, 0.00003])
+check value("strings", ["pear", "apple", "Banana", "app"] sort, ["Banana", "app", "apple", "pear"])
+check value("numbers before strings", ["b", 3, "a", 1.5] sort, [1.5, 3, "a", "b"])
+check value("empty", [] sort, [])
+check value("one", [7.5] sort, [7.5])
+
+nan = 0.0 / 0.0
+sorted = [2.0, nan, 1.0] sort
+check value("NaN goes last", sorted slice(0, 2), [1.0, 2.0])
+check value("NaN is kept", (sorted at(2)) != (sorted at(2)), true)
+
+original = [3, 1, 2]
+original sort
+check value("sort leaves the array as it was", original, [3, 1, 2])
+
+(failures > 0) ifTrue { System exit(1) }

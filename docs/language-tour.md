@@ -677,7 +677,8 @@ arr find { |x| x > 2 }           // 3
 
 // Utility methods
 arr reverse                   // [3, 2, 1]
-arr sort                      // [1, 2, 3]
+arr sort                      // [1, 2, 3]: a new array; numbers by value, strings
+                              // byte by byte, numbers before strings
 arr join(", ")                // "1, 2, 3"
 arr contains(2)               // true
 arr indexOf(2)                // 1

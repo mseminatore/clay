@@ -298,14 +298,41 @@ static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(result);
 }
 
+/* sort's order: numbers by value (NaN last), then strings byte by byte, then
+ * anything else by its toString text */
+static int sort_rank(ClayValue v) {
+    if (CLAY_IS_INT(v) || CLAY_IS_FLOAT(v)) return 0;
+    if (CLAY_IS_TYPE(v, CLAY_TYPE_STRING)) return 1;
+    return 2;
+}
+
 static int clay_compare_values(const void *a, const void *b) {
     ClayValue va = *(const ClayValue *)a;
     ClayValue vb = *(const ClayValue *)b;
-    if (CLAY_IS_INT(va) && CLAY_IS_INT(vb)) {
-        intptr_t ia = clay_to_int(va), ib = clay_to_int(vb);
-        return (ia > ib) - (ia < ib);
+    int ra = sort_rank(va), rb = sort_rank(vb);
+    if (ra != rb) return (ra > rb) - (ra < rb);
+
+    if (ra == 0) {
+        if (CLAY_IS_INT(va) && CLAY_IS_INT(vb)) {
+            intptr_t ia = clay_to_int(va), ib = clay_to_int(vb);
+            return (ia > ib) - (ia < ib);
+        }
+        double da = CLAY_IS_INT(va) ? (double)clay_to_int(va) : (double)clay_to_float(va);
+        double db = CLAY_IS_INT(vb) ? (double)clay_to_int(vb) : (double)clay_to_float(vb);
+        int na = da != da, nb = db != db;
+        if (na || nb) return na - nb;
+        return (da > db) - (da < db);
     }
-    /* Fall back to string comparison */
+
+    if (ra == 1) {
+        ClayObject *sa = CLAY_OBJ(va), *sb = CLAY_OBJ(vb);
+        size_t la = sa->as.string.length, lb = sb->as.string.length;
+        int cmp = memcmp(sa->as.string.data, sb->as.string.data, la < lb ? la : lb);
+        if (cmp != 0) return cmp;
+        return (la > lb) - (la < lb);
+    }
+
+    /* Anything else: compare as text */
     ClayValue sa = clay_send_val(va, "toString", 0, NULL);
     ClayValue sb = clay_send_val(vb, "toString", 0, NULL);
     int cmp = strcmp(clay_string_data(CLAY_OBJ(sa)), clay_string_data(CLAY_OBJ(sb)));
