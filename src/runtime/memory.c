@@ -116,6 +116,11 @@ static void clay_dealloc(ClayObject *obj) {
                 }
                 free(obj->as.block.env);
             }
+            if (obj->as.block.outer_self) {
+                ClayObject *outer = obj->as.block.outer_self;
+                obj->as.block.outer_self = NULL;
+                clay_release(outer);
+            }
             break;
         case CLAY_TYPE_DICT:
             if (obj->as.dict.map) clay_dict_free_contents(obj);

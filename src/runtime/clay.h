@@ -180,6 +180,8 @@ struct ClayObject {
             ClayValue     *env;
             int            env_size;
             int            env_are_cells; /* 1 = env entries are ClayCell pointers */
+            ClayObject    *outer_self;    /* VM blocks: self of the method that made
+                                           * them (retained; NULL at top level) */
         } block;
 
         struct {

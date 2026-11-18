@@ -1,0 +1,67 @@
+// self inside a block is the self of the method that made the block, wherever
+// the block runs: run by another object's method, at top level, or after
+// being stored. (The VM once used the self of whoever ran the block, while
+// compiled code used the maker's.) A block invoked as a method -- a slot
+// holding it, or setMethod -- has the receiver as self instead.
+// failures are counted, and the program exits 1 if there were any
+
+failures = 0
+check = { |what, got, want|
+    (got == want) ifTrue { ("PASS: " + what) println } ifFalse {
+        ("FAIL: " + what + ": got " + got toString + ", want " + want toString) println
+        failures = failures + 1
+    }
+}
+
+A = Object clone {
+    name = "A"
+    count = 0
+    hello() { "A hello" }
+    implicitSend() { { |k| hello } }
+    explicitSelf() { { |k| self hello } }
+    slotRead() { { name } }
+    slotWrite() { { count = count + 1; count } }
+    nested() { { |k| [1] map { |i| hello } } }
+    // a block that keeps calling back into its maker (a callback, as in an
+    // animation's update)
+    callback() { { |k| self record(k) } }
+    record(k) { "A got " + k toString }
+}
+
+B = Object clone {
+    name = "B"
+    hello() { "B hello" }
+    run(block) { block value(1) }
+    // the caller's self is back after the block, even when it raised
+    runThenHello(block) {
+        try { block value(1) } catch { |e| nil }
+        hello
+    }
+    store(block) { self kept = [block]; self }
+    runKept() { kept first value(2) }
+}
+
+check value("implicit send, run by another object", B run(A implicitSend), "A hello")
+check value("explicit self, run by another object", B run(A explicitSelf), "A hello")
+check value("implicit send, run at top level", A implicitSend value(1), "A hello")
+check value("slot read, run by another object", B run(A slotRead), "A")
+w = A slotWrite
+B run(w)
+check value("slot write, run by another object", B run(w), 2)
+check value("A's slot was the one written", A count, 2)
+check value("nested block keeps the maker's self", B run(A nested), ["A hello"])
+check value("a stored block, run later", B store(A callback) runKept, "A got 2")
+check value("the runner's self is back after the block", B runThenHello({ |k| raise("x") }), "B hello")
+check value("and after a block that returns normally", B runThenHello(A implicitSend), "B hello")
+
+// a block run as a method has the receiver as self
+C = Object clone { name = "C" }
+C setMethod("who", { self name })
+check value("setMethod block: the receiver", C who, "C")
+D = C clone
+D name = "D"
+check value("setMethod block, inherited: the receiver", D who, "D")
+C greet = { "hi from " + self name }
+check value("block in a slot: the receiver", C greet, "hi from C")
+
+(failures > 0) ifTrue { System exit(1) }

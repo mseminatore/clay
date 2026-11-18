@@ -52,12 +52,16 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
 
     BcChunk *chunk = g_bc->chunks[chunk_id];
 
-    /* If invoked as a slot-method, bind the receiver as 'self' via fast global */
+    /* 'self' in the block: the receiver when it is invoked as a slot-method,
+     * else the self of the method that made it (lexical, as in compiled
+     * code), not the self of whoever runs it. Restored when the block ends. */
     ClayObject *slot_method_self = clay_slot_method_self;
     ClayObject *saved_method_self = g_method_self;
     if (slot_method_self) {
         clay_slot_method_self = NULL;
         g_method_self = slot_method_self;
+    } else {
+        g_method_self = self->as.block.outer_self;
     }
 
     /* Save VM state for re-entrant execution */
@@ -182,10 +186,8 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_vm->running = saved_running;
     g_vm->frame_count = saved_frame_count;
 
-    /* Restore 'self' if we bound a slot-method receiver */
-    if (slot_method_self) {
-        g_method_self = saved_method_self;
-    }
+    /* Restore the caller's 'self' */
+    g_method_self = saved_method_self;
 
     /* Re-raise after VM state is safely restored */
     if (had_exception) {
@@ -1171,6 +1173,13 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* A new block remembers the self of the method making it (retained), so it
+ * keeps that self wherever it runs. A block made at top level has none. */
+static void bc_block_keep_self(ClayObject *block) {
+    block->as.block.outer_self = g_method_self;
+    if (g_method_self) clay_retain(g_method_self);
+}
+
 /* native_make_block(chunk_id, param_count, capture0, ..., captureN, capture_count) */
 static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
     /* Pop capture_count (last arg) */
@@ -1212,12 +1221,14 @@ static int native_make_block_fn(clayvm_vm_t *vm, int argc) {
         /* Release popped captured values (env took its own ref via cell_retain) */
         for (int i = 0; i < capture_count; i++)
             vm_release_val(captured[i]);
+        bc_block_keep_self(block);
         clayvm_vm_push(vm, CLAYVM_OBJ(block));
     } else {
         /* No captures — use standard clay_block_new path.
          * clay_block_new copies the env array, so we free ours after. */
         ClayValue env_chunk = clay_int(chunk_id);
         ClayObject *block = clay_block_new(bc_block_trampoline, &env_chunk, 1);
+        bc_block_keep_self(block);
         clayvm_vm_push(vm, CLAYVM_OBJ(block));
     }
     return 0;

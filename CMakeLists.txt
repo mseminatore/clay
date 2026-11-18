@@ -477,6 +477,7 @@ add_test(NAME clay_test_multiline_string COMMAND clay_compiler ${CMAKE_CURRENT_S
 add_test(NAME clay_test_range COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_range.clay)
 add_test(NAME clay_test_shared_capture COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_shared_capture.clay)
 add_test(NAME clay_test_capture_contexts COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_capture_contexts.clay)
+add_test(NAME clay_test_block_self COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_block_self.clay)
 add_test(NAME clay_test_sort COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_sort.clay)
 add_test(NAME clay_test_range_slice COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_range_slice.clay)
 add_test(NAME clay_test_enum COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_enum.clay)

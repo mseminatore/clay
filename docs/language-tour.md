@@ -321,6 +321,8 @@ puppy speak println   // Buddy says Woof!
 
 Note: blocks assigned to slots must use explicit `self` to access other slots, since the compiler doesn't know the block will be used as a method.
 
+A block invoked as a method like this has the receiver as `self`. Any other block keeps the `self` of the method that made it, wherever it runs: a block a method hands to another object, which calls it back later, still talks to the method's object (and a block made at top level has no `self`).
+
 Use `getSlot("name")` to retrieve the raw block without invoking it:
 
 ```clay
