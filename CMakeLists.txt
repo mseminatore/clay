@@ -455,6 +455,7 @@ add_test(NAME clay_test_toml COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/t
 add_test(NAME clay_test_semver_diff COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_semver_diff.clay)
 add_test(NAME clay_test_slot_globals COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_slot_globals.clay)
 add_test(NAME clay_test_dict_order COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_dict_order.clay)
+add_test(NAME clay_test_console_capture COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_console_capture.clay)
 add_test(NAME clay_test_fs COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fs.clay)
 add_test(NAME clay_test_process COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_process.clay)
 add_test(NAME clay_test_fiber COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_fiber.clay)

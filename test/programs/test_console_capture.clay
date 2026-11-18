@@ -1,0 +1,75 @@
+// Console capture: collect what a program prints instead of writing it out
+failures = 0
+check = { |name, got, want|
+    (got != want) ifTrue {
+        Console println("FAIL: " + name + ": got " + got toString + ", want " + want toString)
+        failures = failures + 1
+    }
+}
+
+// every way of printing goes into the capture
+out = Console capture {
+    "a string" println
+    "no newline" print
+    42 println
+    1.5 println
+    [1, 2] println
+    nil println
+    Console print("x", "y")
+    Console println("!")
+}
+check value("all printing captured", out, "a string\nno newline42\n1.5\n[1, 2]\nnil\nx y!\n")
+
+// the block's variables and result work as usual
+n = 0
+check value("blocks run in place", Console capture { n = n + 5; n println }, "5\n")
+check value("and change outer variables", n, 5)
+check value("nothing printed", Console capture { 1 + 1 }, "")
+
+// captures nest; the outer one gets only what is printed outside the inner
+inner = nil
+outer = Console capture {
+    "before" println
+    inner = Console capture { "inside" println }
+    "after" println
+}
+check value("inner capture", inner, "inside\n")
+check value("outer capture", outer, "before\nafter\n")
+
+// begin / end, for code that is not one block (knit's chunks)
+Console beginCapture
+"one" println
+Console beginCapture
+"two" println
+two = Console endCapture
+"three" println
+one = Console endCapture
+check value("begin/end inner", two, "two\n")
+check value("begin/end outer", one, "one\nthree\n")
+e = nil
+try { Console endCapture } catch { |err| e = err }
+check value("endCapture without begin raises", e != nil, true)
+
+// an error ends the capture and goes on; printing then reaches stdout again
+caught = nil
+try {
+    Console capture {
+        "lost" println
+        Console beginCapture          // left open by the error: ended too
+        raise("boom")
+    }
+} catch { |err| caught = err message }
+check value("the error goes on", caught, "boom")
+check value("captures after an error start fresh", Console capture { "ok" println }, "ok\n")
+check value("capture wants a block", (try { Console capture(3); "none" } catch { |err| err type }), "ArgumentError")
+
+// bytes are kept, and long output is not cut
+long = "x" repeat(100000)
+check value("long output", (Console capture { long println }) length, 100001)
+check value("UTF-8 kept", Console capture { "é✓" print }, "é✓")
+
+(failures > 0) ifTrue {
+    Console println(failures toString + " capture checks failed")
+    System exit(1)
+}
+"console capture tests passed" println

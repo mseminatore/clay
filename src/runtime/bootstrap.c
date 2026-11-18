@@ -486,6 +486,84 @@ static ClayValue console_println(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_VAL(self);
 }
 
+/* Console beginCapture / endCapture / capture { } — collect what the program
+ * prints (print, println, Console print ...) instead of writing it out.
+ * Captures nest: each keeps the output hook that was set before it (stdout,
+ * the debugger's, or an outer capture) and puts it back when it ends. */
+typedef struct ClayCapture {
+    char *buf;
+    size_t len, cap;
+    void (*prev)(const char *text);
+    struct ClayCapture *outer;
+} ClayCapture;
+
+static ClayCapture *g_capture = NULL;
+
+static void capture_hook(const char *text) {
+    ClayCapture *c = g_capture;
+    if (!c) return;
+    size_t n = strlen(text);
+    if (c->len + n + 1 > c->cap) {
+        size_t cap = c->cap ? c->cap : 256;
+        while (c->len + n + 1 > cap) cap *= 2;
+        c->buf = (char *)realloc(c->buf, cap);
+        c->cap = cap;
+    }
+    memcpy(c->buf + c->len, text, n);
+    c->len += n;
+    c->buf[c->len] = '\0';
+}
+
+static ClayValue console_beginCapture(ClayObject *self, int argc, ClayValue *argv) {
+    (void)argc; (void)argv;
+    fflush(stdout);
+    ClayCapture *c = (ClayCapture *)calloc(1, sizeof(ClayCapture));
+    c->prev = clay_output_fn;
+    c->outer = g_capture;
+    g_capture = c;
+    clay_output_fn = capture_hook;
+    return CLAY_VAL(self);
+}
+
+/* The text printed since the matching beginCapture */
+static ClayValue console_endCapture(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    ClayCapture *c = g_capture;
+    if (!c) clay_raise(CLAY_VAL(clay_error_new("Console endCapture without beginCapture", "RuntimeError")));
+    g_capture = c->outer;
+    clay_output_fn = c->prev;
+    ClayObject *text = clay_string_new_len(c->buf ? c->buf : "", c->len);
+    free(c->buf);
+    free(c);
+    return CLAY_VAL(text);
+}
+
+/* Console capture { ... } — what the block prints, as a String. If the
+ * block raises, the capture ends (its text is dropped) and the error goes on. */
+static ClayValue console_capture(ClayObject *self, int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_TYPE(argv[0], CLAY_TYPE_BLOCK))
+        clay_raise_argument_error("capture", "expects a block");
+    ClayObject *block = CLAY_OBJ(argv[0]);
+    console_beginCapture(self, 0, NULL);
+    ClayCapture *mine = g_capture;
+    ClayTryFrame tf;
+    if (clay_try_push(&tf) == 0) {
+        ClayValue r = block->as.block.func(block, 0, NULL);
+        clay_try_pop();
+        clay_release_val(r);
+        return console_endCapture(self, 0, NULL);
+    }
+    ClayValue err = clay_error_stack.current_error;
+    /* end this capture and any the block left open inside it */
+    while (g_capture) {
+        int last = g_capture == mine;
+        clay_release_val(console_endCapture(self, 0, NULL));
+        if (last) break;
+    }
+    clay_raise(err);
+    return CLAY_NIL;
+}
+
 /* Console loadHistory(path) / saveHistory(path) — readLine's line history */
 static ClayValue console_loadHistory(ClayObject *self, int argc, ClayValue *argv) {
     (void)self;
@@ -811,6 +889,9 @@ void clay_bootstrap(void) {
     clay_set_method(clay_Console, "prompt", console_prompt);
     clay_set_method(clay_Console, "print", console_print);
     clay_set_method(clay_Console, "println", console_println);
+    clay_set_method(clay_Console, "beginCapture", console_beginCapture);
+    clay_set_method(clay_Console, "endCapture", console_endCapture);
+    clay_set_method(clay_Console, "capture", console_capture);
     clay_set_method(clay_Console, "error", console_error);
     clay_set_method(clay_Console, "isTerminal", console_isTerminal);
     clay_set_method(clay_Console, "isInteractive", console_isInteractive);
