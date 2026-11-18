@@ -208,7 +208,30 @@ static char *block_func_name(CodeGen *cg) {
     return buf;
 }
 
-/* Escape a string for C output */
+/* The length of the valid UTF-8 sequence of 2-4 bytes at p, or 0 (overlong
+ * forms, surrogates and code points past U+10FFFF are not valid) */
+static int utf8_seq_len(const unsigned char *p) {
+    unsigned char c = p[0];
+    int len;
+    unsigned char lo = 0x80, hi = 0xBF;   /* the range of the second byte */
+    if (c >= 0xC2 && c <= 0xDF) len = 2;
+    else if (c >= 0xE0 && c <= 0xEF) {
+        len = 3;
+        if (c == 0xE0) lo = 0xA0;
+        if (c == 0xED) hi = 0x9F;
+    } else if (c >= 0xF0 && c <= 0xF4) {
+        len = 4;
+        if (c == 0xF0) lo = 0x90;
+        if (c == 0xF4) hi = 0x8F;
+    } else return 0;
+    if (p[1] < lo || p[1] > hi) return 0;
+    for (int i = 2; i < len; i++)
+        if (p[i] < 0x80 || p[i] > 0xBF) return 0;
+    return len;
+}
+
+/* Escape a string for C output: valid UTF-8 is kept as it is, other bytes
+ * above 0x7F are written in octal (a C compiler warns about invalid UTF-8) */
 static void emit_c_string(CodeGen *cg, const char *s) {
     fputc('"', cg->out);
     for (; *s; s++) {
@@ -220,7 +243,15 @@ static void emit_c_string(CodeGen *cg, const char *s) {
             case '\r': fprintf(cg->out, "\\r"); break;
             case '?':  fprintf(cg->out, "\\?"); break;   /* no trigraphs ("??'" is '^') */
             default:
-                if ((unsigned char)*s < 0x20 || (unsigned char)*s == 0x7f) {
+                if ((unsigned char)*s >= 0x80) {
+                    int n = utf8_seq_len((const unsigned char *)s);
+                    if (n > 0) {
+                        fwrite(s, 1, (size_t)n, cg->out);
+                        s += n - 1;
+                    } else {
+                        fprintf(cg->out, "\\%03o", (unsigned char)*s);
+                    }
+                } else if ((unsigned char)*s < 0x20 || (unsigned char)*s == 0x7f) {
                     /* octal: at most 3 digits, so a following digit can't join it */
                     fprintf(cg->out, "\\%03o", (unsigned char)*s);
                 } else {

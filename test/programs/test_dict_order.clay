@@ -53,4 +53,17 @@ n set("x", nil)
 T eq([n has("x"), n keys, n size], [true, ["x"], 1], "a nil value still counts")
 T eq(#{"a": 1, "b": 2} == #{"b": 2, "a": 1}, true, "equality ignores order")
 
+// keys are strings: other keys raise instead of being dropped
+kind = { |b| try { b(); "none" } catch { |e| e type } }
+k = Dict clone
+T eq(kind({ k set(1, "one") }), "ArgumentError", "a number key raises")
+T eq(kind({ k set([1], "x") }), "ArgumentError", "an array key raises")
+T eq(kind({ k set(nil, "x") }), "ArgumentError", "a nil key raises in set")
+T eq(kind({ k get(1) }), "ArgumentError", "get with a number key raises")
+T eq(kind({ k has(1.5) }), "ArgumentError", "has with a number key raises")
+T eq(kind({ k remove(true) }), "ArgumentError", "remove with a boolean key raises")
+T eq([k get(nil), k has(nil), k size], [nil, false, 0], "a nil key finds nothing")
+k set(1 toString, "one")
+T eq(k get("1"), "one", "toString makes a key")
+
 T done

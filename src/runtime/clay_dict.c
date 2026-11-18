@@ -163,31 +163,40 @@ size_t clay_dict_size(ClayObject *dict) {
 
 /* --- Dict methods --- */
 
+/* A Dict key: a string's text, NULL for nil; anything else raises (keys are
+ * strings -- a number key used to be dropped without a word) */
+static const char *dict_key(const char *who, ClayValue key) {
+    if (CLAY_IS_NIL(key)) return NULL;
+    if (!CLAY_IS_TYPE(key, CLAY_TYPE_STRING))
+        clay_raise_argument_error(who, "Dict keys are strings (use key toString)");
+    return clay_string_data(CLAY_OBJ(key));
+}
+
 static ClayValue dict_set(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 2) return CLAY_VAL(self);
-    if (!CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_VAL(self);
-    const char *key = clay_string_data(CLAY_OBJ(argv[0]));
+    const char *key = dict_key("set", argv[0]);
+    if (!key) clay_raise_argument_error("set", "a Dict key can't be nil");
     clay_dict_set(self, key, argv[1]);
     return CLAY_VAL(self);
 }
 
 static ClayValue dict_get(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_NIL;
-    const char *key = clay_string_data(CLAY_OBJ(argv[0]));
+    const char *key = argc < 1 ? NULL : dict_key("get", argv[0]);
+    if (!key) return CLAY_NIL;
     ClayValue result = clay_dict_get(self, key);
     clay_retain_val(result);
     return result;
 }
 
 static ClayValue dict_has(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_FALSE;
-    const char *key = clay_string_data(CLAY_OBJ(argv[0]));
+    const char *key = argc < 1 ? NULL : dict_key("has", argv[0]);
+    if (!key) return CLAY_FALSE;
     return clay_dict_has(self, key) ? CLAY_TRUE : CLAY_FALSE;
 }
 
 static ClayValue dict_remove(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1 || !CLAY_IS_PTR(argv[0]) || CLAY_IS_NIL(argv[0])) return CLAY_VAL(self);
-    const char *key = clay_string_data(CLAY_OBJ(argv[0]));
+    const char *key = argc < 1 ? NULL : dict_key("remove", argv[0]);
+    if (!key) return CLAY_VAL(self);
     clay_dict_remove(self, key);
     return CLAY_VAL(self);
 }

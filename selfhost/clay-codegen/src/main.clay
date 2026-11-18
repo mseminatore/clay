@@ -126,6 +126,38 @@ CNames = Object clone {
         parts join("")
     }
 
+    octal(c) { "\\" + (c / 64) toString + ((c / 8) % 8) toString + (c % 8) toString }
+
+    // The length of the valid UTF-8 sequence of 2-4 bytes at i, or 0
+    // (codegen.c utf8_seq_len)
+    utf8Len(s, i) {
+        c = s byteAt(i)
+        len = 0
+        lo = 128
+        hi = 191
+        ((c >= 194) && (c <= 223)) ifTrue { len = 2 }
+        ((c >= 224) && (c <= 239)) ifTrue {
+            len = 3
+            (c == 224) ifTrue { lo = 160 }
+            (c == 237) ifTrue { hi = 159 }
+        }
+        ((c >= 240) && (c <= 244)) ifTrue {
+            len = 4
+            (c == 240) ifTrue { lo = 144 }
+            (c == 244) ifTrue { hi = 143 }
+        }
+        (len == 0) ifTrue { return 0 }
+        b = s byteAt(i + 1)
+        ((b == nil) || (b < lo) || (b > hi)) ifTrue { return 0 }
+        j = 2
+        { j < len } whileTrue {
+            b = s byteAt(i + j)
+            ((b == nil) || (b < 128) || (b > 191)) ifTrue { return 0 }
+            j = j + 1
+        }
+        len
+    }
+
     // A C string literal (the value ends at a NUL, like a C string)
     cString(s) {
         parts = ["\""]
@@ -141,15 +173,18 @@ CNames = Object clone {
             (c == 9) ifTrue { esc = "\\t" }
             (c == 13) ifTrue { esc = "\\r" }
             (c == 63) ifTrue { esc = "\\?" }
-            (esc == nil && (c < 32 || c == 127)) ifTrue {
-                esc = "\\" + (c / 64) toString + ((c / 8) % 8) toString + (c % 8) toString
+            skip = 1
+            (c >= 128) ifTrue {
+                skip = self utf8Len(s, i)
+                (skip == 0) ifTrue { skip = 1; esc = self octal(c) }
             }
+            (esc == nil && (c < 32 || c == 127)) ifTrue { esc = self octal(c) }
             (esc != nil) ifTrue {
                 parts push(s slice(start, i))
                 parts push(esc)
                 start = i + 1
             }
-            i = i + 1
+            i = i + skip
         }
         parts push(s slice(start, n))
         parts push("\"")
