@@ -23,7 +23,8 @@ endif()
 # (the same one the VM run is checked against); with -DEXPECT_FAIL=1 as well,
 # the program must exit non-zero
 if(EXPECTED)
-    execute_process(COMMAND "${OUT}" RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out)
+    # UTF-8 output, not the Windows console code page (see expect_output.cmake)
+    execute_process(COMMAND "${OUT}" RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out ENCODING UTF8)
     include("${CMAKE_CURRENT_LIST_DIR}/expect_compare.cmake")
     if(EXPECT_FAIL)
         if(rc EQUAL 0)

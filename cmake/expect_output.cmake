@@ -16,8 +16,10 @@ foreach(var CLAY SRC EXPECTED)
     endif()
 endforeach()
 
+# Clay writes UTF-8; on Windows, CMake would otherwise decode the output in
+# the console's code page (and a check mark came back as three other characters)
 execute_process(COMMAND "${CLAY}" ${FLAGS} "${SRC}"
-                RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out)
+                RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE out ENCODING UTF8)
 include("${CMAKE_CURRENT_LIST_DIR}/expect_compare.cmake")
 if(EXPECT_FAIL)
     if(rc EQUAL 0)
