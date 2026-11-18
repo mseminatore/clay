@@ -36,6 +36,21 @@ encoded = Url encodeComponent("hello world&foo=bar")
 // Test decodeComponent
 (Url decodeComponent("hello%20world") == "hello world") ifTrue { "PASS: decodeComponent" println } ifFalse { TestFails fail("FAIL: decodeComponent") }
 
+// Non-ASCII text and bytes: one %XX per byte, and back
+eq = { |name, got, want| (got == want) ifTrue { ("PASS: " + name) println } ifFalse { TestFails fail("FAIL: " + name + " = " + got toString) } }
+eq value("encode UTF-8", Url encodeComponent("café ✓"), "caf%C3%A9%20%E2%9C%93")
+eq value("decode UTF-8", Url decodeComponent("caf%C3%A9%20%E2%9C%93"), "café ✓")
+eq value("encode NUL and high bytes", Url encodeComponent(String fromBytes([0, 255, 65])), "%00%FFA")
+eq value("decode lower-case hex", Url decodeComponent("%c3%a9") bytes, [195, 169])
+eq value("unreserved kept", Url encodeComponent("AZaz09-._~"), "AZaz09-._~")
+eq value("plus is a space", Url decodeComponent("a+b"), "a b")
+eq value("a bad escape is kept", Url decodeComponent("100%zz%"), "100%zz%")
+eq value("a short escape is kept", Url decodeComponent("%4"), "%4")
+all = []
+256 times { |i| all push(i) }
+bin = String fromBytes(all)
+eq value("every byte round-trips", Url decodeComponent(Url encodeComponent(bin)) == bin, true)
+
 // Test parseQuery
 params = Url parseQuery("name=Clay&version=1&lang=en")
 (params get("name") == "Clay") ifTrue { "PASS: parseQuery name" println } ifFalse { TestFails fail("FAIL: parseQuery name") }

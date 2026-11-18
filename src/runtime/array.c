@@ -256,9 +256,14 @@ static ClayValue array_reverse(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
-    /* No argument (or nil) joins with no separator; otherwise it must be a String */
-    const char *sep = (argc > 0 && !CLAY_IS_NIL(argv[0])) ? clay_arg_string(argc, argv, 0, "Array join") : "";
-    size_t sep_len = strlen(sep);
+    /* No argument (or nil) joins with no separator; otherwise it must be a String.
+     * Strings are bytes and may hold NULs, so lengths come from the objects. */
+    const char *sep = "";
+    size_t sep_len = 0;
+    if (argc > 0 && !CLAY_IS_NIL(argv[0])) {
+        sep = clay_arg_string(argc, argv, 0, "Array join");
+        sep_len = CLAY_OBJ(argv[0])->as.string.length;
+    }
     char *buf = (char *)malloc(256);
     size_t cap = 256, len = 0;
 
@@ -270,30 +275,38 @@ static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
         }
         ClayValue item = self->as.array.items[i];
         const char *s;
+        size_t slen;
         char numbuf[32];
+        ClayObject *str = NULL;   /* an owned toString result */
         if (CLAY_IS_INT(item)) {
             snprintf(numbuf, sizeof(numbuf), "%lld", (long long)clay_to_int(item));
             s = numbuf;
+            slen = strlen(s);
         } else if (CLAY_IS_NIL(item)) {
             s = "nil";
+            slen = 3;
+        } else if (CLAY_IS_TYPE(item, CLAY_TYPE_STRING)) {
+            s = CLAY_OBJ(item)->as.string.data;
+            slen = CLAY_OBJ(item)->as.string.length;
         } else {
-            ClayValue sv = clay_send(CLAY_OBJ(item), "toString", 0, NULL);
-            s = clay_string_data(CLAY_OBJ(sv));
-            /* Copy s before releasing sv */
-            size_t slen = strlen(s);
-            while (len + slen + 1 > cap) { cap *= 2; buf = (char *)realloc(buf, cap); }
-            memcpy(buf + len, s, slen);
-            len += slen;
-            clay_release(CLAY_OBJ(sv));
-            continue;
+            ClayValue sv = clay_send_val(item, "toString", 0, NULL);
+            if (CLAY_IS_TYPE(sv, CLAY_TYPE_STRING)) {
+                str = CLAY_OBJ(sv);
+                s = str->as.string.data;
+                slen = str->as.string.length;
+            } else {
+                if (CLAY_IS_OBJ(sv) && !CLAY_IS_NIL(sv)) clay_release(CLAY_OBJ(sv));
+                s = "";
+                slen = 0;
+            }
         }
-        size_t slen = strlen(s);
         while (len + slen + 1 > cap) { cap *= 2; buf = (char *)realloc(buf, cap); }
         memcpy(buf + len, s, slen);
         len += slen;
+        if (str) clay_release(str);
     }
     buf[len] = '\0';
-    ClayObject *result = clay_string_new(buf);
+    ClayObject *result = clay_string_new_len(buf, len);
     free(buf);
     return CLAY_VAL(result);
 }

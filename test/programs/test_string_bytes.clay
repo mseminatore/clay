@@ -71,6 +71,13 @@ check value("overlong and surrogate bytes", ("\xc0\xaf\xed\xa0\x80" bytes) == [1
 check value("a cut-off sequence", ("\xe2\x9c" bytes) == [226, 156])
 check value("an escaped byte before a digit", ("\xff1" bytes) == [255, 49])
 
+// join keeps NUL bytes, in the items and the separator
+nul3 = String fromBytes([0, 0, 0])
+check value("join keeps NUL bytes", (["x", nul3, "y"] join("")) bytes == [120, 0, 0, 0, 121])
+check value("a NUL separator", (["a", "b"] join(String fromBytes([0]))) bytes == [97, 0, 98])
+check value("join's length is every byte", (["ab", nul3, "cd"] join("-")) length == 9)
+check value("join of numbers and nil", ([1, 2.5, nil] join(",")) == "1,2.5,nil")
+
 // files and hashes keep every byte
 path = File tempDir + "/clay_string_bytes_test.bin"
 File write(path, s)

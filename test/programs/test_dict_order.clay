@@ -66,4 +66,10 @@ T eq([k get(nil), k has(nil), k size], [nil, false, 0], "a nil key finds nothing
 k set(1 toString, "one")
 T eq(k get("1"), "one", "toString makes a key")
 
+// keys are C strings inside: a key with a NUL byte would match its prefix
+nul = String fromBytes([65, 0, 66])
+k set("A", "a")
+T eq(kind({ k set(nul, "x") }), "ArgumentError", "a key with a NUL byte raises in set")
+T eq([k get(nul), k has(nul), k get("A")], [nil, false, "a"], "and finds nothing, not its prefix")
+
 T done

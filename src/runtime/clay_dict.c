@@ -3,6 +3,7 @@
  * order their keys were first added (each, keys, values, toString, ...).
  */
 #include "clay.h"
+#include <string.h>
 
 /* String comparison for dict keys (non-static, used by object.c clone) */
 int dict_str_compare(ht_key_t a, ht_key_t b) {
@@ -169,7 +170,15 @@ static const char *dict_key(const char *who, ClayValue key) {
     if (CLAY_IS_NIL(key)) return NULL;
     if (!CLAY_IS_TYPE(key, CLAY_TYPE_STRING))
         clay_raise_argument_error(who, "Dict keys are strings (use key toString)");
-    return clay_string_data(CLAY_OBJ(key));
+    /* Keys are stored as C strings, so one with a NUL byte can't be told
+     * apart from its prefix: set refuses it, and the others find nothing */
+    ClayObject *k = CLAY_OBJ(key);
+    if (memchr(k->as.string.data, 0, k->as.string.length)) {
+        if (strcmp(who, "set") == 0)
+            clay_raise_argument_error(who, "a Dict key can't contain a NUL byte");
+        return NULL;
+    }
+    return k->as.string.data;
 }
 
 static ClayValue dict_set(ClayObject *self, int argc, ClayValue *argv) {
