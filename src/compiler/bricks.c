@@ -491,16 +491,21 @@ static void split_url_parts(const char *url,
 static void url_to_repo_name(const char *url, char *name, size_t sz);
 static void dep_repo_dir(const char *url, const char *name, char *out, size_t sz);
 
+/* Every dependency installed, the project's own and theirs: one entry each */
+#define BRICK_MAX_LOCKED (BRICK_MAX_DEPS * 4)
+
 typedef struct {
     char name[BRICK_MAX_NAME];
     char url[BRICK_MAX_PATH];
     char version[64];
     char resolved[128]; /* git commit SHA or empty for local */
+    char parent[BRICK_MAX_NAME]; /* "dependency_of": the brick that needs it,
+                                  * "" for one of the project's own */
 } BrickLockEntry;
 
 typedef struct {
     int lockfile_version;
-    BrickLockEntry entries[BRICK_MAX_DEPS];
+    BrickLockEntry entries[BRICK_MAX_LOCKED];
     int entry_count;
 } BrickLock;
 
@@ -527,7 +532,7 @@ static int parse_lock(const char *json, BrickLock *lock) {
             if (*p != '{') return -1;
             p = skip_ws(p + 1);
             while (*p && *p != '}') {
-                if (lock->entry_count >= BRICK_MAX_DEPS) return -1;
+                if (lock->entry_count >= BRICK_MAX_LOCKED) return -1;
                 BrickLockEntry *e = &lock->entries[lock->entry_count];
                 p = parse_string(p, e->name, sizeof(e->name));
                 if (!p) return -1;
@@ -550,6 +555,8 @@ static int parse_lock(const char *json, BrickLock *lock) {
                         p = parse_string(p, e->version, sizeof(e->version));
                     } else if (strcmp(ekey, "resolved") == 0) {
                         p = parse_string(p, e->resolved, sizeof(e->resolved));
+                    } else if (strcmp(ekey, "dependency_of") == 0) {
+                        p = parse_string(p, e->parent, sizeof(e->parent));
                     } else {
                         /* Skip unknown value */
                         if (*p == '"') {
@@ -644,7 +651,60 @@ static int get_dep_resolved(const char *dep_dir, char *out, size_t out_sz) {
     return git_output(dep_dir, "rev-parse HEAD", out, out_sz);
 }
 
-/* Write brick.lock from the current manifest and installed deps. */
+/* One entry of brick.lock: the commit checked out for a dependency, and the
+ * brick that needs it (parent; "" for one of the project's own) */
+static void lock_write_entry(FILE *f, int *count, const char *url, const char *name,
+                             const char *parent) {
+    char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
+    split_url_parts(url, clone_url, sizeof(clone_url),
+                    subpath, sizeof(subpath), ref, sizeof(ref));
+
+    /* Determine the git directory for this dep */
+    char git_dir[BRICK_MAX_PATH];
+    dep_repo_dir(url, name, git_dir, sizeof(git_dir));
+
+    /* Try to resolve commit SHA */
+    char resolved[128] = "";
+    get_dep_resolved(git_dir, resolved, sizeof(resolved));
+
+    fprintf(f, "%s\n    \"%s\": {\n", *count > 0 ? "," : "", name);
+    fprintf(f, "      \"url\": \"%s\",\n", url);
+    fprintf(f, "      \"version\": \"%s\",\n", ref[0] ? ref : "latest");
+    if (parent[0]) {
+        fprintf(f, "      \"resolved\": \"%s\",\n", resolved);
+        fprintf(f, "      \"dependency_of\": \"%s\"\n", parent);
+    } else {
+        fprintf(f, "      \"resolved\": \"%s\"\n", resolved);
+    }
+    fprintf(f, "    }");
+    (*count)++;
+}
+
+static int brick_mark_visited(const char *name);
+static void brick_reset_visited(void);
+static void brick_install_dir(const char *url, const char *name, char *out, size_t sz);
+
+/* The dependencies of the installed brick (url, name), in the order install
+ * reaches them: a brick's own first, then theirs (so a name's entry is the
+ * one that was installed) */
+static void lock_write_deps(FILE *f, int *count, const char *url, const char *name) {
+    char manifest[BRICK_MAX_PATH + 16];
+    char dir[BRICK_MAX_PATH];
+    brick_install_dir(url, name, dir, sizeof(dir));
+    snprintf(manifest, sizeof(manifest), "%s/brick.json", dir);
+    BrickManifest sub;
+    if (brick_parse(manifest, &sub) != 0) return;
+    int fresh[BRICK_MAX_DEPS];
+    for (int i = 0; i < sub.dep_count; i++) {
+        fresh[i] = brick_mark_visited(sub.deps[i].name);
+        if (fresh[i]) lock_write_entry(f, count, sub.deps[i].url, sub.deps[i].name, name);
+    }
+    for (int i = 0; i < sub.dep_count; i++)
+        if (fresh[i]) lock_write_deps(f, count, sub.deps[i].url, sub.deps[i].name);
+}
+
+/* Write brick.lock: the commit of every dependency installed, the project's
+ * own and, marked "dependency_of", theirs */
 static void bricks_write_lock(const BrickManifest *m) {
     FILE *f = fopen(BRICK_LOCK_FILE, "w");
     if (!f) {
@@ -656,27 +716,17 @@ static void bricks_write_lock(const BrickManifest *m) {
     fprintf(f, "  \"lockfile_version\": %d,\n", BRICK_LOCK_VERSION);
     fprintf(f, "  \"locked\": {");
 
+    int count = 0;
+    brick_reset_visited();
     for (int i = 0; i < m->dep_count; i++) {
-        char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
-        split_url_parts(m->deps[i].url, clone_url, sizeof(clone_url),
-                        subpath, sizeof(subpath), ref, sizeof(ref));
-
-        /* Determine the git directory for this dep */
-        char git_dir[BRICK_MAX_PATH];
-        dep_repo_dir(m->deps[i].url, m->deps[i].name, git_dir, sizeof(git_dir));
-
-        /* Try to resolve commit SHA */
-        char resolved[128] = "";
-        get_dep_resolved(git_dir, resolved, sizeof(resolved));
-
-        fprintf(f, "%s\n    \"%s\": {\n", i > 0 ? "," : "", m->deps[i].name);
-        fprintf(f, "      \"url\": \"%s\",\n", m->deps[i].url);
-        fprintf(f, "      \"version\": \"%s\",\n", ref[0] ? ref : "latest");
-        fprintf(f, "      \"resolved\": \"%s\"\n", resolved);
-        fprintf(f, "    }");
+        brick_mark_visited(m->deps[i].name);
+        lock_write_entry(f, &count, m->deps[i].url, m->deps[i].name, "");
     }
+    for (int i = 0; i < m->dep_count; i++)
+        lock_write_deps(f, &count, m->deps[i].url, m->deps[i].name);
+    brick_reset_visited();
 
-    if (m->dep_count > 0) fprintf(f, "\n  ");
+    if (count > 0) fprintf(f, "\n  ");
     fprintf(f, "}\n}\n");
     fclose(f);
     printf("Wrote %s\n", BRICK_LOCK_FILE);
@@ -686,12 +736,17 @@ static void bricks_write_lock(const BrickManifest *m) {
  * Returns 1 if lock is up-to-date, 0 if not. */
 static int bricks_lock_matches(const BrickManifest *m, const BrickLock *lock) {
     if (lock->lockfile_version != BRICK_LOCK_VERSION) return 0;
-    if (lock->entry_count != m->dep_count) return 0;
+    /* the project's own entries (the others are its dependencies') */
+    int own = 0;
+    for (int j = 0; j < lock->entry_count; j++)
+        if (!lock->entries[j].parent[0]) own++;
+    if (own != m->dep_count) return 0;
 
     for (int i = 0; i < m->dep_count; i++) {
         int found = 0;
         for (int j = 0; j < lock->entry_count; j++) {
-            if (strcmp(m->deps[i].name, lock->entries[j].name) == 0 &&
+            if (!lock->entries[j].parent[0] &&
+                strcmp(m->deps[i].name, lock->entries[j].name) == 0 &&
                 strcmp(m->deps[i].url, lock->entries[j].url) == 0) {
                 found = 1;
                 break;
@@ -988,6 +1043,14 @@ static const BrickLock *g_install_lock = NULL;
 static char g_visited[BRICK_MAX_VISITED][BRICK_MAX_NAME];
 static int  g_visited_count = 0;
 
+static void brick_reset_visited(void) { g_visited_count = 0; }
+
+static int brick_was_visited(const char *name) {
+    for (int i = 0; i < g_visited_count; i++)
+        if (strcmp(g_visited[i], name) == 0) return 1;
+    return 0;
+}
+
 static int brick_mark_visited(const char *name) {
     for (int i = 0; i < g_visited_count; i++)
         if (strcmp(g_visited[i], name) == 0) return 0;   /* already seen */
@@ -999,12 +1062,20 @@ static int brick_mark_visited(const char *name) {
     return 1;
 }
 
-/* The locked commit SHA for (name, url), or NULL if not locked */
+/* The locked commit SHA for the dependency (name, url), or NULL if not
+ * locked. A name has one checkout, so its entry applies to any URL of the
+ * same repository (one brick may pin it, another not). */
 static const char *brick_locked_sha(const char *name, const char *url) {
     if (!g_install_lock) return NULL;
     for (int i = 0; i < g_install_lock->entry_count; i++) {
         const BrickLockEntry *e = &g_install_lock->entries[i];
-        if (strcmp(e->name, name) != 0 || strcmp(e->url, url) != 0) continue;
+        if (strcmp(e->name, name) != 0) continue;
+        if (strcmp(e->url, url) != 0) {
+            char a[BRICK_MAX_PATH], b[BRICK_MAX_PATH], sub[BRICK_MAX_PATH], ref[256];
+            split_url_parts(e->url, a, sizeof(a), sub, sizeof(sub), ref, sizeof(ref));
+            split_url_parts(url, b, sizeof(b), sub, sizeof(sub), ref, sizeof(ref));
+            if (strcmp(a, b) != 0) continue;
+        }
         size_t n = strlen(e->resolved);
         if (n < 7 || n > 64) return NULL;
         for (size_t k = 0; k < n; k++) {
@@ -1016,6 +1087,7 @@ static const char *brick_locked_sha(const char *name, const char *url) {
     return NULL;
 }
 
+static int install_deps(const BrickDep *deps, int n);
 static int install_dep(const char *url, const char *name);
 
 /* Does this Clay satisfy the manifest's "clay" range? `who` names the brick
@@ -1048,8 +1120,7 @@ static int install_subdeps(const char *dir, const char *name) {
     int failed = 0;
     if (sub.dep_count > 0) {
         printf("  Installing dependencies of %s...\n", name);
-        for (int i = 0; i < sub.dep_count; i++)
-            if (install_dep(sub.deps[i].url, sub.deps[i].name) != 0) failed++;
+        failed = install_deps(sub.deps, sub.dep_count);
     }
     return failed ? -1 : 0;
 }
@@ -1076,9 +1147,10 @@ static void brick_checkout(const char *dir, const char *name, const char *url,
     sync_submodules(dir);
 }
 
-/* Install a single dependency (and, recursively, its dependencies).
- * Returns 0 on success. */
-static int install_dep(const char *url, const char *name) {
+/* Install one dependency, not its dependencies: 1 if it is there now, 0 if
+ * this run reached it already (a cycle, or a name another brick chose
+ * first), -1 on an error */
+static int install_one(const char *url, const char *name) {
     if (!brick_mark_visited(name)) return 0;   /* cycle or diamond: done already */
 
     char clone_url[BRICK_MAX_PATH], subpath[BRICK_MAX_PATH], ref[256];
@@ -1124,7 +1196,7 @@ static int install_dep(const char *url, const char *name) {
                     name, brick_dir, brick_dir + strlen("bricks/"));
 
         printf("  Installed %s\n", name);
-        return install_subdeps(brick_dir, name);
+        return 1;
     }
 
     /* Simple single-brick repo */
@@ -1135,9 +1207,9 @@ static int install_dep(const char *url, const char *name) {
     if (stat(dest, &st) == 0) {
         if (check_repo_origin(dest, clone_url, name) != 0) return -1;
         printf("  %s: already installed\n", name);
-        /* still check its dependencies: an interrupted install can leave the
-         * checkout without them */
-        return install_subdeps(dest, name);
+        /* (its dependencies are still checked: an interrupted install can
+         * leave the checkout without them) */
+        return 1;
     }
 
     char cmd[BRICK_MAX_PATH * 2 + 64];
@@ -1148,7 +1220,34 @@ static int install_dep(const char *url, const char *name) {
         return -1;
     }
     brick_checkout(dest, name, url, ref);
-    return install_subdeps(dest, name);
+    return 1;
+}
+
+/* Install a list of dependencies (a manifest's): each of them first, then
+ * their dependencies, so a brick's own choice for a name (a pinned version,
+ * say) wins over one further down. Returns how many failed. */
+static int install_deps(const BrickDep *deps, int n) {
+    int state[BRICK_MAX_DEPS];
+    int failed = 0;
+    for (int i = 0; i < n; i++) {
+        state[i] = install_one(deps[i].url, deps[i].name);
+        if (state[i] < 0) failed++;
+    }
+    for (int i = 0; i < n; i++) {
+        if (state[i] != 1) continue;
+        char dir[BRICK_MAX_PATH];
+        brick_install_dir(deps[i].url, deps[i].name, dir, sizeof(dir));
+        if (install_subdeps(dir, deps[i].name) != 0) failed++;
+    }
+    return failed;
+}
+
+/* Install a dependency and, in turn, its dependencies. Returns 0 on success. */
+static int install_dep(const char *url, const char *name) {
+    static BrickDep d;
+    snprintf(d.url, sizeof(d.url), "%s", url);
+    snprintf(d.name, sizeof(d.name), "%s", name);
+    return install_deps(&d, 1) ? -1 : 0;
 }
 
 /* Directory a dependency is installed into (bricks/<name> or <checkout>/<sub>) */
@@ -1724,11 +1823,11 @@ static int cmd_install(void) {
     int locked = bricks_has_lock() && bricks_read_lock(&lock) == 0 &&
                  bricks_lock_matches(&m, &lock);
     if (locked) {
-        int all_present = 1;
-        for (int i = 0; i < m.dep_count && all_present; i++) {
+        int all_present = 1;      /* every locked one: the project's and theirs */
+        for (int i = 0; i < lock.entry_count && all_present; i++) {
             char dir[BRICK_MAX_PATH];
             struct stat st;
-            brick_install_dir(m.deps[i].url, m.deps[i].name, dir, sizeof(dir));
+            brick_install_dir(lock.entries[i].url, lock.entries[i].name, dir, sizeof(dir));
             if (stat(dir, &st) != 0) all_present = 0;
         }
         if (all_present) {
@@ -1741,13 +1840,8 @@ static int cmd_install(void) {
     make_dir("bricks");
     printf("Installing %d dependencies%s...\n", m.dep_count,
            locked ? " (from brick.lock)" : "");
-    int failed = 0;
     g_visited_count = 0;
-    for (int i = 0; i < m.dep_count; i++) {
-        if (install_dep(m.deps[i].url, m.deps[i].name) != 0) {
-            failed++;
-        }
-    }
+    int failed = install_deps(m.deps, m.dep_count);
     g_install_lock = NULL;
     if (failed) {
         fprintf(stderr, "%d dependencies failed to install.\n", failed);
@@ -2160,8 +2254,9 @@ static int update_dep(const char *url, const char *name, int *changed) {
     if (stat(git_dir, &st) != 0) {
         printf("  %s: not installed, installing...\n", name);
         *changed = 1;
-        return install_dep(url, name);
+        return install_dep(url, name);      /* (and its dependencies) */
     }
+    brick_mark_visited(name);
 
     char before[128] = "", after[128] = "";
     get_dep_resolved(git_dir, before, sizeof(before));
@@ -2203,6 +2298,36 @@ static int update_dep(const char *url, const char *name, int *changed) {
     return 0;
 }
 
+/* Update a list of dependencies (a manifest's), then the dependencies their
+ * brick.json lists now, in the order install takes them. *updated counts
+ * those that moved, *total those reached. Returns how many failed. */
+static int update_deps(const BrickDep *deps, int n, int *updated, int *total) {
+    int state[BRICK_MAX_DEPS];
+    int failed = 0;
+    for (int i = 0; i < n; i++) {
+        state[i] = 0;
+        if (brick_was_visited(deps[i].name)) continue;
+        int changed = 0;
+        (*total)++;
+        if (update_dep(deps[i].url, deps[i].name, &changed) != 0) {
+            failed++;
+            continue;
+        }
+        if (changed) (*updated)++;
+        state[i] = 1;
+    }
+    for (int i = 0; i < n; i++) {
+        if (!state[i]) continue;
+        char dir[BRICK_MAX_PATH], manifest[BRICK_MAX_PATH + 16];
+        brick_install_dir(deps[i].url, deps[i].name, dir, sizeof(dir));
+        snprintf(manifest, sizeof(manifest), "%s/brick.json", dir);
+        BrickManifest sub;
+        if (brick_parse(manifest, &sub) != 0 || sub.dep_count == 0) continue;
+        failed += update_deps(sub.deps, sub.dep_count, updated, total);
+    }
+    return failed;
+}
+
 static int cmd_update(void) {
     BrickManifest m;
     int prc = brick_parse("brick.json", &m);
@@ -2217,15 +2342,9 @@ static int cmd_update(void) {
     }
     printf("Updating %d dependenc%s...\n", m.dep_count,
            m.dep_count == 1 ? "y" : "ies");
-    int failures = 0, updated = 0;
+    int updated = 0, total = 0;
     g_visited_count = 0;
-    for (int i = 0; i < m.dep_count; i++) {
-        int changed = 0;
-        if (update_dep(m.deps[i].url, m.deps[i].name, &changed) != 0)
-            failures++;
-        else if (changed)
-            updated++;
-    }
+    int failures = update_deps(m.deps, m.dep_count, &updated, &total);
     if (failures) {
         printf("Done with %d failure(s).\n", failures);
     } else {
@@ -2233,8 +2352,8 @@ static int cmd_update(void) {
         if (updated == 0)
             printf("Everything was already up to date.\n");
         else
-            printf("Updated %d of %d dependenc%s.\n", updated, m.dep_count,
-                   m.dep_count == 1 ? "y" : "ies");
+            printf("Updated %d of %d dependenc%s.\n", updated, total,
+                   total == 1 ? "y" : "ies");
     }
     return failures ? 1 : 0;
 }

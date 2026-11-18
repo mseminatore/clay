@@ -127,7 +127,11 @@ file(WRITE "${WORK}/src/current/brick.json"
 commit(current one)
 file(WRITE "${WORK}/src/oddrange/brick.json" "{ \"name\": \"oddrange\", \"clay\": \"^abc\" }\n")
 commit(oddrange one)
-foreach(name lib-a lib-b mono nat cyc-a cyc-b bad future current oddrange)
+# pin-a: depends on lib-a (which depends on lib-b) and pins lib-b itself
+file(WRITE "${WORK}/src/pin-a/brick.json"
+     "{ \"name\": \"pin-a\", \"deps\": { \"lib-a\": \"example.test/acme/lib-a\", \"lib-b\": \"example.test/acme/lib-b@v1.0\" } }\n")
+commit(pin-a one)
+foreach(name lib-a lib-b mono nat cyc-a cyc-b bad future current oddrange pin-a)
     publish(${name})
 endforeach()
 
@@ -325,7 +329,7 @@ file(WRITE "${WORK}/src/lib-a/src/main.clay" "LibA = Object clone { more = 1 }\n
 commit(lib-a two)
 git("${WORK}/src/lib-a" push -q "${WORK}/repos/acme/lib-a" HEAD:main)
 both(update)
-expect("Updated 1 of 7 dependencies.")
+expect("Updated 1 of 9 dependencies.")      # (and lib-b and cyc-b, theirs)
 remove_both(bricks/libb)
 both(update)
 expect("libb: not installed, installing...")
@@ -434,6 +438,46 @@ expect("error: this project needs Clay >=99, but this is Clay ")
 write_both(brick.json "{ \"name\": \"p\", \"clay\": \">=1.2.3.4\" }\n")
 both(install)
 expect("error: brick.json has an invalid \"clay\" version range")
+
+# brick.lock holds the whole tree; a brick's own pin wins over one further
+# down; installing from brick.lock puts a dependency's dependency back at its
+# locked commit, and update moves it on
+macro(expect_both_file file text)
+    foreach(side clay clayc)
+        file(READ "${WORK}/${side}/proj/${file}" now)
+        string(FIND "${now}" "${text}" at)
+        if(at LESS 0)
+            list(APPEND failed "${side}: ${file} lacks ${text}")
+            message("--- ${side}: ${file} lacks \"${text}\":\n${now}")
+        endif()
+    endforeach()
+endmacro()
+write_both(brick.json "{ \"name\": \"p\" }\n")
+remove_both(bricks brick.lock)
+both(add example.test/acme/pin-a)
+expect("Added 'pin-a' to brick.json")
+expect_both_file(brick.lock "\"dependency_of\": \"pin-a\"")
+expect_both_file(bricks/lib-b/src/main.clay "v() { 1 }")      # pin-a's lib-b@v1.0, not lib-a's
+same_state("after adding a brick that pins a dependency of its dependency")
+write_both(brick.json "{ \"name\": \"p\" }\n")
+remove_both(bricks brick.lock)
+both(add example.test/acme/lib-a)
+expect_both_file(brick.lock "\"lib-b\": {")
+expect_both_file(bricks/lib-b/src/main.clay "v() { 2 }")
+file(WRITE "${WORK}/src/lib-b/src/main.clay" "LibB = Object clone { v() { 3 } }\n")
+commit(lib-b three)
+git("${WORK}/src/lib-b" push -q "${WORK}/repos/acme/lib-b" HEAD:main)
+both(install)
+expect("Dependencies already locked and up to date.")
+remove_both(bricks/lib-b)
+both(install)
+expect("(from brick.lock)")
+expect_both_file(bricks/lib-b/src/main.clay "v() { 2 }")      # the locked commit, not the newest
+same_state("after installing a dependency's dependency from brick.lock")
+both(update)
+expect("Updated 1 of 2 dependencies.")
+expect_both_file(bricks/lib-b/src/main.clay "v() { 3 }")
+same_state("after updating a dependency's dependency")
 
 # invalid manifests
 write_both(brick.json "{ \"name\": \"p\", \"deps\": { \"x\": \"bad url\" } }\n")

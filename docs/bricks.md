@@ -35,6 +35,11 @@ clay bricks info ann                          # what the registry says about one
 
 Dependencies are pinned to a Git tag, branch, or commit via `@ref`. URLs are automatically prefixed with `https://` if no protocol is specified.
 
+A dependency's own dependencies are installed too, each name once (in `bricks/<name>`). When two
+bricks ask for the same name, the one nearer the project wins: a brick's own dependencies are
+installed before theirs, so a brick that pins `pdf@v0.1.1` gets that version even if another of
+its dependencies asks for `pdf` unpinned.
+
 `"clay"` (optional) says which Clay versions the brick works with, as an npm-style semver range:
 `">=0.3.3"`, `"^0.3"`, `">=0.3.3 <0.5"`, `"0.3.x || >=1.0"`, the syntax of
 [`Semver satisfies`](#bundled-bricks). `clay bricks add` and `install` refuse a dependency whose
@@ -197,10 +202,12 @@ my-project/
 
 The `bricks/` directory should be gitignored — it's recreated by `clay bricks install`.
 
-`brick.lock` records the exact commit of every dependency. Commit it: with a
-matching lock file, `clay bricks install` checks out those commits, so everyone
-(and CI) builds against the same code even when a dependency's branch moves on.
-`clay bricks update` fetches newer commits and rewrites the lock file.
+`brick.lock` records the exact commit of every dependency, the project's own and theirs (an
+entry with `"dependency_of"` names the brick that needs it). Commit it: with a matching lock
+file, `clay bricks install` checks out those commits, so everyone (and CI) builds against the
+same code even when a dependency's branch moves on. `clay bricks update` fetches newer commits
+for all of them and rewrites the lock file. (A lock file written by Clay 0.3.7 or earlier lists
+only the project's own dependencies; the next install or update adds the rest.)
 
 ## Bundled bricks
 

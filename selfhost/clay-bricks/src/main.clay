@@ -630,7 +630,8 @@ BrickFiles = Object clone {
               true } catch { |e| false }
     }
 
-    // One entry of "locked": { name: { "url", "version", "resolved" } }
+    // One entry of "locked": { name: { "url", "version", "resolved",
+    // "dependency_of" } }
     _lockEntry(r, entry) {
         c = r peek
         { c != 0 && c != 125 } whileTrue {
@@ -641,8 +642,9 @@ BrickFiles = Object clone {
             (key == "url") ifTrue { idx = 1 }
             (key == "version") ifTrue { idx = 2 }
             (key == "resolved") ifTrue { idx = 3 }
+            (key == "dependency_of") ifTrue { idx = 4 }
             (idx > 0) ifTrue {
-                v = r str([0, 1024, 64, 128] at(idx))
+                v = r str([0, 1024, 64, 128, 128] at(idx))
                 (v == nil) ifTrue { return false }
                 entry setAt(idx, v)
             } ifFalse {
@@ -661,14 +663,14 @@ BrickFiles = Object clone {
         r ws
         c = r peek
         { c != 0 && c != 125 } whileTrue {
-            (entries size >= 64) ifTrue { return false }
+            (entries size >= 256) ifTrue { return false }    // BRICK_MAX_LOCKED
             depName = r str(128)
             (depName == nil) ifTrue { return false }
             (r colon) ifFalse { return false }
             ((r peek) != 123) ifTrue { return false }
             r skip
             r ws
-            entry = [depName, "", "", ""]
+            entry = [depName, "", "", "", ""]
             (self _lockEntry(r, entry)) ifFalse { return false }
             entries push(entry)
             r comma
@@ -679,7 +681,8 @@ BrickFiles = Object clone {
     }
 
     // parse_lock: [lockfile_version, entries], each entry
-    // [name, url, version, resolved]; nil if the text is malformed
+    // [name, url, version, resolved, dependency_of] (dependency_of "" for one
+    // of the project's own); nil if the text is malformed
     parseLock(text) {
         r = BrickReader new(text)
         version = 0
@@ -716,10 +719,11 @@ BrickFiles = Object clone {
         self parseLock(text)
     }
 
-    // bricks_lock_matches: the lock lists exactly the manifest's dependencies
+    // bricks_lock_matches: the lock's own entries (not its dependencies')
+    // are exactly the manifest's dependencies
     lockMatches(m, lock) {
         ((lock at(0)) != 1) ifTrue { return false }
-        entries = lock at(1)
+        entries = (lock at(1)) filter { |e| (e at(4)) == "" }
         (entries size != m deps size) ifTrue { return false }
         m deps each { |d|
             found = false
@@ -1734,22 +1738,58 @@ Bricks = Object clone {
 
     _initHint() { " (run '" + prog + " bricks init' first)" }
 
-    // bricks_write_lock: brick.lock from the manifest and what is installed
+    // lock_write_entry: one entry of brick.lock, the commit checked out for a
+    // dependency and the brick that needs it (parent; "" for the project's own)
+    _lockEntryText(url, depName, parent) {
+        ref = (BrickUrl split(url)) at(2)
+        (ref == "") ifTrue { ref = "latest" }
+        sha = self _head(BrickUrl repoDir(url, depName))
+        text = "\n    \"" + depName + "\": {\n" +
+               "      \"url\": \"" + url + "\",\n" +
+               "      \"version\": \"" + ref + "\",\n"
+        (parent != "") ifTrue {
+            text = text + "      \"resolved\": \"" + sha + "\",\n" +
+                   "      \"dependency_of\": \"" + parent + "\"\n"
+        } ifFalse {
+            text = text + "      \"resolved\": \"" + sha + "\"\n"
+        }
+        text + "    }"
+    }
+
+    // lock_write_deps: the entries for the dependencies of the installed
+    // brick (url, name), in the order install reaches them: a brick's own
+    // first, then theirs
+    _lockDeps(entries, url, depName) {
+        sub = BrickFiles load((BrickUrl installDir(url, depName)) + "/brick.json")
+        ((sub == nil) || (sub == false)) ifTrue { return nil }
+        fresh = sub deps map { |d| self _visit(d at(0)) }
+        i = 0
+        sub deps each { |d|
+            (fresh at(i)) ifTrue { entries push(self _lockEntryText(d at(1), d at(0), depName)) }
+            i = i + 1
+        }
+        i = 0
+        sub deps each { |d|
+            (fresh at(i)) ifTrue { self _lockDeps(entries, d at(1), d at(0)) }
+            i = i + 1
+        }
+        nil
+    }
+
+    // bricks_write_lock: brick.lock, the commit of every dependency
+    // installed: the project's own and, marked "dependency_of", theirs
     writeLock(m) {
         out = "{\n  \"lockfile_version\": 1,\n  \"locked\": {"
-        sep = ""
+        entries = []
+        _visited = []
         m deps each { |d|
-            ref = (BrickUrl split(d at(1))) at(2)
-            (ref == "") ifTrue { ref = "latest" }
-            sha = self _head(BrickUrl repoDir(d at(1), d at(0)))
-            out = out + sep + "\n    \"" + (d at(0)) + "\": {\n" +
-                  "      \"url\": \"" + (d at(1)) + "\",\n" +
-                  "      \"version\": \"" + ref + "\",\n" +
-                  "      \"resolved\": \"" + sha + "\"\n" +
-                  "    }"
-            sep = ","
+            self _visit(d at(0))
+            entries push(self _lockEntryText(d at(1), d at(0), ""))
         }
-        (m deps size > 0) ifTrue { out = out + "\n  " }
+        m deps each { |d| self _lockDeps(entries, d at(1), d at(0)) }
+        _visited = []
+        out = out + (entries join(","))
+        (entries size > 0) ifTrue { out = out + "\n  " }
         out = out + "}\n}\n"
         wrote = try { File write("brick.lock", out)
                       true } catch { |e| false }
@@ -1778,11 +1818,17 @@ Bricks = Object clone {
         true
     }
 
-    // brick_locked_sha: the commit brick.lock records for (name, url), or nil
+    // brick_locked_sha: the commit brick.lock records for the dependency
+    // (name, url), or nil. A name has one checkout, so its entry applies to
+    // any URL of the same repository (one brick may pin it, another not).
     _lockedSha(depName, url) {
         (_pins == nil) ifTrue { return nil }
         _pins each { |e|
-            ((e at(0)) == depName && (e at(1)) == url) ifTrue {
+            same = (e at(0)) == depName
+            (same && (e at(1)) != url) ifTrue {
+                same = ((BrickUrl split(e at(1))) at(0)) == ((BrickUrl split(url)) at(0))
+            }
+            same ifTrue {
                 sha = e at(3)
                 (sha length < 7 || sha length > 64) ifTrue { return nil }
                 i = 0
@@ -1826,9 +1872,7 @@ Bricks = Object clone {
         failed = 0
         (sub deps size > 0) ifTrue {
             self _say("  Installing dependencies of " + depName + "...")
-            sub deps each { |d|
-                (self _installDep(d at(1), d at(0))) ifFalse { failed = failed + 1 }
-            }
+            failed = self _installDeps(sub deps)
         }
         failed == 0
     }
@@ -1860,10 +1904,11 @@ Bricks = Object clone {
         true
     }
 
-    // install_dep: one dependency and, in turn, its dependencies; true if
-    // they are all there
-    _installDep(url, depName) {
-        (self _visit(depName)) ifFalse { return true }   // a cycle or diamond: done already
+    // install_one: one dependency, not its dependencies: 1 if it is there
+    // now, 0 if this run reached it already (a cycle, or a name another brick
+    // chose first), -1 on an error
+    _installOne(url, depName) {
+        (self _visit(depName)) ifFalse { return 0 }      // a cycle or diamond: done already
         parts = BrickUrl split(url)
         cloneUrl = parts at(0)
         subpath = parts at(1)
@@ -1874,16 +1919,16 @@ Bricks = Object clone {
             // see BrickUrl repoDir) shared by its bricks, each at its subpath
             repo = BrickUrl repoDir(url, depName)
             (File exists(repo)) ifTrue {
-                (self _sameOrigin(repo, cloneUrl)) ifFalse { return false }
+                (self _sameOrigin(repo, cloneUrl)) ifFalse { return -1 }
             } ifFalse {
                 self _say("  Cloning " + cloneUrl + " into " + repo + "...")
-                (self _clone(cloneUrl, repo)) ifFalse { return false }
+                (self _clone(cloneUrl, repo)) ifFalse { return -1 }
                 self _checkout(repo, depName, url, ref)
             }
             dir = repo + "/" + subpath
             (File exists(dir)) ifFalse {
                 self _err("  error: sub-brick '" + subpath + "' not found in " + cloneUrl)
-                return false
+                return -1
             }
             // the import path is the directory under bricks/
             slash = depName indexOf("/")
@@ -1892,22 +1937,46 @@ Bricks = Object clone {
                           (dir slice(7, dir length)) + "\"")
             }
             self _say("  Installed " + depName)
-            return self _installSubdeps(dir, depName)
+            return 1
         }
 
         dest = "bricks/" + depName
         (File exists(dest)) ifTrue {
-            (self _sameOrigin(dest, cloneUrl)) ifFalse { return false }
+            (self _sameOrigin(dest, cloneUrl)) ifFalse { return -1 }
             self _say("  " + depName + ": already installed")
-            // still check its dependencies: an interrupted install can leave
-            // the checkout without them
-            return self _installSubdeps(dest, depName)
+            // (its dependencies are still checked: an interrupted install can
+            // leave the checkout without them)
+            return 1
         }
         self _say("  Installing " + depName + " from " + cloneUrl + "...")
-        (self _clone(cloneUrl, dest)) ifFalse { return false }
+        (self _clone(cloneUrl, dest)) ifFalse { return -1 }
         self _checkout(dest, depName, url, ref)
-        self _installSubdeps(dest, depName)
+        1
     }
+
+    // install_deps: a list of dependencies (a manifest's), each of them first,
+    // then their dependencies, so a brick's own choice for a name (a pinned
+    // version, say) wins over one further down; how many failed
+    _installDeps(deps) {
+        failed = 0
+        state = deps map { |d|
+            st = self _installOne(d at(1), d at(0))
+            (st < 0) ifTrue { failed = failed + 1 }
+            st
+        }
+        i = 0
+        deps each { |d|
+            ((state at(i)) == 1) ifTrue {
+                (self _installSubdeps(BrickUrl installDir(d at(1), d at(0)), d at(0))) ifFalse { failed = failed + 1 }
+            }
+            i = i + 1
+        }
+        failed
+    }
+
+    // install_dep: one dependency and, in turn, its dependencies; true if
+    // they are all there
+    _installDep(url, depName) { (self _installDeps([[depName, url]])) == 0 }
 
     cmdInit() {
         (File exists("brick.json")) ifTrue {
@@ -1992,7 +2061,8 @@ Bricks = Object clone {
         locked = lock != nil && (BrickFiles lockMatches(m, lock))
         _pins = nil
         locked ifTrue {
-            missing = m deps filter { |d| (File exists(BrickUrl installDir(d at(1), d at(0)))) == false }
+            // every locked one: the project's and theirs
+            missing = (lock at(1)) filter { |e| (File exists(BrickUrl installDir(e at(1), e at(0)))) == false }
             (missing size == 0) ifTrue {
                 self _say("Dependencies already locked and up to date.")
                 return 0
@@ -2003,11 +2073,8 @@ Bricks = Object clone {
         self _mkdir("bricks")
         self _say("Installing " + m deps size toString + " dependencies" +
                   (locked ifTrue { " (from brick.lock)" } ifFalse { "" }) + "...")
-        failed = 0
         _visited = []
-        m deps each { |d|
-            (self _installDep(d at(1), d at(0))) ifFalse { failed = failed + 1 }
-        }
+        failed = self _installDeps(m deps)
         _pins = nil
         (failed > 0) ifTrue {
             self _err(failed toString + " dependencies failed to install.")
@@ -2147,8 +2214,9 @@ Bricks = Object clone {
         dir = BrickUrl repoDir(url, depName)     // git works on the repository
         (File exists(dir)) ifFalse {
             self _say("  " + depName + ": not installed, installing...")
-            return [self _installDep(url, depName), true]
+            return [self _installDep(url, depName), true]     // (and its dependencies)
         }
+        self _visit(depName)
 
         before = self _head(dir)
         (ref != "") ifTrue {
@@ -2183,6 +2251,36 @@ Bricks = Object clone {
         BrickUrl clip(sha, 7)
     }
 
+    // update_deps: a list of dependencies (a manifest's), then the
+    // dependencies their brick.json lists now, in the order install takes
+    // them. counts is [updated, reached], counted up; returns how many failed.
+    _updateDeps(deps, counts) {
+        failed = 0
+        state = deps map { |d|
+            ok = false
+            (_visited contains(d at(0))) ifFalse {
+                counts setAt(1, (counts at(1)) + 1)
+                res = self _updateDep(d at(1), d at(0))
+                (res at(0)) ifTrue {
+                    (res at(1)) ifTrue { counts setAt(0, (counts at(0)) + 1) }
+                    ok = true
+                } ifFalse { failed = failed + 1 }
+            }
+            ok
+        }
+        i = 0
+        deps each { |d|
+            (state at(i)) ifTrue {
+                sub = BrickFiles load((BrickUrl installDir(d at(1), d at(0))) + "/brick.json")
+                ((sub != nil) && (sub != false) && (sub deps size > 0)) ifTrue {
+                    failed = failed + (self _updateDeps(sub deps, counts))
+                }
+            }
+            i = i + 1
+        }
+        failed
+    }
+
     cmdUpdate() {
         m = self _project("")
         (m == nil) ifTrue { return 1 }
@@ -2193,17 +2291,11 @@ Bricks = Object clone {
         }
         noun = (count == 1) ifTrue { "dependency" } ifFalse { "dependencies" }
         self _say("Updating " + count toString + " " + noun + "...")
-        failures = 0
-        updated = 0
+        counts = [0, 0]            // updated, reached
         _visited = []
-        m deps each { |d|
-            res = self _updateDep(d at(1), d at(0))
-            (res at(0)) ifTrue {
-                (res at(1)) ifTrue { updated = updated + 1 }
-            } ifFalse {
-                failures = failures + 1
-            }
-        }
+        failures = self _updateDeps(m deps, counts)
+        updated = counts at(0)
+        total = counts at(1)
         (failures > 0) ifTrue {
             self _say("Done with " + failures toString + " failure(s).")
             return 1
@@ -2212,7 +2304,8 @@ Bricks = Object clone {
         (updated == 0) ifTrue {
             self _say("Everything was already up to date.")
         } ifFalse {
-            self _say("Updated " + updated toString + " of " + count toString + " " + noun + ".")
+            noun = (total == 1) ifTrue { "dependency" } ifFalse { "dependencies" }
+            self _say("Updated " + updated toString + " of " + total toString + " " + noun + ".")
         }
         0
     }
