@@ -282,7 +282,7 @@ static ClayValue dict_toString(ClayObject *self, int argc, ClayValue *argv) {
         } else if (CLAY_IS_NIL(cv)) {
             vs = "nil";
         } else {
-            sv = clay_send(CLAY_OBJ(cv), "toString", 0, NULL);
+            sv = clay_send_owned(cv, "toString", 0, NULL);
             vs = clay_string_data(CLAY_OBJ(sv));
         }
         size_t vlen = strlen(vs);

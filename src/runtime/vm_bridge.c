@@ -1159,7 +1159,7 @@ static int native_println_fn(clayvm_vm_t *vm, int argc) {
     } else if (cv == CLAY_FALSE) {
         snprintf(buf, sizeof(buf), "false\n");
     } else {
-        ClayValue sv = clay_send_val(cv, "toString", 0, NULL);
+        ClayValue sv = clay_send_owned(cv, "toString", 0, NULL);
         snprintf(buf, sizeof(buf), "%s\n", clay_string_data(CLAY_OBJ(sv)));
         clay_release(CLAY_OBJ(sv));
     }

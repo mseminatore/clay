@@ -220,7 +220,9 @@ static ClayPluginObject api_clone(ClayPluginObject proto) {
 
 static ClayPluginValue api_send(ClayPluginValue recv, const char *sel,
                                 int argc, ClayPluginValue *argv) {
-    return (ClayPluginValue)clay_send_val((ClayValue)recv, sel, argc, (ClayValue *)argv);
+    /* a new reference, as documented, even when the method returns its
+     * receiver or an argument (which methods return borrowed) */
+    return (ClayPluginValue)clay_send_owned((ClayValue)recv, sel, argc, (ClayValue *)argv);
 }
 
 static void api_set_data(ClayPluginObject obj, void *data) {

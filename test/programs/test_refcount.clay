@@ -44,6 +44,16 @@ check value("closure call", { f = { |x| x + count }; f value(1) })
 check value("try/catch", { try { raise("x") } catch { |e| e message } })
 check value("string concat", { t = "a" + count toString + "b" })
 
+// --- String methods that give back the receiver (no match, nothing to pad)
+// return it borrowed, and a new string doesn't outlive them ---
+check value("replace with no match", { ("ab" + count toString) replace("x", "y") })
+check value("padLeft too short to pad", { ("ab" + count toString) padLeft(1) })
+check value("padRight too short to pad", { ("ab" + count toString) padRight(1) })
+check value("toString of a new string", { ("ab" + count toString) toString })
+check value("strings inside an Array toString", { [("ab" + count toString), 1] toString })
+check value("strings inside a Dict toString", { #{a: ("ab" + count toString)} toString })
+check value("Console print of a new string", { Console print("") })
+
 // --- and the measurement does see a real leak ---
 kept = []
 (growth value({ kept push("x" + kept size toString) }) == 100) ifFalse {

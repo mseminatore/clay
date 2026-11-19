@@ -85,11 +85,11 @@ static ClayValue string_length(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_toString(ClayObject *self, int argc, ClayValue *argv) {
     (void)argc; (void)argv;
-    return CLAY_VAL(clay_retain(self));
+    return CLAY_VAL(self);   /* the receiver: borrowed */
 }
 
 static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_VAL(clay_retain(self));
+    if (argc < 1) return CLAY_VAL(self);   /* the receiver: borrowed */
 
     /* Convert argument to string via toString */
     if (CLAY_IS_INT(argv[0])) {
@@ -107,7 +107,7 @@ static ClayValue string_concat(ClayObject *self, int argc, ClayValue *argv) {
     ClayObject *other;
     ClayValue other_val;
     if (CLAY_IS_PTR(argv[0]) && !CLAY_IS_NIL(argv[0])) {
-        other_val = clay_send(CLAY_OBJ(argv[0]), "toString", 0, NULL);
+        other_val = clay_send_owned(argv[0], "toString", 0, NULL);
         other = CLAY_OBJ(other_val);
     } else {
         other = clay_string_new("nil");
@@ -198,7 +198,7 @@ static ClayValue string_contains(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_slice(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_VAL(clay_retain(self));
+    if (argc < 1) return CLAY_VAL(self);   /* the receiver: borrowed */
     intptr_t start = CLAY_IS_INT(argv[0]) ? clay_to_int(argv[0]) : 0;
     intptr_t end = (argc > 1 && CLAY_IS_INT(argv[1])) ? clay_to_int(argv[1])
                  : (intptr_t)self->as.string.length;
@@ -244,13 +244,13 @@ static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 2 || !CLAY_IS_OBJ(argv[0])
                   || !CLAY_IS_OBJ(argv[1])) {
-        return CLAY_VAL(clay_retain(self));
+        return CLAY_VAL(self);   /* the receiver: borrowed */
     }
     ClayObject *old_str = CLAY_OBJ(argv[0]);
     ClayObject *new_str = CLAY_OBJ(argv[1]);
     if (old_str->type != CLAY_TYPE_STRING || new_str->type != CLAY_TYPE_STRING)
-        return CLAY_VAL(clay_retain(self));
-    if (old_str->as.string.length == 0) return CLAY_VAL(clay_retain(self));
+        return CLAY_VAL(self);   /* the receiver: borrowed */
+    if (old_str->as.string.length == 0) return CLAY_VAL(self);   /* the receiver: borrowed */
 
     /* Count occurrences to pre-allocate */
     size_t count = 0;
@@ -261,7 +261,7 @@ static ClayValue string_replace(ClayObject *self, int argc, ClayValue *argv) {
         count++;
         p += old_str->as.string.length;
     }
-    if (count == 0) return CLAY_VAL(clay_retain(self));
+    if (count == 0) return CLAY_VAL(self);   /* the receiver: borrowed */
 
     size_t new_len = self->as.string.length
                    + count * (new_str->as.string.length - old_str->as.string.length);
@@ -433,7 +433,7 @@ static ClayValue string_repeat(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t width = clay_arg_integer(argc, argv, 0, "String padLeft");
-    if (width < 0 || (size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
+    if (width < 0 || (size_t)width <= self->as.string.length) return CLAY_VAL(self);   /* the receiver: borrowed */
     char pad = ' ';
     if (argc > 1 && CLAY_IS_PTR(argv[1]) && !CLAY_IS_NIL(argv[1])) {
         ClayObject *ps = CLAY_OBJ(argv[1]);
@@ -450,7 +450,7 @@ static ClayValue string_padLeft(ClayObject *self, int argc, ClayValue *argv) {
 
 static ClayValue string_padRight(ClayObject *self, int argc, ClayValue *argv) {
     intptr_t width = clay_arg_integer(argc, argv, 0, "String padRight");
-    if (width < 0 || (size_t)width <= self->as.string.length) return CLAY_VAL(clay_retain(self));
+    if (width < 0 || (size_t)width <= self->as.string.length) return CLAY_VAL(self);   /* the receiver: borrowed */
     char pad = ' ';
     if (argc > 1 && CLAY_IS_PTR(argv[1]) && !CLAY_IS_NIL(argv[1])) {
         ClayObject *ps = CLAY_OBJ(argv[1]);

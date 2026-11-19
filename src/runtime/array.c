@@ -128,7 +128,7 @@ static ClayValue array_toString(ClayObject *self, int argc, ClayValue *argv) {
         } else if (CLAY_IS_NIL(item)) {
             s = "nil";
         } else {
-            sv = clay_send(CLAY_OBJ(item), "toString", 0, NULL);
+            sv = clay_send_owned(item, "toString", 0, NULL);
             s = clay_string_data(CLAY_OBJ(sv));
         }
         size_t slen = strlen(s);
@@ -289,7 +289,7 @@ static ClayValue array_join(ClayObject *self, int argc, ClayValue *argv) {
             s = CLAY_OBJ(item)->as.string.data;
             slen = CLAY_OBJ(item)->as.string.length;
         } else {
-            ClayValue sv = clay_send_val(item, "toString", 0, NULL);
+            ClayValue sv = clay_send_owned(item, "toString", 0, NULL);
             if (CLAY_IS_TYPE(sv, CLAY_TYPE_STRING)) {
                 str = CLAY_OBJ(sv);
                 s = str->as.string.data;
@@ -346,8 +346,8 @@ static int clay_compare_values(const void *a, const void *b) {
     }
 
     /* Anything else: compare as text */
-    ClayValue sa = clay_send_val(va, "toString", 0, NULL);
-    ClayValue sb = clay_send_val(vb, "toString", 0, NULL);
+    ClayValue sa = clay_send_owned(va, "toString", 0, NULL);
+    ClayValue sb = clay_send_owned(vb, "toString", 0, NULL);
     int cmp = strcmp(clay_string_data(CLAY_OBJ(sa)), clay_string_data(CLAY_OBJ(sb)));
     clay_release(CLAY_OBJ(sa));
     clay_release(CLAY_OBJ(sb));

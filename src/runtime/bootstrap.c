@@ -99,7 +99,7 @@ static ClayValue object_println(ClayObject *self, int argc, ClayValue *argv) {
     if (argc > 0) clay_raise_argument_error("println",
         "takes no arguments — it prints the receiver (to print a value, use Console println(value))");
 
-    ClayValue s = clay_send(self, "toString", 0, NULL);
+    ClayValue s = clay_send_owned(CLAY_VAL(self), "toString", 0, NULL);
     ClayValue pr = clay_send(CLAY_OBJ(s), "println", 0, NULL);
     /* pr is often the same object as s (string_println returns self),
      * so only release each distinct object once. */
@@ -455,7 +455,7 @@ static void console_write(const char *text) {
 static ClayValue console_print(ClayObject *self, int argc, ClayValue *argv) {
     for (int i = 0; i < argc; i++) {
         if (i > 0) console_write(" ");
-        ClayValue s = clay_send_val(argv[i], "toString", 0, NULL);
+        ClayValue s = clay_send_owned(argv[i], "toString", 0, NULL);
         if (CLAY_IS_TYPE(s, CLAY_TYPE_STRING)) console_write(clay_string_data(CLAY_OBJ(s)));
         else console_write(CLAY_IS_NIL(argv[i]) ? "nil" : "?");
         clay_release_val(s);
@@ -469,7 +469,7 @@ static ClayValue console_error(ClayObject *self, int argc, ClayValue *argv) {
     fflush(stdout);
     for (int i = 0; i < argc; i++) {
         if (i > 0) fputs(" ", stderr);
-        ClayValue s = clay_send_val(argv[i], "toString", 0, NULL);
+        ClayValue s = clay_send_owned(argv[i], "toString", 0, NULL);
         if (CLAY_IS_TYPE(s, CLAY_TYPE_STRING)) fputs(clay_string_data(CLAY_OBJ(s)), stderr);
         else fputs(CLAY_IS_NIL(argv[i]) ? "nil" : "?", stderr);
         clay_release_val(s);
