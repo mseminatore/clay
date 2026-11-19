@@ -10,6 +10,7 @@ clay bricks --help                            # the commands
 clay bricks init                              # create brick.json in this folder
 clay bricks add github.com/user/some-lib      # add + install a dependency
 clay bricks add github.com/user/clay-foo foo  # ...named (and imported as) "foo"
+clay bricks add github.com/user/some-lib@v1.2 # change the version it's pinned to
 clay bricks install                           # install all deps from brick.json
 clay bricks update                            # update all deps to latest
 clay bricks list                              # show project info
@@ -33,12 +34,26 @@ clay bricks info ann                          # what the registry says about one
 }
 ```
 
-Dependencies are pinned to a Git tag, branch, or commit via `@ref`. URLs are automatically prefixed with `https://` if no protocol is specified.
+Dependencies are pinned to a Git tag, branch, or commit via `@ref`. URLs are automatically
+prefixed with `https://` if no protocol is specified. Bricks come over https only: an
+`http://` URL is refused, since code fetched that way can be changed on its way, and git may
+only use https (or ssh, if your git config sends a host there) for a brick's submodules too.
+
+To move a dependency to another version, `add` it again with the new `@ref` (as `uv add`,
+`cargo add` and `go get` do): `clay bricks add github.com/user/some-lib@v1.2` checks out
+`v1.2`, then changes `brick.json` and `brick.lock`. Editing the `@ref` in `brick.json` by
+hand works too: `clay bricks install` moves the checkout to it. A pin that can't be checked
+out (a tag that doesn't exist, say) is an error, and the dependency stays where it was.
 
 A dependency's own dependencies are installed too, each name once (in `bricks/<name>`). When two
 bricks ask for the same name, the one nearer the project wins: a brick's own dependencies are
 installed before theirs, so a brick that pins `pdf@v0.1.1` gets that version even if another of
-its dependencies asks for `pdf` unpinned.
+its dependencies asks for `pdf` unpinned. A brick that pinned another version than the one
+used is told on stderr, since it gets code it didn't ask for:
+
+```
+  warning: plot asks for github.com/user/clay-pdf@v0.2.0 as 'pdf'; using github.com/user/clay-pdf@v0.1.1 (from this project)
+```
 
 `"clay"` (optional) says which Clay versions the brick works with, as an npm-style semver range:
 `">=0.3.3"`, `"^0.3"`, `">=0.3.3 <0.5"`, `"0.3.x || >=1.0"`, the syntax of
@@ -205,7 +220,9 @@ The `bricks/` directory should be gitignored — it's recreated by `clay bricks 
 `brick.lock` records the exact commit of every dependency, the project's own and theirs (an
 entry with `"dependency_of"` names the brick that needs it). Commit it: with a matching lock
 file, `clay bricks install` checks out those commits, so everyone (and CI) builds against the
-same code even when a dependency's branch moves on. `clay bricks update` fetches newer commits
+same code even when a dependency's branch moves on, or someone moves a tag. A checkout that
+isn't at its locked commit is put back there, and a locked commit that can't be checked out
+stops the install rather than running something else. `clay bricks update` fetches newer commits
 for all of them and rewrites the lock file. (A lock file written by Clay 0.3.7 or earlier lists
 only the project's own dependencies; the next install or update adds the rest.)
 

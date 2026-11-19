@@ -238,9 +238,13 @@ the sources in directly, so it doesn't depend on the plugin file. The brick's
   `clay bricks add` and `install` fetch submodules.
 - Because a native brick runs C code it ships, `clay bricks add` says so when adding one and,
   at a terminal, asks before going ahead (`--yes` skips the question).
-- `cflags` and `libs` are options for the compiler and linker. Each must start
-  with `-` and contain only letters, digits and `. _ = + , / -`, because they end up
-  on a command line. A `brick.json` that breaks these rules fails to import.
+- `cflags` and `libs` are options for the compiler and linker: `-D`, `-U`, `-I`, `-L`,
+  `-l`, `-O`, `-g`, `-std=`, `-f...`, `-m...`, `-W...` (including `-Wl,` for the linker)
+  and `-pthread`. Each contains only letters, digits and `. _ = + , / -`, because they
+  end up on a command line. Options that could bring in code from outside the brick's
+  sources are refused (`-fplugin=`, a linker plugin, `-B`, `-specs=`, `-include`,
+  `-Xlinker`, `-Wa,`, `-Wp,`), so reading a brick's C files shows what it compiles. A
+  `brick.json` that breaks these rules fails to import.
 
 ### Per-platform options and brick-relative paths
 

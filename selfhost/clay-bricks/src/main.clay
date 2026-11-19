@@ -260,10 +260,12 @@ BrickUrl = Object clone {
         0 - 1
     }
 
-    // brick_safe_url: [https://|http://]host[:port]/owner/repo[/subpath][@ref],
-    // every part a safe path
+    // brick_safe_url: [https://]host[:port]/owner/repo[/subpath][@ref], every
+    // part a safe path. Not http://: code fetched that way can be changed on
+    // its way.
     safe(url) {
         (url == nil || url == "") ifTrue { return false }
+        (url startsWith("http://")) ifTrue { return false }
         rest = self stripScheme(url)
         (rest length >= 1024) ifTrue { return false }
         cut = rest indexOf("@")
@@ -397,7 +399,8 @@ BrickFiles = Object clone {
             flags each { |f|
                 (NativeBricks safeFlag(f)) ifFalse {
                     Console error("error: brick.json: rejecting native flag \"" + f + "\" " +
-                                  "(a flag starts with '-' and has no spaces, quotes or shell characters)\n")
+                                  "(a flag is one of -D -U -I -L -l -O -g -std= -f -m -W -pthread, " +
+                                  "with no spaces, quotes or shell characters)\n")
                     return false
                 }
             }
@@ -457,6 +460,11 @@ BrickFiles = Object clone {
             (r colon) ifFalse { return false }
             url = r str(1024)
             (url == nil) ifTrue { return false }
+            (url startsWith("http://")) ifTrue {
+                Console error("error: brick.json: dependency \"" + depName + "\" is fetched over http (" +
+                              url + "); bricks come over https only\n")
+                return false
+            }
             ((NativeBricks safePath(depName, true)) && (BrickUrl safe(url))) ifFalse {
                 Console error("error: brick.json: rejecting unsafe dependency \"" + depName + "\": \"" + url +
                               "\" (names and URLs may only contain letters, digits, '.', '_', '-', '/' " +
@@ -1661,14 +1669,26 @@ Bricks = Object clone {
     prog = "clayc"         // how the messages name the program
     _pins = nil            // brick.lock's entries while installing from it
     _visited = nil         // names already installed in this run (cycles)
+    _from = nil            // [name, url, by] of those install reached: where it
+                           // came from and who asked ("" for the project)
 
     _say(text) { Console print(text + "\n") }
     _err(text) { Console error(text + "\n") }
 
+    // Every git command: only https and ssh, for the dependencies and the
+    // submodules they bring (git passes -c on to the git commands it starts),
+    // so no http, git://, file:// or ext:: URL in a third-party .gitmodules
+    // is followed. A protocol.<name>.allow in the user's own git config still
+    // wins, for a local mirror say.
+    _gitCmd() {
+        ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+         "-c", "protocol.ssh.allow=always"]
+    }
+
     // Run git with these arguments, its output going to the terminal; the
     // exit code
     _git(args) {
-        cmd = ["git"]
+        cmd = self _gitCmd
         args each { |a| cmd push(a) }
         try { Process stream(cmd) { |line| Console print(line + "\n") } } catch { |e|
             Console error("  error: cannot run git (" + e message + ")\n")
@@ -1679,7 +1699,9 @@ Bricks = Object clone {
     // git_output: the first line `git -C dir args` prints, clipped to
     // width - 1 bytes; "" if git fails or prints nothing
     _gitLine(dir, args, width) {
-        cmd = ["git", "-C", dir]
+        cmd = self _gitCmd
+        cmd push("-C")
+        cmd push(dir)
         args each { |a| cmd push(a) }
         res = try { Process run(cmd) } catch { |e| nil }
         (res == nil || res ok == false) ifTrue { return "" }
@@ -1818,6 +1840,42 @@ Bricks = Object clone {
         true
     }
 
+    // brick_visit: the same, noting the URL and the brick that asked for it
+    _visitDep(depName, url, by) {
+        (self _visit(depName)) ifFalse { return false }
+        _from push([depName, url, by])
+        true
+    }
+
+    // brick_warn_other_pin: `by` asks for depName from url, but this run
+    // installed the name already, from the URL the brick nearest the project
+    // gave. Say so when that isn't what `by` pinned.
+    _warnOtherPin(depName, url, by) {
+        _from each { |e|
+            ((e at(0)) == depName) ifTrue {
+                ((e at(1)) == url) ifTrue { return nil }
+                a = BrickUrl split(url)
+                b = BrickUrl split(e at(1))
+                ((a at(2)) == "" && (a at(0)) == (b at(0)) && (a at(1)) == (b at(1))) ifTrue { return nil }
+                asker = (by != "") ifTrue { by } ifFalse { "this project" }
+                chooser = ((e at(2)) != "") ifTrue { e at(2) } ifFalse { "this project" }
+                self _err("  warning: " + asker + " asks for " + url + " as '" + depName + "'; using " +
+                          (e at(1)) + " (from " + chooser + ")")
+                return nil
+            }
+        }
+        nil
+    }
+
+    // brick_repo_placed: did another dependency installed in this run use
+    // the checkout repo (a repository of bricks)? It put it at its commit.
+    _repoPlaced(repo, depName) {
+        _from each { |e|
+            ((e at(0)) != depName && (BrickUrl repoDir(e at(1), e at(0))) == repo) ifTrue { return true }
+        }
+        false
+    }
+
     // brick_locked_sha: the commit brick.lock records for the dependency
     // (name, url), or nil. A name has one checkout, so its entry applies to
     // any URL of the same repository (one brick may pin it, another not).
@@ -1872,7 +1930,7 @@ Bricks = Object clone {
         failed = 0
         (sub deps size > 0) ifTrue {
             self _say("  Installing dependencies of " + depName + "...")
-            failed = self _installDeps(sub deps)
+            failed = self _installDeps(sub deps, depName)
         }
         failed == 0
     }
@@ -1885,15 +1943,31 @@ Bricks = Object clone {
         }
     }
 
-    // brick_checkout: the locked commit, else the URL's @ref
-    _checkout(dir, depName, url, ref) {
+    // brick_checkout: put the checkout at the locked commit, else the URL's
+    // @ref; an unpinned one stays where it is. A pin that can't be honoured
+    // is an error, never a warning. An existing checkout (fresh false) is
+    // checked too. 0 if it was there already, 1 if it moved, -1 on an error.
+    _checkout(dir, depName, url, ref, fresh) {
         target = self _lockedSha(depName, url)
         (target == nil && ref != "") ifTrue { target = ref }
-        (target == nil) ifTrue { return nil }
+        (target == nil) ifTrue { return 0 }
+        before = ""
+        fresh ifFalse {
+            before = self _head(dir)
+            want = self _gitLine(dir, ["rev-parse", "--verify", "--quiet", target + "^{commit}"], 128)
+            (want != "" && before != "" && before == want) ifTrue { return 0 }
+            // a tag or commit this checkout hasn't seen: fetch it (how that
+            // goes doesn't matter, the checkout below must work)
+            (want == "") ifTrue { self _git(["-C", dir, "fetch", "--quiet", "--tags", "origin"]) }
+        }
         ((self _git(["-C", dir, "checkout", "--quiet", target])) != 0) ifTrue {
-            self _err("  warning: could not checkout '" + target + "' for " + depName)
+            self _err("  error: could not check out '" + target + "' for " + depName)
+            return 0 - 1
         }
         self _syncSubmodules(dir)
+        fresh ifTrue { return 0 }
+        self _say("  " + depName + ": " + (self _short(before)) + " -> " + (self _short(self _head(dir))))
+        1
     }
 
     _clone(cloneUrl, dest) {
@@ -1907,8 +1981,11 @@ Bricks = Object clone {
     // install_one: one dependency, not its dependencies: 1 if it is there
     // now, 0 if this run reached it already (a cycle, or a name another brick
     // chose first), -1 on an error
-    _installOne(url, depName) {
-        (self _visit(depName)) ifFalse { return 0 }      // a cycle or diamond: done already
+    _installOne(url, depName, by) {
+        (self _visitDep(depName, url, by)) ifFalse {      // a cycle or diamond: done already
+            self _warnOtherPin(depName, url, by)
+            return 0
+        }
         parts = BrickUrl split(url)
         cloneUrl = parts at(0)
         subpath = parts at(1)
@@ -1920,10 +1997,14 @@ Bricks = Object clone {
             repo = BrickUrl repoDir(url, depName)
             (File exists(repo)) ifTrue {
                 (self _sameOrigin(repo, cloneUrl)) ifFalse { return -1 }
+                // (the first of its bricks this run decides its commit)
+                (self _repoPlaced(repo, depName)) ifFalse {
+                    ((self _checkout(repo, depName, url, ref, false)) < 0) ifTrue { return -1 }
+                }
             } ifFalse {
                 self _say("  Cloning " + cloneUrl + " into " + repo + "...")
                 (self _clone(cloneUrl, repo)) ifFalse { return -1 }
-                self _checkout(repo, depName, url, ref)
+                ((self _checkout(repo, depName, url, ref, true)) < 0) ifTrue { return -1 }
             }
             dir = repo + "/" + subpath
             (File exists(dir)) ifFalse {
@@ -1943,24 +2024,26 @@ Bricks = Object clone {
         dest = "bricks/" + depName
         (File exists(dest)) ifTrue {
             (self _sameOrigin(dest, cloneUrl)) ifFalse { return -1 }
-            self _say("  " + depName + ": already installed")
+            moved = self _checkout(dest, depName, url, ref, false)
+            (moved < 0) ifTrue { return -1 }
+            (moved == 0) ifTrue { self _say("  " + depName + ": already installed") }
             // (its dependencies are still checked: an interrupted install can
             // leave the checkout without them)
             return 1
         }
         self _say("  Installing " + depName + " from " + cloneUrl + "...")
         (self _clone(cloneUrl, dest)) ifFalse { return -1 }
-        self _checkout(dest, depName, url, ref)
+        ((self _checkout(dest, depName, url, ref, true)) < 0) ifTrue { return -1 }
         1
     }
 
     // install_deps: a list of dependencies (a manifest's), each of them first,
     // then their dependencies, so a brick's own choice for a name (a pinned
     // version, say) wins over one further down; how many failed
-    _installDeps(deps) {
+    _installDeps(deps, by) {
         failed = 0
         state = deps map { |d|
-            st = self _installOne(d at(1), d at(0))
+            st = self _installOne(d at(1), d at(0), by)
             (st < 0) ifTrue { failed = failed + 1 }
             st
         }
@@ -1974,9 +2057,9 @@ Bricks = Object clone {
         failed
     }
 
-    // install_dep: one dependency and, in turn, its dependencies; true if
-    // they are all there
-    _installDep(url, depName) { (self _installDeps([[depName, url]])) == 0 }
+    // install_dep: one dependency (one `by` asks for: "" for the project)
+    // and, in turn, its dependencies; true if they are all there
+    _installDep(url, depName, by) { (self _installDeps([[depName, url]], by)) == 0 }
 
     cmdInit() {
         (File exists("brick.json")) ifTrue {
@@ -2062,7 +2145,12 @@ Bricks = Object clone {
         _pins = nil
         locked ifTrue {
             // every locked one: the project's and theirs
-            missing = (lock at(1)) filter { |e| (File exists(BrickUrl installDir(e at(1), e at(0)))) == false }
+            // every locked one, the project's and theirs, there and at its
+            // locked commit
+            missing = (lock at(1)) filter { |e|
+                ((File exists(BrickUrl installDir(e at(1), e at(0)))) == false) ||
+                    ((e at(3)) != "" && (self _head(BrickUrl repoDir(e at(1), e at(0)))) != (e at(3)))
+            }
             (missing size == 0) ifTrue {
                 self _say("Dependencies already locked and up to date.")
                 return 0
@@ -2074,7 +2162,8 @@ Bricks = Object clone {
         self _say("Installing " + m deps size toString + " dependencies" +
                   (locked ifTrue { " (from brick.lock)" } ifFalse { "" }) + "...")
         _visited = []
-        failed = self _installDeps(m deps)
+        _from = []
+        failed = self _installDeps(m deps, "")
         _pins = nil
         (failed > 0) ifTrue {
             self _err(failed toString + " dependencies failed to install.")
@@ -2108,6 +2197,10 @@ Bricks = Object clone {
     cmdAdd(url, alias, yes) {
         m = self _project(self _initHint)
         (m == nil) ifTrue { return 1 }
+        (url startsWith("http://")) ifTrue {
+            self _err("error: " + url + " is fetched over http; bricks come over https only")
+            return 1
+        }
         (BrickUrl safe(url)) ifFalse {
             self _err("error: invalid brick URL '" + url + "'")
             return 1
@@ -2126,9 +2219,46 @@ Bricks = Object clone {
             self _err("error: invalid brick name '" + depName + "' derived from URL")
             return 1
         }
-        (m hasDep(depName)) ifTrue {
-            self _err("'" + depName + "' is already a dependency")
-            return 1
+        // already a dependency: the same URL is nothing to do; the same
+        // repository with another @ref changes its pin (as `uv add`, `cargo
+        // add` and `go get` do); another repository needs its own name
+        repin = 0 - 1
+        i = 0
+        m deps each { |d|
+            ((d at(0)) == depName) ifTrue {
+                a = BrickUrl split(d at(1))
+                b = BrickUrl split(url)
+                ((d at(1)) == url || (BrickUrl sameRepo(a at(0), b at(0))) == false || (a at(1)) != (b at(1))) ifTrue {
+                    ((d at(1)) == url) ifTrue {
+                        self _err("'" + depName + "' is already a dependency")
+                    } ifFalse {
+                        self _err("'" + depName + "' is already a dependency, from " + (d at(1)) + "\n" +
+                                  "(remove it first, or give this one another name: " + prog + " bricks add <url> <name>)")
+                    }
+                    return 1
+                }
+                repin = i
+            }
+            i = i + 1
+        }
+        (repin >= 0) ifTrue {
+            self _mkdir("bricks")
+            beforeRepin = self _snapshot
+            _visited = []
+            _from = []
+            (self _installDep(url, depName, "")) ifFalse {
+                self _undoInstall(beforeRepin)
+                self _err("'" + depName + "' was not changed")
+                return 1
+            }
+            self _say("Changed '" + depName + "' from " + ((m deps at(repin)) at(1)) + " to " + url)
+            m deps setAt(repin, [depName, url])
+            (BrickFiles saveDeps("brick.json", m)) ifFalse {
+                self _err("error: cannot update brick.json")
+                return 1
+            }
+            self writeLock(m)
+            return 0
         }
         (m deps size >= 64) ifTrue {
             self _err("error: too many dependencies")
@@ -2139,7 +2269,8 @@ Bricks = Object clone {
         self _mkdir("bricks")
         before = self _snapshot
         _visited = []
-        (self _installDep(url, depName)) ifFalse {
+        _from = []
+        (self _installDep(url, depName, "")) ifFalse {
             self _undoInstall(before)
             self _err("'" + depName + "' was not added")
             return 1
@@ -2209,14 +2340,14 @@ Bricks = Object clone {
 
     // update_dep: [ok, changed]; changed when the checkout moved to another
     // commit (or had to be installed)
-    _updateDep(url, depName) {
+    _updateDep(url, depName, by) {
         ref = (BrickUrl split(url)) at(2)
         dir = BrickUrl repoDir(url, depName)     // git works on the repository
         (File exists(dir)) ifFalse {
             self _say("  " + depName + ": not installed, installing...")
-            return [self _installDep(url, depName), true]     // (and its dependencies)
+            return [self _installDep(url, depName, by), true]     // (and its dependencies)
         }
-        self _visit(depName)
+        self _visitDep(depName, url, by)
 
         before = self _head(dir)
         (ref != "") ifTrue {
@@ -2224,7 +2355,10 @@ Bricks = Object clone {
                 self _err("  warning: fetch failed for " + depName)
                 return [false, false]
             }
-            self _git(["-C", dir, "checkout", "--quiet", ref])
+            ((self _git(["-C", dir, "checkout", "--quiet", ref])) != 0) ifTrue {
+                self _err("  error: could not check out '" + ref + "' for " + depName)
+                return [false, false]
+            }
         } ifFalse {
             // fetch, then move to the remote's default branch: a checkout
             // made from brick.lock is on a detached HEAD, where `git pull`
@@ -2254,13 +2388,13 @@ Bricks = Object clone {
     // update_deps: a list of dependencies (a manifest's), then the
     // dependencies their brick.json lists now, in the order install takes
     // them. counts is [updated, reached], counted up; returns how many failed.
-    _updateDeps(deps, counts) {
+    _updateDeps(deps, by, counts) {
         failed = 0
         state = deps map { |d|
             ok = false
-            (_visited contains(d at(0))) ifFalse {
+            (_visited contains(d at(0))) ifTrue { self _warnOtherPin(d at(0), d at(1), by) } ifFalse {
                 counts setAt(1, (counts at(1)) + 1)
-                res = self _updateDep(d at(1), d at(0))
+                res = self _updateDep(d at(1), d at(0), by)
                 (res at(0)) ifTrue {
                     (res at(1)) ifTrue { counts setAt(0, (counts at(0)) + 1) }
                     ok = true
@@ -2273,7 +2407,7 @@ Bricks = Object clone {
             (state at(i)) ifTrue {
                 sub = BrickFiles load((BrickUrl installDir(d at(1), d at(0))) + "/brick.json")
                 ((sub != nil) && (sub != false) && (sub deps size > 0)) ifTrue {
-                    failed = failed + (self _updateDeps(sub deps, counts))
+                    failed = failed + (self _updateDeps(sub deps, d at(0), counts))
                 }
             }
             i = i + 1
@@ -2293,7 +2427,8 @@ Bricks = Object clone {
         self _say("Updating " + count toString + " " + noun + "...")
         counts = [0, 0]            // updated, reached
         _visited = []
-        failures = self _updateDeps(m deps, counts)
+        _from = []
+        failures = self _updateDeps(m deps, "", counts)
         updated = counts at(0)
         total = counts at(1)
         (failures > 0) ifTrue {

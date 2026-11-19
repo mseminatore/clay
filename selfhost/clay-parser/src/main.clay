@@ -1401,10 +1401,27 @@ NativeBricks = Object clone {
         ok
     }
 
-    // brick_safe_flag: starts with '-', then letters, digits, . _ = + , / -
+    // brick_flag_allowed: macros, include and library paths, libraries,
+    // optimization, debug info, the C standard, -f and -m options and
+    // warnings (-Wl, passes linker options). Others, and -fplugin= or a
+    // linker plugin, could bring in code from outside the brick's sources.
+    flagAllowed(f) {
+        ok = false
+        ["-D", "-U", "-I", "-L", "-l", "-O", "-g", "-std=", "-f", "-m", "-W", "-pthread"] each { |p|
+            (f startsWith(p)) ifTrue { ok = true }
+        }
+        ok ifFalse { return false }
+        (f startsWith("-fplugin")) ifTrue { return false }
+        ((f startsWith("-Wa,")) || (f startsWith("-Wp,"))) ifTrue { return false }
+        ((f startsWith("-Wl,")) && (f indexOf("plugin")) >= 0) ifTrue { return false }
+        true
+    }
+
+    // brick_safe_flag: an allowed option, then letters, digits, . _ = + , / -
     // (-I@/dir and -L@/dir are also accepted: a directory inside the brick)
     safeFlag(f) {
         ((f length < 2) || (f startsWith("-")) == false) ifTrue { return false }
+        (self flagAllowed(f)) ifFalse { return false }
         i = 0
         ((f length >= 4) && ((f byteAt(1) == 73) || (f byteAt(1) == 76)) &&
          (f byteAt(2) == 64) && (f byteAt(3) == 47)) ifTrue { i = 4 }
@@ -1491,7 +1508,8 @@ NativeBricks = Object clone {
         badFlags = flags filter { |f| (self safeFlag(f)) == false }
         (badFlags size > 0) ifTrue {
             Console error("error: brick.json: rejecting native flag \"" + (badFlags at(0)) +
-                          "\" (a flag starts with '-' and has no spaces, quotes or shell characters)\n")
+                          "\" (a flag is one of -D -U -I -L -l -O -g -std= -f -m -W -pthread, " +
+                          "with no spaces, quotes or shell characters)\n")
             return false
         }
         (sources size == 0) ifTrue {
