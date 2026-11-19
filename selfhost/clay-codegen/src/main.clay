@@ -334,7 +334,11 @@ CodeGen = Object clone {
         t
     }
 
-    pushOwnedTemp(t) { ownedTemps push(t) }
+    // (an error or non-local return unwinding past the statement releases it)
+    pushOwnedTemp(t) {
+        ownedTemps push(t)
+        self line("clay_uw_temp(&" + t + ");")
+    }
     isOwnedTemp(t) { ownedTemps contains(t) }
 
     // release owned temps [from, end) except resultTemp, and drop them
@@ -345,12 +349,31 @@ CodeGen = Object clone {
             (t != resultTemp) ifTrue { self line("clay_release_val(" + t + ");") }
             i = i + 1
         }
+        (ownedTemps size > from) ifTrue { self line("clay_uw_drop(" + (ownedTemps size - from) toString + ");") }
         ownedTemps = ownedTemps slice(0, from)
     }
     tempCleanup(resultTemp) { self tempCleanupFrom(0, resultTemp) }
 
-    trackVar(n) { inFunction ifTrue { fnVars push(n) } }
-    trackCell(n) { (inFunction && indent <= 1) ifTrue { fnCells push(n) } }
+    // a line with at least one level of indent (declarations at a function's
+    // start are written before its body's indent is set)
+    fnLine(s) {
+        (indent < 1) ifTrue { out push("    " + s + "\n") } ifFalse { self line(s) }
+    }
+
+    // fn_track_var / fn_track_cell: released on return, and registered for
+    // unwinding (an error, break or non-local return passing through)
+    trackVar(n) {
+        inFunction ifTrue {
+            fnVars push(n)
+            self fnLine("clay_uw_var(&" + (self safe(n)) + ");")
+        }
+    }
+    trackCell(n) {
+        (inFunction && indent <= 1) ifTrue {
+            fnCells push(n)
+            self fnLine("clay_uw_cell(&" + (self safe(n)) + "_cell);")
+        }
+    }
 
     retains(v, n) {
         i = 0
@@ -362,6 +385,7 @@ CodeGen = Object clone {
     rvSet(v) { self line("clay_release_val(__rv); __rv = " + v + ";") }
 
     functionReleases() {
+        self line("clay_uw_reset(__uw);")
         fnVars each { |v| self line("clay_release_val(" + (self safe(v)) + ");") }
         fnCells each { |c| self line("clay_cell_release(" + (self safe(c)) + "_cell);") }
     }
@@ -1102,8 +1126,11 @@ CodeGen = Object clone {
     raiseExpr(n) {
         v = self expr(n expr)
         t = self tempName
-        self retains(v, (self isOwnedTemp(v)) ifTrue { 0 } ifFalse { 1 })
+        moved = self isOwnedTemp(v)
+        self retains(v, moved ifTrue { 0 } ifFalse { 1 })
         self line("ClayValue " + t + " = " + (v ?? "(null)") + ";")
+        // the temp's reference is the error's now: not the unwinder's to release
+        moved ifTrue { self line(v + " = CLAY_NIL;") }
         self line("if (CLAY_IS_PTR(" + t + ") && !CLAY_IS_NIL(" + t + ") && CLAY_OBJ(" + t + ")->type == CLAY_TYPE_STRING) {")
         indent = indent + 1
         self line("ClayValue " + t + "_s = " + t + ";")
@@ -1416,6 +1443,7 @@ CodeGen = Object clone {
             mname = (n name replace("\\", "\\\\")) replace("\"", "\\\"")
             out push("    CLAY_STACK_CHECK();\n")
             out push("    clay_trace_enter(CLAY_FRAME_METHOD);\n")
+            out push("    int __uw = clay_uw_mark();\n")
             out push("    if (argc > " + pc + ") clay_raise_arity(\"" + mname + "\", " + pc + ", argc);\n")
             (self hasBlockReturn(n body)) ifTrue {
                 out push("    ClayValue __ret_id = clay_return_id_next();\n" +
@@ -1441,6 +1469,7 @@ CodeGen = Object clone {
                 i = i + 1
             }
             out push("    ClayValue __rv = CLAY_NIL;\n")
+            out push("    clay_uw_var(&__rv);\n")
             self slotFallbackDecls(n body)
             savedIndent = indent
             indent = 1
@@ -1455,6 +1484,7 @@ CodeGen = Object clone {
             useSlotRecv = (d captures contains("_method_self")) == false
             out push("    CLAY_STACK_CHECK();\n")
             out push("    clay_trace_enter(CLAY_FRAME_BLOCK);\n")
+            out push("    int __uw = clay_uw_mark();\n")
             useSlotRecv ifTrue { out push("    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n") }
             blockBoxed = boxed size
             i = 0
@@ -1471,6 +1501,7 @@ CodeGen = Object clone {
                 i = i + 1
             }
             out push("    ClayValue __rv = CLAY_NIL;\n")
+            out push("    clay_uw_var(&__rv);\n")
             (inMethod && (self isBoxed("_method_self"))) ifTrue { self slotFallbackDecls(n body) }
             methodCtx ifFalse { self shadowDecls(n body) }
             savedIndent = indent

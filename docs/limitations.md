@@ -93,13 +93,6 @@ blank statement between them.
 
 ## Native compilation
 
-**Native programs leak a little memory on non-local exits.** When an exception
-or a block's `return` unwinds through compiled C frames, the temporaries and
-locals of the frames it skips are not released (about one block object per
-non-local return), and top-level globals are never freed at exit. This doesn't
-affect results, only memory use in long-running programs that use non-local
-returns heavily.
-
 **`clay --compile` runs from a build tree.** `clay-native.cfg`, written next to
 the `clay` binary by CMake, records paths inside the build directory, and there
 is no `cmake --install` yet. Build Clay from source and run it from there.

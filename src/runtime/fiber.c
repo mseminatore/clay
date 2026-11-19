@@ -384,6 +384,9 @@ void clay_fiber_context_free(intptr_t ctx_ptr) {
     }
     clay_release_val(ctx->yield_value);
     clay_release_val(ctx->result);
+    /* (before the stack goes: the entries of a fiber left suspended point
+     * into it, at what its frames still hold) */
+    clay_unwind_list_free(&ctx->unwind);
 #ifdef _WIN32
     if (ctx->os_fiber) { DeleteFiber(ctx->os_fiber); ctx->os_fiber = NULL; }
 #else
@@ -391,6 +394,5 @@ void clay_fiber_context_free(intptr_t ctx_ptr) {
 #endif
     if (ctx->engine && clay_fiber_hooks) clay_fiber_hooks->destroy(ctx->engine);
     ctx->engine = NULL;
-    clay_unwind_list_free(&ctx->unwind);
     free(ctx);
 }

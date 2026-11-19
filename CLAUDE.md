@@ -132,7 +132,12 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   stores emit retains *before* releasing old values; params are retained on entry; each function
   releases its variables and the cells it created before `return clay_return_value(...)`. Methods
   return results that alias self/args as borrowed (same as C natives); blocks always return owned
-  values because runtime callers (`each`, `map`, `ifTrue`) release them. Debug with an ASan build
+  values because runtime callers (`each`, `map`, `ifTrue`) release them. Everything a generated
+  function owns is also registered on the unwind list (`clay_uw_temp`/`clay_uw_var`/`clay_uw_cell`,
+  inline in clay.h), so an error, break, continue or non-local return unwinding past the frame
+  releases it; cleanup drops the entries (`clay_uw_drop`, `clay_uw_reset(__uw)` before the exit
+  releases). Code that moves a temp's reference anywhere but at statement cleanup must set the temp
+  to nil (see `emit_raise`), or the unwinder releases it twice. Debug with an ASan build
   configured with `-DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON` (SDL2 + ASan hangs on macOS).
 - **Fibers** live in `src/runtime/fiber.c` (C-stack switching); the VM swaps its own stacks via
   `clay_fiber_hooks` registered in `vm_bridge.c`.

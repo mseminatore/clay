@@ -449,19 +449,52 @@ void _longjmp(jmp_buf env, int val) __attribute__((noreturn));
 /* Execution-engine state saved with each try frame (see ClayTryHooks) */
 #define CLAY_TRY_ENGINE_STATE_SIZE 128
 
-/* Objects a C function owns only for the duration of a call it makes (e.g.
- * the temporary Number wrapper dispatch creates for an int receiver). An error
+/* What a C function owns only while a call it makes is running: objects
+ * (the temporary Number wrapper dispatch creates for an int receiver, say),
+ * and in generated code the addresses of the variables, temporaries and cells
+ * holding a reference. An error, break, continue or non-local return
  * unwinding past that call releases them: each try frame records the depth
- * and restoring it releases what is above. One list per fiber. */
+ * and restoring it releases what is above (an address's value, set to nil).
+ * One list per fiber. Entries are tagged pointers (CLAY_UW_*). */
 typedef struct ClayUnwindList {
-    ClayObject **items;
+    uintptr_t *items;
     int count;
     int capacity;
 } ClayUnwindList;
+#define CLAY_UW_OBJECT 0     /* a ClayObject * */
+#define CLAY_UW_TEMP   1     /* a ClayValue * holding a statement's temporary */
+#define CLAY_UW_VAR    2     /* a ClayValue * holding a variable, parameter or __rv */
+#define CLAY_UW_CELL   3     /* a ClayCell ** */
 extern CLAY_THREAD_LOCAL ClayUnwindList *clay_unwind_list;   /* NULL: the thread's own */
 void clay_unwind_push(ClayObject *obj);
 void clay_unwind_pop(void);              /* normal path: the caller releases it */
 void clay_unwind_list_free(ClayUnwindList *list);   /* releases what remains */
+/* Generated code (codegen.c) registers what it owns as it goes, and drops the
+ * entries without releasing them on the normal path. Inline: a generated
+ * function does this for every temporary. */
+ClayUnwindList *clay_uw_thread_list(void);           /* the thread's own, made current */
+void clay_uw_grow(ClayUnwindList *l);
+void clay_uw_drop_slow(ClayUnwindList *l, int n);
+static inline ClayUnwindList *clay_uw_list(void) {
+    ClayUnwindList *l = clay_unwind_list;
+    return l ? l : clay_uw_thread_list();
+}
+static inline void clay_uw_add(uintptr_t entry) {
+    ClayUnwindList *l = clay_uw_list();
+    if (l->count == l->capacity) clay_uw_grow(l);
+    l->items[l->count++] = entry;
+}
+static inline int  clay_uw_mark(void) { return clay_uw_list()->count; }
+static inline void clay_uw_reset(int mark) { clay_uw_list()->count = mark; }   /* drop all above */
+static inline void clay_uw_temp(ClayValue *slot) { clay_uw_add((uintptr_t)slot | CLAY_UW_TEMP); }
+static inline void clay_uw_var(ClayValue *slot) { clay_uw_add((uintptr_t)slot | CLAY_UW_VAR); }
+/* drop the n most recent temporaries (usually the top n entries) */
+static inline void clay_uw_drop(int n) {
+    ClayUnwindList *l = clay_uw_list();
+    for (int i = 1; i <= n; i++)
+        if ((l->items[l->count - i] & 3) != CLAY_UW_TEMP) { clay_uw_drop_slow(l, n); return; }
+    l->count -= n;
+}
 
 typedef struct ClayTryFrame {
     jmp_buf buf;
@@ -622,6 +655,7 @@ typedef struct {
 ClayCell   *clay_cell_new(ClayValue initial);
 void        clay_cell_retain(ClayCell *cell);
 void        clay_cell_release(ClayCell *cell);
+static inline void clay_uw_cell(ClayCell **slot) { clay_uw_add((uintptr_t)slot | CLAY_UW_CELL); }
 
 #ifdef __cplusplus
 }

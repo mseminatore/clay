@@ -80,6 +80,9 @@ static void push_owned_temp(CodeGen *cg, const char *name) {
         cg->owned_temps = (char **)realloc(cg->owned_temps, sizeof(char *) * (size_t)cg->owned_temp_capacity);
     }
     cg->owned_temps[cg->owned_temp_count++] = strdup(name);
+    /* an error or non-local return unwinding past this statement releases it */
+    emit_indent(cg);
+    fprintf(cg->out, "clay_uw_temp(&%s);\n", name);
 }
 
 /* Emit clay_release_val() for owned temps [from, count) except result_temp,
@@ -95,6 +98,10 @@ static void emit_temp_cleanup_from(CodeGen *cg, int from, const char *result_tem
         emit_indent(cg);
         fprintf(cg->out, "clay_release_val(%s);\n", cg->owned_temps[i]);
         free(cg->owned_temps[i]);
+    }
+    if (cg->owned_temp_count > from) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(%d);\n", cg->owned_temp_count - from);
     }
     cg->owned_temp_count = from;
 }
@@ -125,18 +132,33 @@ static void name_list_push(char ***list, int *count, int *cap, const char *name)
     (*list)[(*count)++] = strdup(name);
 }
 
-/* Remember that C variable `name` holds a reference to release on return */
+/* At least one level of indent (declarations at a function's start are
+ * written before its body's indent is set) */
+static void emit_fn_indent(CodeGen *cg) {
+    if (cg->indent < 1) fprintf(cg->out, "    ");
+    else emit_indent(cg);
+}
+
+/* Remember that C variable `name` holds a reference to release on return, and
+ * register it for unwinding (an error, break or non-local return passing
+ * through this function releases it) */
 static void fn_track_var(CodeGen *cg, const char *name) {
-    if (cg->in_function)
+    if (cg->in_function) {
         name_list_push(&cg->fn_vars, &cg->fn_var_count, &cg->fn_var_capacity, name);
+        emit_fn_indent(cg);
+        fprintf(cg->out, "clay_uw_var(&%s);\n", c_safe_name(name));
+    }
 }
 
 /* Remember that `name_cell` was created in this function (release on return).
  * Only cells declared at function level are tracked — one declared inside a
  * nested C scope is not visible at the return. */
 static void fn_track_cell(CodeGen *cg, const char *name) {
-    if (cg->in_function && cg->indent <= 1)
+    if (cg->in_function && cg->indent <= 1) {
         name_list_push(&cg->fn_cells, &cg->fn_cell_count, &cg->fn_cell_capacity, name);
+        emit_fn_indent(cg);
+        fprintf(cg->out, "clay_uw_cell(&%s_cell);\n", c_safe_name(name));
+    }
 }
 
 static void emit_retains(CodeGen *cg, const char *val, int n) {
@@ -152,8 +174,11 @@ static void emit_rv_set(CodeGen *cg, const char *val) {
     fprintf(cg->out, "clay_release_val(__rv); __rv = %s;\n", val);
 }
 
-/* Release the variables and cells this function owns */
+/* Release the variables and cells this function owns (first taking them off
+ * the unwind list: from here on this code releases them) */
 static void emit_function_releases(CodeGen *cg) {
+    emit_indent(cg);
+    fprintf(cg->out, "clay_uw_reset(__uw);\n");
     for (int i = 0; i < cg->fn_var_count; i++) {
         emit_indent(cg);
         fprintf(cg->out, "clay_release_val(%s);\n", c_safe_name(cg->fn_vars[i]));
@@ -1645,9 +1670,15 @@ static char *emit_raise(CodeGen *cg, AstNode *node) {
     /* clay_raise takes a reference: own the value, and if it is a string,
      * wrap it in an Error object */
     char *t = temp_name(cg);
-    emit_retains(cg, val, 1 - is_owned_temp(cg, val));
+    int moved = is_owned_temp(cg, val);
+    emit_retains(cg, val, 1 - moved);
     emit_indent(cg);
     fprintf(cg->out, "ClayValue %s = %s;\n", t, val);
+    if (moved) {
+        /* the temp's reference is the error's now: not the unwinder's to release */
+        emit_indent(cg);
+        fprintf(cg->out, "%s = CLAY_NIL;\n", val);
+    }
     emit_indent(cg);
     fprintf(cg->out, "if (CLAY_IS_PTR(%s) && !CLAY_IS_NIL(%s) && CLAY_OBJ(%s)->type == CLAY_TYPE_STRING) {\n",
             t, t, t);
@@ -2161,6 +2192,7 @@ static void emit_method_bodies(CodeGen *cg) {
             /* runaway recursion raises instead of overflowing the C stack */
             fprintf(cg->out, "    CLAY_STACK_CHECK();\n");
             fprintf(cg->out, "    clay_trace_enter(CLAY_FRAME_METHOD);\n");
+            fprintf(cg->out, "    int __uw = clay_uw_mark();\n");
             /* Too many arguments is an error (same as the VM); fewer is fine */
             fprintf(cg->out, "    if (argc > %d) clay_raise_arity(\"", node->as.method_def.params.count);
             for (const char *c = node->as.method_def.name; *c; c++) {
@@ -2197,6 +2229,7 @@ static void emit_method_bodies(CodeGen *cg) {
                     emit_param_decl(cg, param->as.ident.name, i, NULL);
             }
             fprintf(cg->out, "    ClayValue __rv = CLAY_NIL;\n");
+            fprintf(cg->out, "    clay_uw_var(&__rv);\n");
             emit_slot_fallback_decls(cg, &node->as.method_def.body);
             int saved_indent = cg->indent;
             cg->indent = 1;
@@ -2227,6 +2260,7 @@ static void emit_method_bodies(CodeGen *cg) {
             cg->use_slot_recv = !capture_has(&cur->captures, "_method_self");
             fprintf(cg->out, "    CLAY_STACK_CHECK();\n");
             fprintf(cg->out, "    clay_trace_enter(CLAY_FRAME_BLOCK);\n");
+            fprintf(cg->out, "    int __uw = clay_uw_mark();\n");
             if (cg->use_slot_recv)
                 fprintf(cg->out, "    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n");
             /* Declare captured variables from env as cell pointers */
@@ -2243,6 +2277,7 @@ static void emit_method_bodies(CodeGen *cg) {
                 emit_param_decl(cg, param->as.ident.name, i, NULL);
             }
             fprintf(cg->out, "    ClayValue __rv = CLAY_NIL;\n");
+            fprintf(cg->out, "    clay_uw_var(&__rv);\n");
             /* Inside a method: new bare assignments may resolve to self's slots */
             if (cg->in_method && is_boxed(cg, "_method_self"))
                 emit_slot_fallback_decls(cg, &node->as.block.body);

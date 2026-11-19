@@ -54,6 +54,28 @@ check value("strings inside an Array toString", { [("ab" + count toString), 1] t
 check value("strings inside a Dict toString", { #{a: ("ab" + count toString)} toString })
 check value("Console print of a new string", { Console print("") })
 
+// --- Leaving blocks early releases what the frames skipped held: a `return`
+// from a block (its method's temporaries, variables, parameters and cells, and
+// the blocks in between), break, continue, and a caught error ---
+Early = Object clone {
+  fromIf(x) { (x > 0) ifTrue { return "a" + x toString }; "b" }
+  fromEach(xs) { xs each { |v| (v == 2) ifTrue { return v } }; 0 }
+  fromNested(xs) {
+    tag = "t" + xs size toString
+    xs each { |v| [1, 2] each { |w| (v == 2 && w == 2) ifTrue { return tag } } }
+    nil
+  }
+  breakOut(xs) { n = 0; xs each { |v| (v == 2) ifTrue { break }; n = n + v }; n }
+  skip(xs) { n = 0; xs each { |v| (v == 2) ifTrue { continue }; n = n + v }; n }
+  caught(x) { try { s = "s" + x toString; raise(s) } catch { |e| e message } }
+}
+check value("return from ifTrue in a method", { Early fromIf(count + 1) })
+check value("return from each in a method", { Early fromEach([1, 2, 3]) })
+check value("return from nested each, captured local", { Early fromNested([1, 2, 3]) })
+check value("break out of each", { Early breakOut([1, 2, 3]) })
+check value("continue in each", { Early skip([1, 2, 3]) })
+check value("raise and catch a new string", { Early caught(count) })
+
 // --- and the measurement does see a real leak ---
 kept = []
 (growth value({ kept push("x" + kept size toString) }) == 100) ifFalse {

@@ -260,28 +260,65 @@ const ClayTryHooks *clay_try_hooks = NULL;
 CLAY_THREAD_LOCAL ClayUnwindList *clay_unwind_list = NULL;
 static CLAY_THREAD_LOCAL ClayUnwindList g_thread_unwind = { NULL, 0, 0 };
 
-static ClayUnwindList *unwind_list(void) {
-    return clay_unwind_list ? clay_unwind_list : &g_thread_unwind;
+ClayUnwindList *clay_uw_thread_list(void) {
+    clay_unwind_list = &g_thread_unwind;
+    return clay_unwind_list;
 }
 
-void clay_unwind_push(ClayObject *obj) {
-    ClayUnwindList *l = unwind_list();
-    if (l->count == l->capacity) {
-        int cap = l->capacity ? l->capacity * 2 : 64;
-        ClayObject **items = (ClayObject **)realloc(l->items, sizeof(ClayObject *) * (size_t)cap);
-        if (!items) { fprintf(stderr, "clay: out of memory\n"); exit(1); }
-        l->items = items;
-        l->capacity = cap;
-    }
-    l->items[l->count++] = obj;
+static ClayUnwindList *unwind_list(void) { return clay_uw_list(); }
+
+void clay_uw_grow(ClayUnwindList *l) {
+    int cap = l->capacity ? l->capacity * 2 : 64;
+    uintptr_t *items = (uintptr_t *)realloc(l->items, sizeof(uintptr_t) * (size_t)cap);
+    if (!items) { fprintf(stderr, "clay: out of memory\n"); exit(1); }
+    l->items = items;
+    l->capacity = cap;
 }
+
+void clay_unwind_push(ClayObject *obj) { clay_uw_add((uintptr_t)obj | CLAY_UW_OBJECT); }
 
 void clay_unwind_pop(void) {
     unwind_list()->count--;
 }
 
+/* A statement's temporaries are released (or handed on) at its end: drop the
+ * n most recent temporary entries. Variables and cells made during the
+ * statement may sit above them, and stay. */
+void clay_uw_drop_slow(ClayUnwindList *l, int n) {
+    int k = l->count, found = 0;
+    while (found < n && k > 0) {
+        k--;
+        if ((l->items[k] & 3) == CLAY_UW_TEMP) found++;
+    }
+    int out = k;
+    for (int j = k; j < l->count; j++)
+        if ((l->items[j] & 3) != CLAY_UW_TEMP) l->items[out++] = l->items[j];
+    l->count = out;
+}
+
 static void unwind_to(ClayUnwindList *l, int depth) {
-    while (l->count > depth) clay_release(l->items[--l->count]);
+    while (l->count > depth) {
+        uintptr_t e = l->items[--l->count];
+        void *p = (void *)(e & ~(uintptr_t)3);
+        switch (e & 3) {
+        case CLAY_UW_OBJECT:
+            clay_release((ClayObject *)p);
+            break;
+        case CLAY_UW_TEMP:
+        case CLAY_UW_VAR: {
+            ClayValue v = *(ClayValue *)p;
+            *(ClayValue *)p = CLAY_NIL;
+            clay_release_val(v);
+            break;
+        }
+        default: {
+            ClayCell *c = *(ClayCell **)p;
+            *(ClayCell **)p = NULL;
+            if (c) clay_cell_release(c);
+            break;
+        }
+        }
+    }
 }
 
 void clay_unwind_list_free(ClayUnwindList *list) {
