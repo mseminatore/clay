@@ -369,12 +369,14 @@ ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
 /* Sequential fallback for parallelMap */
 ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
     ClayObject *result = clay_array_new();
+    clay_unwind_push(result);   /* released if the block raises or returns */
     for (size_t i = 0; i < arr->as.array.size; i++) {
         ClayValue item = arr->as.array.items[i];
         ClayValue mapped = clay_send(block, "value", 1, &item);
         clay_array_append(result, mapped);
         clay_release_val(mapped);
     }
+    clay_unwind_pop();
     return CLAY_VAL(result);
 }
 

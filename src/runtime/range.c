@@ -53,6 +53,7 @@ static ClayValue range_map(ClayObject *self, int argc, ClayValue *argv) {
     range_read_slots(self, &start, &end, &step);
     ClayObject *result = clay_array_new();
     if (step == 0) return CLAY_VAL(result);
+    clay_unwind_push(result);   /* released if the block raises or returns */
 
     for (intptr_t i = start; step > 0 ? i <= end : i >= end; i += step) {
         ClayValue arg = clay_int(i);
@@ -60,6 +61,7 @@ static ClayValue range_map(ClayObject *self, int argc, ClayValue *argv) {
         clay_array_append(result, mapped);
         clay_release_val(mapped);
     }
+    clay_unwind_pop();
     return CLAY_VAL(result);
 }
 
@@ -69,6 +71,7 @@ static ClayValue range_filter(ClayObject *self, int argc, ClayValue *argv) {
     range_read_slots(self, &start, &end, &step);
     ClayObject *result = clay_array_new();
     if (step == 0) return CLAY_VAL(result);
+    clay_unwind_push(result);   /* released if the block raises or returns */
 
     for (intptr_t i = start; step > 0 ? i <= end : i >= end; i += step) {
         ClayValue arg = clay_int(i);
@@ -78,6 +81,7 @@ static ClayValue range_filter(ClayObject *self, int argc, ClayValue *argv) {
         }
         clay_release_val(test);
     }
+    clay_unwind_pop();
     return CLAY_VAL(result);
 }
 

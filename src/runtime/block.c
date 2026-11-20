@@ -67,6 +67,8 @@ static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     ClayObject *body = CLAY_OBJ(argv[0]);
     ClayValue result = CLAY_NIL;
+    int uw = clay_uw_mark();
+    clay_uw_var(&result);       /* released if the block raises or returns */
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
         if (!CLAY_IS_TRUTHY(cond)) { clay_release_val(cond); break; }
@@ -81,12 +83,13 @@ static ClayValue block_whileTrue(ClayObject *self, int argc, ClayValue *argv) {
             /* Exception caught — check for break/continue signals */
             ClayValue err = clay_error_stack.current_error;
             int sig = clay_loop_signal(err);
-            if (sig == CLAY_SIGNAL_BREAK) return result;
+            if (sig == CLAY_SIGNAL_BREAK) { clay_uw_reset(uw); return result; }
             if (sig == CLAY_SIGNAL_CONTINUE) continue;
             /* Re-raise unknown errors */
             clay_raise(err);
         }
     }
+    clay_uw_reset(uw);
     return result;
 }
 
@@ -94,6 +97,8 @@ static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     ClayObject *body = CLAY_OBJ(argv[0]);
     ClayValue result = CLAY_NIL;
+    int uw = clay_uw_mark();
+    clay_uw_var(&result);       /* released if the block raises or returns */
     while (1) {
         ClayValue cond = self->as.block.func(self, 0, NULL);
         if (CLAY_IS_TRUTHY(cond)) { clay_release_val(cond); break; }
@@ -108,11 +113,12 @@ static ClayValue block_whileFalse(ClayObject *self, int argc, ClayValue *argv) {
         } else {
             ClayValue err = clay_error_stack.current_error;
             int sig = clay_loop_signal(err);
-            if (sig == CLAY_SIGNAL_BREAK) return result;
+            if (sig == CLAY_SIGNAL_BREAK) { clay_uw_reset(uw); return result; }
             if (sig == CLAY_SIGNAL_CONTINUE) continue;
             clay_raise(err);
         }
     }
+    clay_uw_reset(uw);
     return result;
 }
 

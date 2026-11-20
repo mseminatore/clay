@@ -396,6 +396,8 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     intptr_t n = self_int_value(self);
     ClayValue result = CLAY_NIL;
+    int uw = clay_uw_mark();
+    clay_uw_var(&result);       /* released if the block raises or returns */
     for (intptr_t i = 0; i < n; i++) {
         ClayValue arg = clay_int(i);
         ClayTryFrame _tf;
@@ -407,11 +409,12 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
         } else {
             ClayValue err = clay_error_stack.current_error;
             int sig = clay_loop_signal(err);
-            if (sig == CLAY_SIGNAL_BREAK) return result;
+            if (sig == CLAY_SIGNAL_BREAK) { clay_uw_reset(uw); return result; }
             if (sig == CLAY_SIGNAL_CONTINUE) continue;
             clay_raise(err);
         }
     }
+    clay_uw_reset(uw);
     return result;
 }
 

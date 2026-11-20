@@ -247,7 +247,9 @@ static ClayValue dict_each(ClayObject *self, int argc, ClayValue *argv) {
     while (clay_dict_next(self, &pos, &key, &val)) {
         ClayObject *key_str = clay_string_new(key);
         ClayValue args[2] = { CLAY_VAL(key_str), val };
+        clay_unwind_push(key_str);   /* released if the block raises or returns */
         ClayValue ret = clay_send(CLAY_OBJ(argv[0]), "value", 2, args);
+        clay_unwind_pop();
         clay_release_val(ret);
         clay_release(key_str);
     }

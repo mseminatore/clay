@@ -151,18 +151,21 @@ static ClayValue array_toString(ClayObject *self, int argc, ClayValue *argv) {
 static ClayValue array_map(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     ClayObject *result = clay_array_new();
+    clay_unwind_push(result);   /* released if the block raises or returns */
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
         ClayValue mapped = clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
         clay_array_append(result, mapped);
         clay_release_val(mapped);
     }
+    clay_unwind_pop();
     return CLAY_VAL(result);
 }
 
 static ClayValue array_filter(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     ClayObject *result = clay_array_new();
+    clay_unwind_push(result);   /* released if the block raises or returns */
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue item = self->as.array.items[i];
         ClayValue test = clay_send(CLAY_OBJ(argv[0]), "value", 1, &item);
@@ -171,6 +174,7 @@ static ClayValue array_filter(ClayObject *self, int argc, ClayValue *argv) {
         }
         clay_release_val(test);
     }
+    clay_unwind_pop();
     return CLAY_VAL(result);
 }
 
@@ -178,12 +182,15 @@ static ClayValue array_reduce(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 2) return CLAY_NIL;
     ClayValue acc = argv[0];
     clay_retain_val(acc);
+    int uw = clay_uw_mark();
+    clay_uw_var(&acc);          /* released if the block raises or returns */
     for (size_t i = 0; i < self->as.array.size; i++) {
         ClayValue args[2] = { acc, self->as.array.items[i] };
         ClayValue new_acc = clay_send(CLAY_OBJ(argv[1]), "value", 2, args);
         clay_release_val(acc);
         acc = new_acc;
     }
+    clay_uw_reset(uw);
     return acc;
 }
 

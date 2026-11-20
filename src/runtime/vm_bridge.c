@@ -1402,7 +1402,21 @@ static int native_try_catch_fn(clayvm_vm_t *vm, int argc) {
     }
 
     if (!CLAY_IS_NIL(finally_block)) {
-        clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
+        /* if finally raises, its error replaces the result or the error leaving */
+        ClayTryFrame _ff;
+        if (clay_try_push(&_ff) == 0) {
+            clay_release_val(clay_send_val(finally_block, "value", 0, NULL));
+            clay_try_pop();
+        } else {
+            vm_regs_restore(vm, &st);
+            ClayValue raised = clay_error_stack.current_error;
+            vm_release_val(try_vm);
+            vm_release_val(catch_vm);
+            vm_release_val(finally_vm);
+            clay_release_val(result);
+            clay_release_val(escaping);
+            clay_raise(raised);
+        }
     }
     vm_release_val(try_vm);
     vm_release_val(catch_vm);

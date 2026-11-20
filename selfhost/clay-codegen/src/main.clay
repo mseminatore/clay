@@ -1079,10 +1079,12 @@ CodeGen = Object clone {
         self line("} else {")
         indent = indent + 1
         self line("ClayValue " + errTmp + " = clay_error_stack.current_error; /* owned */")
+        // released by an unwind if the catch or finally block raises
+        self line("clay_uw_temp(&" + errTmp + ");")
         fin = (finallyBlock == nil) ifTrue { "" } ifFalse {
             " clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));"
         }
-        self line("if (clay_is_control_signal(" + errTmp + ")) {" + fin + " clay_raise(" + errTmp + "); }")
+        self line("if (clay_is_control_signal(" + errTmp + ")) {" + fin + " clay_uw_drop(1); clay_raise(" + errTmp + "); }")
         (catchBlock == nil) ifTrue {
             // no catch: the error isn't handled — run finally, then re-raise
             (finallyBlock != nil) ifTrue {
@@ -1090,6 +1092,7 @@ CodeGen = Object clone {
             } ifFalse {
                 self line(t + " = CLAY_NIL;")
             }
+            self line("clay_uw_drop(1);")
             self line("clay_raise(" + errTmp + ");")
         } ifFalse {
             (finallyBlock != nil) ifTrue {
@@ -1103,21 +1106,29 @@ CodeGen = Object clone {
                 self line("} else {")
                 indent = indent + 1
                 self line("ClayValue " + t + "_raised = clay_error_stack.current_error;")
+                self line("clay_uw_drop(1);")
                 self line("clay_release_val(" + errTmp + ");")
+                self line("clay_uw_temp(&" + t + "_raised);")
                 self line("clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));")
+                self line("clay_uw_drop(1);")
                 self line("clay_raise(" + t + "_raised);")
                 indent = indent - 1
                 self line("}")
+                self line("clay_uw_drop(1);")
                 self line("clay_release_val(" + errTmp + ");")
             } ifFalse {
                 self line(t + " = clay_send_val(" + catchBlock + ", \"value\", 1, (ClayValue[]){ " + errTmp + " });")
+                self line("clay_uw_drop(1);")
                 self line("clay_release_val(" + errTmp + ");")
             }
         }
         indent = indent - 1
         self line("}")
+        // finally: the result is released if it raises
         (finallyBlock != nil) ifTrue {
+            self line("clay_uw_temp(&" + t + ");")
             self line("clay_release_val(clay_send_val(" + finallyBlock + ", \"value\", 0, NULL));")
+            self line("clay_uw_drop(1);")
         }
         self pushOwnedTemp(t)
         t

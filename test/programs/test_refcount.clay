@@ -76,6 +76,29 @@ check value("break out of each", { Early breakOut([1, 2, 3]) })
 check value("continue in each", { Early skip([1, 2, 3]) })
 check value("raise and catch a new string", { Early caught(count) })
 
+// --- Runtime methods that call blocks release what they are building (a
+// map's array, a reduce's accumulator, a Dict each's key) when a block leaves
+// early, and so do doesNotUnderstand and catch/finally blocks that raise ---
+caughtIn = { |block| try { block value } catch { |e| e } }
+Through = Object clone {
+  m(xs) { xs map { |v| (v == 3) ifTrue { return "r" }; "s" + v toString } }
+  r(xs) { xs reduce("a") { |a, v| (v == 3) ifTrue { return a }; a + "b" } }
+  t() { 3 times { |i| (i == 2) ifTrue { return 1 }; "s" + i toString } }
+  k() { #{a: 1} each { |k, v| return k } }
+}
+check value("raise from map", { caughtIn value({ [1, 2, 3] map { |v| (v == 3) ifTrue { raise("x") }; "s" + v toString } }) })
+check value("raise from filter", { caughtIn value({ [1, 2, 3] filter { |v| (v == 3) ifTrue { raise("x") }; true } }) })
+check value("raise from Range map", { caughtIn value({ (1..3) map { |v| (v == 3) ifTrue { raise("x") }; "s" + v toString } }) })
+check value("raise from whileTrue", { caughtIn value({ i = 0; { i < 3 } whileTrue { i = i + 1; (i == 2) ifTrue { raise("x") }; "s" + i toString } }) })
+check value("return from map", { Through m([1, 2, 3]) })
+check value("return from reduce", { Through r([1, 2, 3]) })
+check value("return from times", { Through t })
+check value("return from Dict each", { Through k })
+check value("doesNotUnderstand caught", { caughtIn value({ [1] frob("a" + "b") }) })
+check value("catch block raises", { caughtIn value({ try { raise("a" + "b") } catch { |e| raise("c" + "d") } }) })
+check value("finally block raises", { caughtIn value({ try { "x" + "y" } finally { raise("c" + "d") } }) })
+check value("catch and finally raise", { caughtIn value({ try { raise("a") } catch { |e| raise("b") } finally { raise("c" + "d") } }) })
+
 // --- and the measurement does see a real leak ---
 kept = []
 (growth value({ kept push("x" + kept size toString) }) == 100) ifFalse {

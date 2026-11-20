@@ -1589,13 +1589,16 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
     /* Error was raised — get the error value */
     emit_indent(cg);
     fprintf(cg->out, "ClayValue %s = clay_error_stack.current_error; /* owned */\n", err_tmp);
+    /* released by an unwind if the catch or finally block raises */
+    emit_indent(cg);
+    fprintf(cg->out, "clay_uw_temp(&%s);\n", err_tmp);
 
     /* break / continue / non-local return pass through: run finally, re-raise */
     emit_indent(cg);
     fprintf(cg->out, "if (clay_is_control_signal(%s)) {", err_tmp);
     if (finally_block)
         fprintf(cg->out, " clay_release_val(clay_send_val(%s, \"value\", 0, NULL));", finally_block);
-    fprintf(cg->out, " clay_raise(%s); }\n", err_tmp);
+    fprintf(cg->out, " clay_uw_drop(1); clay_raise(%s); }\n", err_tmp);
 
     if (!catch_block) {
         /* no catch: the error isn't handled — run finally, then re-raise */
@@ -1605,6 +1608,8 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
                     finally_block);
         else
             fprintf(cg->out, "%s = CLAY_NIL;\n", t);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(1);\n");
         emit_indent(cg);
         fprintf(cg->out, "clay_raise(%s);\n", err_tmp);
     } else if (finally_block) {
@@ -1626,21 +1631,31 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
         emit_indent(cg);
         fprintf(cg->out, "ClayValue %s_raised = clay_error_stack.current_error;\n", t);
         emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(1);\n");
+        emit_indent(cg);
         fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_temp(&%s_raised);\n", t);
         emit_indent(cg);
         fprintf(cg->out, "clay_release_val(clay_send_val(%s, \"value\", 0, NULL));\n",
                 finally_block);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(1);\n");
         emit_indent(cg);
         fprintf(cg->out, "clay_raise(%s_raised);\n", t);
         cg->indent--;
         emit_indent(cg);
         fprintf(cg->out, "}\n");
         emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(1);\n");
+        emit_indent(cg);
         fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
     } else {
         emit_indent(cg);
         fprintf(cg->out, "%s = clay_send_val(%s, \"value\", 1, (ClayValue[]){ %s });\n",
                 t, catch_block, err_tmp);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(1);\n");
         emit_indent(cg);
         fprintf(cg->out, "clay_release_val(%s);\n", err_tmp);
     }
@@ -1649,10 +1664,14 @@ static char *emit_try_catch(CodeGen *cg, AstNode *node) {
     emit_indent(cg);
     fprintf(cg->out, "}\n");
 
-    /* Finally block — always executed */
+    /* Finally block — always executed; the result is released if it raises */
     if (finally_block) {
         emit_indent(cg);
+        fprintf(cg->out, "clay_uw_temp(&%s);\n", t);
+        emit_indent(cg);
         fprintf(cg->out, "clay_release_val(clay_send_val(%s, \"value\", 0, NULL));\n", finally_block);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_drop(1);\n");
         free(finally_block);
     }
 

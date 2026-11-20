@@ -287,7 +287,12 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
             clay_array_append(args_arr, argv[i]);
         }
         ClayValue dnu_argv[2] = { CLAY_VAL(sel_str), CLAY_VAL(args_arr) };
+        /* released by an unwind if doesNotUnderstand raises (the default one does) */
+        clay_unwind_push(sel_str);
+        clay_unwind_push(args_arr);
         ClayValue result = invoke_method(dnu, obj, 2, dnu_argv);
+        clay_unwind_pop();
+        clay_unwind_pop();
         clay_release(sel_str);
         clay_release(args_arr);
         clay_trace_pop();
