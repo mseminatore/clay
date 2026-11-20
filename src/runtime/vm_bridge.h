@@ -103,6 +103,8 @@ typedef struct {
     int native_if_skipped;      /* if_skipped(c) → the value when it didn't run */
     int native_send_break;      /* send(...) for a send whose block has a break: nil if one ends it */
     int native_super_send_break; /* the same for super_send */
+    int native_times_count;     /* times_count(n): how many times `n times { }` runs */
+    int native_range_bound;     /* range_bound(v): v, an integer, else a TypeError */
 
     int had_error;
 

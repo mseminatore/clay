@@ -743,6 +743,23 @@ its `break` and `continue` are plain jumps. It behaves exactly like the
 message. A loop with a `break` or `continue` inside another block, such as a
 `try` block, is sent as a message instead.
 
+For counting, `n times { |i| ... }` runs its block with `i` from 0 to `n - 1`, and
+`(a..b) each { |i| ... }` with `i` from `a` to `b`:
+
+```clay
+total = 0
+4 times { |i| total = total + i }
+(1..3) each { |i| total = total + i }
+total println   // 12
+```
+
+These are compiled in place too, inside methods and blocks, so they cost no
+more than a `whileTrue`. They still behave like the messages. `times` gives the
+body's last value, and `each` gives the range. A range's bounds must be integers.
+A float count for `times` is truncated (`3.7 times` runs 3 times). Because the
+block runs in place rather than being sent, `times` with a block literal needs a
+number, so an object with its own `times` method can't take one there.
+
 ## Arrays
 
 ```clay

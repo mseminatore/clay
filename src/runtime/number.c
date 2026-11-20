@@ -418,6 +418,21 @@ static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
     return result;
 }
 
+intptr_t clay_times_count(ClayValue recv) {
+    if (CLAY_IS_INT(recv)) return clay_to_int(recv);
+    if (CLAY_IS_TAGGED_FLOAT(recv)) return clay_float_to_int(clay_float_untag(recv));
+    ClayMethod *m = (CLAY_IS_OBJ(recv) && recv != CLAY_TRUE && recv != CLAY_FALSE)
+                    ? clay_cached_lookup(CLAY_OBJ(recv), "times") : NULL;
+    if (m && m->func == number_times) return self_int_value(CLAY_OBJ(recv));
+    if (!m) {
+        ClayValue none = CLAY_NIL;
+        clay_send_val(recv, "times", 1, &none);   /* raises "does not understand" */
+    }
+    clay_raise(CLAY_VAL(clay_error_new("times with a block literal needs a number "
+                                       "(the block is run in place, not sent)", "TypeError")));
+    return 0;
+}
+
 void clay_number_init_methods(ClayObject *proto) {
     clay_set_method(proto, "+",  number_add);
     clay_set_method(proto, "-",  number_sub);

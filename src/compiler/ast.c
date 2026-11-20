@@ -459,6 +459,34 @@ int ast_is_inline_while(AstNode *n) {
            body->as.block.params.count == 0 && loop_jumps_list(&body->as.block.body);
 }
 
+/* --- Inlined counting loops ---
+ * `n times { |i| ... }` and `(a..b) each { |i| ... }` with a block literal
+ * taking at most one (plain) parameter run in place too, under the same
+ * condition as an inlined whileTrue: each break and continue that targets
+ * the loop can be a jump. They keep the messages' values: times gives the
+ * body's last value (nil after a continue or a break), each the range (nil
+ * after a break). */
+int ast_inline_count_kind(AstNode *n) {
+    if (!n || n->type != NODE_SEND || n->as.send.is_super || n->as.send.is_call) return 0;
+    if (n->as.send.args.count != 1) return 0;
+    AstNode *b = n->as.send.args.items[0];
+    if (!b || b->type != NODE_BLOCK || b->as.block.params.count > 1) return 0;
+    if (b->as.block.params.count == 1 && b->as.block.params.items[0]->type != NODE_IDENT) return 0;
+    const char *m = n->as.send.message;
+    AstNode *r = n->as.send.receiver;
+    int kind = 0;
+    if (m && strcmp(m, "times") == 0 && r) kind = AST_COUNT_TIMES;
+    else if (m && strcmp(m, "each") == 0 && r && r->type == NODE_BINARY &&
+             strcmp(r->as.binary.op, "..") == 0) kind = AST_COUNT_RANGE;
+    if (!kind || !loop_jumps_list(&b->as.block.body)) return 0;
+    return kind;
+}
+
+const char *ast_count_param(AstNode *n) {
+    AstNode *b = n->as.send.args.items[0];
+    return b->as.block.params.count == 1 ? b->as.block.params.items[0]->as.ident.name : NULL;
+}
+
 /* --- break / continue in a block passed to a message ---
  * Each break and continue belongs to the innermost loop around it: an
  * inlined whileTrue/whileFalse (a jump), or a block literal passed to a
@@ -597,6 +625,10 @@ static int ast_return_walk(AstNode *n, int in_block, int want_in_block, int inli
             if (inline_ifs && ast_is_inline_while(n))
                 return ast_return_walk_list(&n->as.send.receiver->as.block.body,
                                             in_block, want_in_block, inline_ifs) ||
+                       ast_return_walk_list(&n->as.send.args.items[0]->as.block.body,
+                                            in_block, want_in_block, inline_ifs);
+            if (inline_ifs && ast_inline_count_kind(n))
+                return ast_return_walk(n->as.send.receiver, in_block, want_in_block, inline_ifs) ||
                        ast_return_walk_list(&n->as.send.args.items[0]->as.block.body,
                                             in_block, want_in_block, inline_ifs);
             return ast_return_walk(n->as.send.receiver, in_block, want_in_block, inline_ifs) ||

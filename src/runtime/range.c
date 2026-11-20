@@ -14,6 +14,16 @@ ClayObject *clay_range_new(intptr_t start, intptr_t end, intptr_t step) {
     return obj;
 }
 
+intptr_t clay_range_bound(ClayValue v) {
+    if (CLAY_IS_INT(v)) return clay_to_int(v);
+    char msg[160];
+    const char *what = CLAY_IS_NIL(v) ? "nil" : CLAY_IS_TAGGED_FLOAT(v) ? "Float"
+                     : clay_type_name(CLAY_OBJ(v));
+    snprintf(msg, sizeof(msg), "a range needs integer bounds, not %s", what);
+    clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+    return 0;
+}
+
 static void range_read_slots(ClayObject *self, intptr_t *start, intptr_t *end, intptr_t *step) {
     ClayValue sv = clay_get_slot(self, "_start");
     *start = CLAY_IS_INT(sv) ? clay_to_int(sv) : 0;

@@ -1564,10 +1564,38 @@ static int native_make_range_fn(clayvm_vm_t *vm, int argc) {
     (void)argc;
     ClayValue end = vm_to_clay(clayvm_vm_pop(vm));
     ClayValue start = vm_to_clay(clayvm_vm_pop(vm));
-    intptr_t s = CLAY_IS_INT(start) ? clay_to_int(start) : 0;
-    intptr_t e = CLAY_IS_INT(end) ? clay_to_int(end) : 0;
+    /* the operands are popped but stay owned until released here */
+    intptr_t s = 0, e = 0;
+    if (CLAY_IS_INT(start) && CLAY_IS_INT(end)) {
+        s = clay_to_int(start);
+        e = clay_to_int(end);
+    } else {
+        vm->sp += 2;   /* an error unwinding releases them */
+        s = clay_range_bound(start);
+        e = clay_range_bound(end);
+        vm->sp -= 2;
+    }
     ClayObject *range = clay_range_new(s, e, 1);
     clayvm_vm_push(vm, clay_to_vm(CLAY_VAL(range)));
+    return 0;
+}
+
+/* times_count(n) / range_bound(v): an inlined counting loop's bounds. The
+ * operand stays on the stack while it is checked, so an error unwinding
+ * releases it. */
+static int native_times_count_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    intptr_t n = clay_times_count(vm_to_clay(vm->stack[vm->sp - 1]));
+    vm_release_val(clayvm_vm_pop(vm));
+    clayvm_vm_push(vm, clay_to_vm(clay_int(n)));
+    return 0;
+}
+
+static int native_range_bound_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    intptr_t n = clay_range_bound(vm_to_clay(vm->stack[vm->sp - 1]));
+    vm_release_val(clayvm_vm_pop(vm));
+    clayvm_vm_push(vm, clay_to_vm(clay_int(n)));
     return 0;
 }
 
@@ -1868,6 +1896,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_if_skipped = clayvm_native_register(&vm->natives, "if_skipped", native_if_skipped_fn, 1);
     bc->native_send_break = clayvm_native_register(&vm->natives, "send_break", native_send_break_fn, -1);
     bc->native_super_send_break = clayvm_native_register(&vm->natives, "super_send_break", native_super_send_break_fn, -1);
+    bc->native_times_count = clayvm_native_register(&vm->natives, "times_count", native_times_count_fn, 1);
+    bc->native_range_bound = clayvm_native_register(&vm->natives, "range_bound", native_range_bound_fn, 1);
 
     /* Pre-register Clay builtin prototypes as globals */
     struct { const char *name; ClayObject *obj; } builtins[] = {

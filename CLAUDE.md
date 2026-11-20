@@ -171,6 +171,13 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   a try block, a receiver block or an expression; a block passed to a message keeps its own); otherwise
   it is sent. `bc_emit_inline_while` / `emit_inline_while`
   (selfhost `inlineWhile` in both ports).
+- **Inlined counting loops**: `n times { |i| ... }` and `(a..b) each { |i| ... }` (block literal with at
+  most one plain parameter, same jump condition: `ast_inline_count_kind`) run in place too:
+  `bc_emit_inline_count` / `emit_inline_count` (selfhost `inlineCount`), bounds from `clay_times_count` /
+  `clay_range_bound` (VM natives `times_count` / `range_bound`), tested before the first run and after each.
+  Values match the messages (times: last body value, nil after break/continue; each: the range, nil after
+  break). The bc compiler gives the parameter a scope (and `bc_slot_flag_local` ignores an outer `?x` flag);
+  codegen has no inner scopes, so its prewalk renames the parameter in the body (`rename_var`, `__p<n>_i`).
 - **break / continue**: lexical, as in Ruby. `check.c` `check_loop_control` (selfhost `GlobalCheck _loop`)
   rejects one outside a loop body or a block literal passed to a message (ifTrue/ifFalse and try blocks and
   a send's receiver block are transparent). Each belongs to the innermost inlined loop (a jump) or block

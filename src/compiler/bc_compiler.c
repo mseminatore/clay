@@ -220,7 +220,11 @@ static void bc_slot_flag_name(const char *name, char *out, size_t sz) {
 static int bc_slot_flag_local(BcCompiler *bc, const char *name) {
     char flag[BC_SLOT_FLAG_MAX];
     bc_slot_flag_name(name, flag, sizeof(flag));
-    return bc_resolve_local(bc, flag);
+    int flag_slot = bc_resolve_local(bc, flag);
+    /* not the flag of an outer variable the name shadows (an inlined
+     * counting loop's parameter) */
+    if (flag_slot >= 0 && flag_slot < bc_resolve_local(bc, name)) return -1;
+    return flag_slot;
 }
 
 /* Push the value of local `slot` (unwrapping its cell if captured) */
@@ -530,6 +534,11 @@ static void bc_prescan_node(BcCompiler *bc, AstNode *node) {
             if (ast_is_inline_while(node)) {
                 /* an inlined loop's blocks' statements are part of this scope */
                 bc_prescan_list(bc, &node->as.send.receiver->as.block.body);
+                bc_prescan_list(bc, &node->as.send.args.items[0]->as.block.body);
+                break;
+            }
+            if (ast_inline_count_kind(node)) {
+                bc_prescan_node(bc, node->as.send.receiver);
                 bc_prescan_list(bc, &node->as.send.args.items[0]->as.block.body);
                 break;
             }
@@ -953,12 +962,17 @@ static int bc_compare_op(AstNode *n) {
     return -1;
 }
 
-/* An inlined whileTrue/whileFalse (bc_emit_inline_while) */
+/* An inlined whileTrue/whileFalse (bc_emit_inline_while) or counting loop
+ * (bc_emit_inline_count) */
 typedef struct {
     int  top;       /* the condition's start (continue's target) */
     int  depth;     /* values above the loop's stack (lone ifTrue values) */
     int *breaks;    /* patch positions of the breaks' jumps */
     int  count, capacity;
+    int  fwd_cont;  /* continue jumps forward, to the step (conts) */
+    int *conts;
+    int  ccount, ccapacity;
+    int  nil_res;   /* >= 0: a break or continue sets this local to nil (times' value) */
 } BcLoop;
 
 /* An inlined block body being compiled: outside methods a `return` in it
@@ -972,11 +986,15 @@ typedef struct {
 
 /* Run an inlined block's statements; with want_value its value is left on
  * the stack */
-static void bc_emit_inline_body(BcCompiler *bc, NodeList *body, int want_value) {
+/* pname: a counting loop's parameter, a local of the body set from local
+ * src each run (NULL for none) */
+static void bc_emit_inline_body_p(BcCompiler *bc, NodeList *body, int want_value,
+                                  const char *pname, int src) {
     BcInlineExit exit = { want_value, NULL, 0, 0 };
     void *outer_exit = bc->inline_exit;
     bc->inline_exit = &exit;
     bc_begin_scope(bc);
+    int pslot = pname ? bc_add_local(bc, pname) : -1;
     int pre_start = bc->local_count;
     bc_preregister_method_locals(bc, body);
     int pre_end = bc->local_count;
@@ -989,6 +1007,18 @@ static void bc_emit_inline_body(BcCompiler *bc, NodeList *body, int want_value) 
     }
     int flag_end = bc->local_count;
     bc_prescan_list(bc, body);
+
+    if (pslot >= 0) {
+        emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)src);
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)pslot);
+        emit_op(bc, CLAYVM_OP_POP);
+        if (bc->locals[pslot].is_captured) {   /* a fresh cell each run */
+            emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)pslot);
+            bc_emit_native(bc, bc->native_cell_new, 1);
+            emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)pslot);
+            emit_op(bc, CLAYVM_OP_POP);
+        }
+    }
 
     /* the block's variables start out nil each time it runs */
     for (int i = pre_start; i < pre_end; i++) {
@@ -1031,6 +1061,10 @@ static void bc_emit_inline_body(BcCompiler *bc, NodeList *body, int want_value) 
     free(exit.jumps);
     bc_end_scope(bc);
     bc->inline_exit = outer_exit;
+}
+
+static void bc_emit_inline_body(BcCompiler *bc, NodeList *body, int want_value) {
+    bc_emit_inline_body_p(bc, body, want_value, NULL, -1);
 }
 
 /* Push 1 if `cond <sel>` should run its block, else 0. A comparison is
@@ -1124,6 +1158,20 @@ static void bc_emit_jump_back(BcCompiler *bc, int target) {
 /* break / continue of the inlined loop being compiled */
 static void bc_emit_loop_jump(BcCompiler *bc, BcLoop *loop, int is_break) {
     for (int i = 0; i < loop->depth; i++) emit_op(bc, CLAYVM_OP_POP);
+    if (loop->nil_res >= 0) {
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)loop->nil_res);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
+    if (!is_break && loop->fwd_cont) {
+        if (loop->ccount >= loop->ccapacity) {
+            loop->ccapacity = loop->ccapacity ? loop->ccapacity * 2 : 4;
+            loop->conts = (int *)realloc(loop->conts, (size_t)loop->ccapacity * sizeof(int));
+        }
+        loop->conts[loop->ccount++] = emit_jump(bc, CLAYVM_OP_JUMP);
+        return;
+    }
     if (!is_break) {
         bc_emit_jump_back(bc, loop->top);
         return;
@@ -1148,7 +1196,7 @@ static void bc_emit_inline_while(BcCompiler *bc, AstNode *node, int want_value) 
         emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)res);
         emit_op(bc, CLAYVM_OP_POP);
     }
-    BcLoop loop = { (int)bc->len, 0, NULL, 0, 0 };
+    BcLoop loop = { (int)bc->len, 0, NULL, 0, 0, 0, NULL, 0, 0, -1 };
     void *outer = bc->inline_loop;
     bc->inline_loop = NULL;
     bc_emit_inline_body(bc, cond, 1);
@@ -1170,6 +1218,97 @@ static void bc_emit_inline_while(BcCompiler *bc, AstNode *node, int want_value) 
         emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)res);
         bc_end_scope(bc);
     }
+}
+
+/* --- Inlined counting loops ---
+ * `n times { |i| ... }` / `(a..b) each { |i| ... }` (ast_inline_count_kind):
+ * the counter runs from first to last in hidden locals (times_count /
+ * range_bound check the receiver as the methods do), tested before the
+ * first run and after each, so it never steps past last. The parameter is a
+ * local of the body, set from the counter each run. A continue jumps to the
+ * step. The value: times', the body's last (nil after a break or continue);
+ * each's, the range (nil after a break). */
+static void bc_emit_push_int(BcCompiler *bc, long long v) {
+    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_int(bc, v));
+}
+
+static void bc_emit_set_pop(BcCompiler *bc, int slot) {
+    emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
+    emit_op(bc, CLAYVM_OP_POP);
+}
+
+static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) {
+    int kind = ast_inline_count_kind(node);
+    AstNode *recv = node->as.send.receiver;
+    NodeList *body = &node->as.send.args.items[0]->as.block.body;
+    int times_value = want_value && kind == AST_COUNT_TIMES;
+    bc_begin_scope(bc);
+    int res = -1, first = -1;
+    if (want_value) {
+        res = bc_add_local(bc, "?loop");
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        bc_emit_set_pop(bc, res);
+    }
+    int k = bc_add_local(bc, "?k");
+    int last = bc_add_local(bc, "?last");
+    if (kind == AST_COUNT_TIMES) {
+        bc_emit_expr(bc, recv);
+        bc_set_loc(bc, node);
+        bc_emit_native(bc, bc->native_times_count, 1);
+        bc_emit_push_int(bc, 1);
+        emit_op(bc, CLAYVM_OP_SUB);
+        bc_emit_set_pop(bc, last);
+        bc_emit_push_int(bc, 0);
+        bc_emit_set_pop(bc, k);
+    } else {
+        bc_emit_expr(bc, recv->as.binary.left);
+        bc_set_loc(bc, node);
+        bc_emit_native(bc, bc->native_range_bound, 1);
+        bc_emit_set_pop(bc, k);
+        bc_emit_expr(bc, recv->as.binary.right);
+        bc_set_loc(bc, node);
+        bc_emit_native(bc, bc->native_range_bound, 1);
+        bc_emit_set_pop(bc, last);
+        if (want_value) {
+            first = bc_add_local(bc, "?first");
+            emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)k);
+            bc_emit_set_pop(bc, first);
+        }
+    }
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)k);
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)last);
+    emit_op(bc, CLAYVM_OP_LTE);
+    int to_skip = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+    BcLoop loop = { (int)bc->len, 0, NULL, 0, 0, 1, NULL, 0, 0, times_value ? res : -1 };
+    void *outer = bc->inline_loop;
+    bc->inline_loop = &loop;
+    bc_emit_inline_body_p(bc, body, times_value, ast_count_param(node), k);
+    bc->inline_loop = outer;
+    if (times_value) bc_emit_set_pop(bc, res);
+    for (int i = 0; i < loop.ccount; i++) patch_jump(bc, loop.conts[i]);
+    free(loop.conts);
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)k);
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)last);
+    emit_op(bc, CLAYVM_OP_LT);
+    int to_done = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)k);
+    bc_emit_push_int(bc, 1);
+    emit_op(bc, CLAYVM_OP_ADD);
+    bc_emit_set_pop(bc, k);
+    bc_emit_jump_back(bc, loop.top);
+    patch_jump(bc, to_skip);
+    patch_jump(bc, to_done);
+    if (want_value && kind == AST_COUNT_RANGE) {
+        emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)first);
+        emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)last);
+        bc_emit_native(bc, bc->native_make_range, 2);
+        bc_emit_set_pop(bc, res);
+    }
+    for (int i = 0; i < loop.count; i++) patch_jump(bc, loop.breaks[i]);
+    free(loop.breaks);
+    if (want_value) emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)res);
+    bc_end_scope(bc);
 }
 
 static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
@@ -1319,6 +1458,10 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             }
             if (bc->chunk_depth > 0 && ast_is_inline_while(node)) {
                 bc_emit_inline_while(bc, node, 1);
+                break;
+            }
+            if (bc->chunk_depth > 0 && ast_inline_count_kind(node)) {
+                bc_emit_inline_count(bc, node, 1);
                 break;
             }
             /* Push receiver */
@@ -1862,6 +2005,10 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     }
     if (bc->chunk_depth > 0 && ast_is_inline_while(node)) {
         bc_emit_inline_while(bc, node, 0);
+        return;
+    }
+    if (bc->chunk_depth > 0 && ast_inline_count_kind(node)) {
+        bc_emit_inline_count(bc, node, 0);
         return;
     }
 

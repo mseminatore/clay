@@ -113,6 +113,8 @@ BcGen = Object clone {
     N_IF_SKIPPED = 32
     N_SEND_BREAK = 33
     N_SUPER_SEND_BREAK = 34
+    N_TIMES_COUNT = 35
+    N_RANGE_BOUND = 36
 
     MAX_CODE = 65536
     MAX_LOCALS = 256
@@ -328,7 +330,13 @@ BcGen = Object clone {
     }
 
     // implicit-slot fallback: the hidden flag local "?x" of local x
-    flagLocal(n) { self resolveLocal("?" + n) }
+    flagLocal(n) {
+        f = self resolveLocal("?" + n)
+        // not the flag of an outer variable the name shadows (an inlined
+        // counting loop's parameter)
+        (f >= 0 && f < (self resolveLocal(n))) ifTrue { return -1 }
+        f
+    }
 
     isKnownSlot(n) { slotsKnown != nil && (slotsKnown contains(n)) }
     isKnownMember(n) { membersKnown != nil && (membersKnown contains(n)) }
@@ -497,6 +505,10 @@ BcGen = Object clone {
                 self prescanList(n recv body)
                 return self prescanList((n items at(0)) body)
             }
+            ((self countKind(n)) > 0) ifTrue {
+                self prescan(n recv)
+                return self prescanList((n items at(0)) body)
+            }
             self prescan(n recv)
             // an inlined block's statements are part of this scope
             (self isInlineIf(n)) ifTrue { return self prescanList((n items at(0)) body) }
@@ -574,6 +586,10 @@ BcGen = Object clone {
                 return (self returnWalkList(n recv body, inBlock, wantInBlock)) ||
                        (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
             }
+            ((self countKind(n)) > 0) ifTrue {
+                return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                       (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
+            }
             return (self returnWalk(n recv, inBlock, wantInBlock)) ||
                    (self returnWalkList(n items, inBlock, wantInBlock))
         }
@@ -618,12 +634,17 @@ BcGen = Object clone {
     }
 
     // run an inlined block's statements (bc_emit_inline_body)
-    inlineBody(body, wantValue) {
+    inlineBody(body, wantValue) { self inlineBodyP(body, wantValue, nil, -1) }
+
+    // pname: a counting loop's parameter, a local of the body set from local
+    // src each run (nil for none)
+    inlineBodyP(body, wantValue, pname, src) {
         // outside methods a `return` ends just this block: a jump to its end
         exit = [wantValue, []]
         outerExit = inlineExit
         inlineExit = exit
         depth = depth + 1
+        pslot = (pname != nil) ifTrue { self addLocal(pname) } ifFalse { -1 }
         preStart = locs size
         self preregister(body)
         preEnd = locs size
@@ -636,6 +657,17 @@ BcGen = Object clone {
         }
         flagEnd = locs size
         self prescanList(body)
+
+        (pslot >= 0) ifTrue {
+            self emitOpU16(GET_LOCAL, src)
+            self setPop(pslot)
+            (locs at(pslot)) captured ifTrue {
+                // a fresh cell each run
+                self emitOpU16(GET_LOCAL, pslot)
+                self native(N_CELL_NEW, 1)
+                self setPop(pslot)
+            }
+        }
 
         i = preStart
         { i < preEnd } whileTrue {
@@ -822,6 +854,28 @@ BcGen = Object clone {
             (self loopJumpsList(b body))
     }
 
+    // `n times { |i| ... }` (1) or `(a..b) each { |i| ... }` (2) that runs in
+    // place under the inlined loop's condition, else 0 (ast_inline_count_kind)
+    countKind(n) {
+        (n == nil || n kind != "Send" || n isSuper || n isCall || n items size != 1) ifTrue { return 0 }
+        b = n items at(0)
+        (b == nil || b kind != "Block" || b params size > 1) ifTrue { return 0 }
+        (b params size == 1 && (b params at(0)) kind != "Ident") ifTrue { return 0 }
+        r = n recv
+        kind = 0
+        (n name == "times" && r != nil) ifTrue { kind = 1 }
+        (n name == "each" && r != nil && r kind == "Binary" && r name == "..") ifTrue { kind = 2 }
+        (kind == 0 || (self loopJumpsList(b body)) == false) ifTrue { return 0 }
+        kind
+    }
+
+    // its parameter's name, or nil
+    countParam(n) {
+        b = n items at(0)
+        (b params size == 1) ifTrue { return (b params at(0)) name }
+        nil
+    }
+
     // --- break / continue in a block passed to a message (ast.c owned_ctl) ---
     // Each belongs to the innermost loop around it: an inlined loop (a jump)
     // or a block literal passed to a message other than ifTrue/ifFalse and a
@@ -910,14 +964,99 @@ BcGen = Object clone {
     }
 
     // break / continue of the inlined loop being compiled
+    // inlineLoop: [top, depth, breaks, fwdCont, conts, nilRes] (BcLoop)
     loopJump(isBreak) {
         i = 0
         { i < (inlineLoop at(1)) } whileTrue {
             self emitOp(POP)
             i = i + 1
         }
+        nr = inlineLoop at(5)
+        (nr >= 0) ifTrue {
+            self pushNil
+            self setPop(nr)
+        }
+        (isBreak == false && (inlineLoop at(3))) ifTrue { return (inlineLoop at(4)) push(self emitJump(JUMP)) }
         isBreak ifFalse { return self jumpBack(inlineLoop at(0)) }
         (inlineLoop at(2)) push(self emitJump(JUMP))
+    }
+
+    setPop(slot) {
+        self emitOpU16(SET_LOCAL, slot)
+        self emitOp(POP)
+    }
+
+    // `n times { |i| ... }` / `(a..b) each { |i| ... }` (bc_emit_inline_count)
+    inlineCount(n, wantValue) {
+        kind = self countKind(n)
+        r = n recv
+        body = (n items at(0)) body
+        timesValue = wantValue && kind == 1
+        depth = depth + 1
+        res = -1
+        first = -1
+        wantValue ifTrue {
+            res = self addLocal("?loop")
+            self pushNil
+            self setPop(res)
+        }
+        k = self addLocal("?k")
+        last = self addLocal("?last")
+        (kind == 1) ifTrue {
+            self expr(r)
+            self setLoc(n)
+            self native(N_TIMES_COUNT, 1)
+            self pushConst(self constInt(1))
+            self emitOp(arithOps get("-"))
+            self setPop(last)
+            self pushConst(self constInt(0))
+            self setPop(k)
+        } ifFalse {
+            self expr(r left)
+            self setLoc(n)
+            self native(N_RANGE_BOUND, 1)
+            self setPop(k)
+            self expr(r right)
+            self setLoc(n)
+            self native(N_RANGE_BOUND, 1)
+            self setPop(last)
+            wantValue ifTrue {
+                first = self addLocal("?first")
+                self emitOpU16(GET_LOCAL, k)
+                self setPop(first)
+            }
+        }
+        self emitOpU16(GET_LOCAL, k)
+        self emitOpU16(GET_LOCAL, last)
+        self emitOp(compareOps get("<="))
+        toSkip = self emitJump(JUMP_IF_FALSE)
+        loop = [buf size, 0, [], true, [], timesValue ifTrue { res } ifFalse { -1 }]
+        outerLoop = inlineLoop
+        inlineLoop = loop
+        self inlineBodyP(body, timesValue, self countParam(n), k)
+        inlineLoop = outerLoop
+        timesValue ifTrue { self setPop(res) }
+        (loop at(4)) each { |j| self patchJump(j) }
+        self emitOpU16(GET_LOCAL, k)
+        self emitOpU16(GET_LOCAL, last)
+        self emitOp(compareOps get("<"))
+        toDone = self emitJump(JUMP_IF_FALSE)
+        self emitOpU16(GET_LOCAL, k)
+        self pushConst(self constInt(1))
+        self emitOp(arithOps get("+"))
+        self setPop(k)
+        self jumpBack(loop at(0))
+        self patchJump(toSkip)
+        self patchJump(toDone)
+        (wantValue && kind == 2) ifTrue {
+            self emitOpU16(GET_LOCAL, first)
+            self emitOpU16(GET_LOCAL, last)
+            self native(N_MAKE_RANGE, 2)
+            self setPop(res)
+        }
+        (loop at(2)) each { |j| self patchJump(j) }
+        wantValue ifTrue { self emitOpU16(GET_LOCAL, res) }
+        self endScope
     }
 
     inlineWhile(n, wantValue) {
@@ -931,7 +1070,7 @@ BcGen = Object clone {
             self emitOpU16(SET_LOCAL, res)
             self emitOp(POP)
         }
-        loop = [buf size, 0, []]
+        loop = [buf size, 0, [], false, [], -1]
         outerLoop = inlineLoop
         // a break in the condition is raised
         inlineLoop = nil
@@ -1170,6 +1309,7 @@ BcGen = Object clone {
             }
             (chunkDepth > 0 && (self isInlineIf(n))) ifTrue { return self inlineIf(n, true) }
             (chunkDepth > 0 && (self isInlineWhile(n))) ifTrue { return self inlineWhile(n, true) }
+            (chunkDepth > 0 && (self countKind(n)) > 0) ifTrue { return self inlineCount(n, true) }
             self expr(n recv)
             self pushString(n name)
             return self sendArgs(n, n name)
@@ -1445,6 +1585,7 @@ BcGen = Object clone {
         }
         (chunkDepth > 0 && (self isInlineIf(n))) ifTrue { return self inlineIf(n, false) }
         (chunkDepth > 0 && (self isInlineWhile(n))) ifTrue { return self inlineWhile(n, false) }
+        (chunkDepth > 0 && (self countKind(n)) > 0) ifTrue { return self inlineCount(n, false) }
         self expr(n)
         self emitOp(POP)
     }

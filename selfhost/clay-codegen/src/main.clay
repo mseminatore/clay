@@ -245,6 +245,8 @@ InlineLoop = Object clone {
     tempMark = 0            // owned temps from here are the body's statements'
     id = 0
     contUsed = false
+    brkUsed = false
+    nilRes = nil            // a break or continue sets this to nil (times' value)
 }
 
 // --- the code generator ---
@@ -285,6 +287,7 @@ CodeGen = Object clone {
     methodCtx = false      // emitting a method, or a block created inside one
     nameOrder = nil        // pre-assigned function names, in registration order
     nameCounter = 0
+    paramCounter = 0       // renamed counting-loop parameters (renameVar)
 
     builtins = #{
         "Object": "CLAY_VAL(clay_Object)", "Number": "CLAY_VAL(clay_Number)",
@@ -337,6 +340,7 @@ CodeGen = Object clone {
         methodCtx = false
         nameOrder = []
         nameCounter = 0
+        paramCounter = 0
     }
 
     // --- output ---
@@ -534,6 +538,10 @@ CodeGen = Object clone {
                 return (self returnWalkList(n recv body, inBlock, wantInBlock)) ||
                        (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
             }
+            ((self countKind(n)) > 0) ifTrue {
+                return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                       (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
+            }
             return (self returnWalk(n recv, inBlock, wantInBlock)) ||
                    (self returnWalkList(n items, inBlock, wantInBlock))
         }
@@ -595,6 +603,20 @@ CodeGen = Object clone {
         }
         (k == "Assign") ifTrue { return self prewalk(n value, n name) }
         (k == "Send") ifTrue {
+            // an inlined counting loop's parameter is renamed in its body
+            (prewalkDepth > 0 && (self countKind(n)) > 0) ifTrue {
+                blk = n items at(0)
+                pname = self countParam(n)
+                (pname != nil) ifTrue {
+                    to = "__p" + paramCounter toString + "_" + pname
+                    paramCounter = paramCounter + 1
+                    blk body each { |s| self renameVar(s, pname, to) }
+                    (blk params at(0)) name = to
+                }
+                self prewalk(n recv, parentName)
+                blk body each { |s| self prewalk(s, parentName) }
+                return nil
+            }
             // an inlined loop's blocks get no functions
             (prewalkDepth > 0 && (self isInlineWhile(n))) ifTrue {
                 n recv body each { |s| self prewalk(s, parentName) }
@@ -771,6 +793,7 @@ CodeGen = Object clone {
         (k == "Send") ifTrue {
             (inFunction && (self isInlineIf(n))) ifTrue { return self inlineIf(n, true) }
             (inFunction && (self isInlineWhile(n))) ifTrue { return self inlineWhile(n, true) }
+            (inFunction && (self countKind(n)) > 0) ifTrue { return self inlineCount(n, true) }
             return self send(n)
         }
         (k == "Binary") ifTrue { return self binary(n) }
@@ -930,6 +953,54 @@ CodeGen = Object clone {
     // made where a block is created and stay in use for the rest of the
     // function; inside a C branch (the right side of &&, || or ??) the cell
     // would go out of scope while the function still uses it.
+    // An inlined counting loop's parameter becomes a C local of its body;
+    // names are the function's variables, with no inner scopes, so the
+    // prewalk renames it in the body first (codegen.c rename_var): the
+    // references in the body and in blocks made there, except where a
+    // block's own parameter or a method's body hides it
+    renameVar(n, from, to) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Ident") ifTrue {
+            (n name == from) ifTrue { n name = to }
+            return nil
+        }
+        (k == "Assign") ifTrue {
+            (n name == from) ifTrue { n name = to }
+            return self renameVar(n value, from, to)
+        }
+        (k == "Block") ifTrue {
+            ((n params find { |p| p name == from }) != nil) ifTrue { return nil }
+            return n body each { |s| self renameVar(s, from, to) }
+        }
+        (k == "Send" || k == "Clone") ifTrue {
+            self renameVar(n recv, from, to)
+            return n items each { |a| self renameVar(a, from, to) }
+        }
+        (k == "Binary") ifTrue {
+            self renameVar(n left, from, to)
+            return self renameVar(n right, from, to)
+        }
+        (k == "SlotDef") ifTrue { return self renameVar(n value, from, to) }
+        (k == "Array") ifTrue { return n items each { |a| self renameVar(a, from, to) } }
+        (k == "DictLit") ifTrue { return n vals each { |a| self renameVar(a, from, to) } }
+        (k == "TryCatch") ifTrue {
+            self renameVar(n tryBlock, from, to)
+            self renameVar(n catchBlock, from, to)
+            return self renameVar(n finallyBlock, from, to)
+        }
+        (k == "Raise" || k == "Return") ifTrue { return self renameVar(n expr, from, to) }
+        (k == "SlotAssign") ifTrue {
+            self renameVar(n recv, from, to)
+            return self renameVar(n value, from, to)
+        }
+        (k == "Destructure") ifTrue {
+            n items each { |t| self renameVar(t, from, to) }
+            return self renameVar(n value, from, to)
+        }
+        nil
+    }
+
     preboxCaptures(n) {
         (n == nil) ifTrue { return nil }
         k = n kind
@@ -943,6 +1014,11 @@ CodeGen = Object clone {
         (k == "Send") ifTrue {
             (inFunction && (self isInlineWhile(n))) ifTrue {
                 n recv body each { |s| self preboxCaptures(s) }
+                (n items at(0)) body each { |s| self preboxCaptures(s) }
+                return nil
+            }
+            (inFunction && (self countKind(n)) > 0) ifTrue {
+                self preboxCaptures(n recv)
                 (n items at(0)) body each { |s| self preboxCaptures(s) }
                 return nil
             }
@@ -1059,7 +1135,7 @@ CodeGen = Object clone {
             (right == nil) ifTrue { return nil }
             t = self tempName
             self emitLine(n)
-            self line("ClayValue " + t + " = CLAY_VAL(clay_range_new(clay_to_int(" + left + "), clay_to_int(" +
+            self line("ClayValue " + t + " = CLAY_VAL(clay_range_new(clay_range_bound(" + left + "), clay_range_bound(" +
                       right + "), 1));")
             self pushOwnedTemp(t)
             return t
@@ -1542,6 +1618,11 @@ CodeGen = Object clone {
             self inlineWhile(s, false)
             return self tempCleanup(nil)
         }
+        (wantValue == false && (self countKind(s)) > 0) ifTrue {
+            self emitLine(s)
+            self inlineCount(s, false)
+            return self tempCleanup(nil)
+        }
         self fnExprStmt(s)
     }
 
@@ -1630,6 +1711,28 @@ CodeGen = Object clone {
         b = n items at(0)
         c != nil && c kind == "Block" && c params size == 0 && b params size == 0 &&
             (self loopJumpsList(b body))
+    }
+
+    // `n times { |i| ... }` (1) or `(a..b) each { |i| ... }` (2) that runs in
+    // place under the inlined loop's condition, else 0 (ast_inline_count_kind)
+    countKind(n) {
+        (n == nil || n kind != "Send" || n isSuper || n isCall || n items size != 1) ifTrue { return 0 }
+        b = n items at(0)
+        (b == nil || b kind != "Block" || b params size > 1) ifTrue { return 0 }
+        (b params size == 1 && (b params at(0)) kind != "Ident") ifTrue { return 0 }
+        r = n recv
+        kind = 0
+        (n name == "times" && r != nil) ifTrue { kind = 1 }
+        (n name == "each" && r != nil && r kind == "Binary" && r name == "..") ifTrue { kind = 2 }
+        (kind == 0 || (self loopJumpsList(b body)) == false) ifTrue { return 0 }
+        kind
+    }
+
+    // its parameter's name, or nil
+    countParam(n) {
+        b = n items at(0)
+        (b params size == 1) ifTrue { return (b params at(0)) name }
+        nil
     }
 
     // --- break / continue in a block passed to a message (ast.c owned_ctl) ---
@@ -1727,10 +1830,70 @@ CodeGen = Object clone {
             self line("clay_release_val(" + (ownedTemps at(i)) + ");")
             i = i + 1
         }
+        (lp nilRes != nil) ifTrue { self line("clay_release_val(" + lp nilRes + "); " + lp nilRes + " = CLAY_NIL;") }
         id = lp id toString
         self line("clay_uw_reset(__lp_" + id + "); goto __" + (isBreak ifTrue { "brk" } ifFalse { "cont" }) +
                   "_" + id + ";")
-        isBreak ifFalse { lp contUsed = true }
+        isBreak ifTrue { lp brkUsed = true } ifFalse { lp contUsed = true }
+    }
+
+    // `n times { |i| ... }` / `(a..b) each { |i| ... }` (emit_inline_count)
+    inlineCount(n, wantValue) {
+        kind = self countKind(n)
+        r = n recv
+        body = (n items at(0)) body
+        timesValue = wantValue && kind == 1
+        // cells for what blocks inside capture outlive the loop
+        self preboxCaptures(n)
+        t = nil
+        wantValue ifTrue {
+            t = self tempName
+            self line("ClayValue " + t + " = CLAY_NIL;")
+            self pushOwnedTemp(t)
+        }
+        lp = InlineLoop clone
+        lp scope = inlineScope
+        lp tempMark = ownedTemps size
+        lp id = tempCounter
+        tempCounter = tempCounter + 1
+        lp nilRes = timesValue ifTrue { t } ifFalse { nil }
+        id = lp id toString
+        (kind == 1) ifTrue {
+            c = self expr(r)
+            self emitLine(n)
+            self line("intptr_t __k_" + id + " = 0, __last_" + id + " = clay_times_count(" +
+                      (c ?? "CLAY_NIL") + ") - 1;")
+        } ifFalse {
+            a = self expr(r left)
+            self emitLine(n)
+            self line("intptr_t __k_" + id + " = clay_range_bound(" + (a ?? "CLAY_NIL") + ");")
+            z = self expr(r right)
+            self emitLine(n)
+            self line("intptr_t __last_" + id + " = clay_range_bound(" + (z ?? "CLAY_NIL") + ");")
+            wantValue ifTrue { self line("intptr_t __first_" + id + " = __k_" + id + ";") }
+        }
+        b = "__b_" + id
+        self line("if (__k_" + id + " <= __last_" + id + ") for (;;) {")
+        indent = indent + 1
+        self line("int __lp_" + id + " = clay_uw_mark(); (void)__lp_" + id + ";")
+        timesValue ifTrue { self line("ClayValue " + b + " = CLAY_NIL; clay_uw_temp(&" + b + ");") }
+        outer = inlineLoop
+        inlineLoop = lp
+        self inlineBodyP(body, timesValue ifTrue { b } ifFalse { nil }, self countParam(n), "__k_" + id)
+        inlineLoop = outer
+        timesValue ifTrue {
+            self line("clay_uw_reset(__lp_" + id + "); clay_release_val(" + t + "); " + t + " = " + b + ";")
+        }
+        lp contUsed ifTrue { self line("__cont_" + id + ": ;") }
+        self line("if (__k_" + id + " >= __last_" + id + ") break;")
+        self line("__k_" + id + "++;")
+        indent = indent - 1
+        self line("}")
+        (wantValue && kind == 2) ifTrue {
+            self line(t + " = CLAY_VAL(clay_range_new(__first_" + id + ", __last_" + id + ", 1));")
+        }
+        lp brkUsed ifTrue { self line("__brk_" + id + ": ;") }
+        t
     }
 
     inlineWhile(n, wantValue) {
@@ -1809,7 +1972,11 @@ CodeGen = Object clone {
             (self toplevelInFile(nm, s file)) == false
     }
 
-    inlineBody(body, dest) {
+    inlineBody(body, dest) { self inlineBodyP(body, dest, nil, nil) }
+
+    // pname: a counting loop's parameter, a variable of the body set to pinit
+    // (an int expression) each run; nil for none
+    inlineBodyP(body, dest, pname, pinit) {
         sc = InlineScope clone
         sc outer = inlineScope
         sc dest = dest
@@ -1823,6 +1990,15 @@ CodeGen = Object clone {
         mark = "__uw_inl_" + tempCounter toString   // the unwind list before them
         tempCounter = tempCounter + 1
         marked = false
+
+        (pname != nil) ifTrue {
+            self line("int " + mark + " = clay_uw_mark();")
+            marked = true
+            c = self safe(pname)
+            self line("ClayValue " + c + " = clay_int(" + pinit + "); clay_uw_var(&" + c + ");")
+            locals push(pname)
+            sc vars push(pname)
+        }
 
         // the block's variables, nil (and their flags set) each time it runs
         body each { |s|

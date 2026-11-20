@@ -305,6 +305,12 @@ int         clay_cond_test(ClayValue recv, int want_true, int chain);
 ClayValue   clay_cond_ran(ClayValue recv, ClayValue val);
 ClayValue   clay_cond_skipped(ClayValue recv);
 
+/* Inlined counting loops: how many times `n times { ... }` runs (number.c;
+ * like the method, a float is truncated; anything else raises), and a range
+ * bound (range.c: an integer, else a TypeError) */
+intptr_t    clay_times_count(ClayValue recv);
+intptr_t    clay_range_bound(ClayValue v);
+
 /* Invoke a method, setting context before call */
 ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv);
 

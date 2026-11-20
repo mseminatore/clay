@@ -173,6 +173,14 @@ int ast_is_inline_if(AstNode *n);
  * whose breaks and continues can all be jumps (see ast.c) */
 int ast_is_inline_while(AstNode *n);
 
+/* `n times { |i| ... }` (AST_COUNT_TIMES) or `(a..b) each { |i| ... }`
+ * (AST_COUNT_RANGE) that runs in place, else 0; its parameter's name, or
+ * NULL for a block without one */
+#define AST_COUNT_TIMES 1
+#define AST_COUNT_RANGE 2
+int ast_inline_count_kind(AstNode *n);
+const char *ast_count_param(AstNode *n);
+
 /* break and continue in a block literal passed to a message (not ifTrue,
  * ifFalse or the body of a whileTrue/whileFalse: ast_block_is_loop_arg)
  * belong to it. A break ends the message's call with nil: such a send
