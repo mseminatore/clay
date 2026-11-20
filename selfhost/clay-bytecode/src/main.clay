@@ -111,6 +111,8 @@ BcGen = Object clone {
     N_CHAIN_FALSE = 30
     N_IF_RAN = 31
     N_IF_SKIPPED = 32
+    N_SEND_BREAK = 33
+    N_SUPER_SEND_BREAK = 34
 
     MAX_CODE = 65536
     MAX_LOCALS = 256
@@ -161,6 +163,8 @@ BcGen = Object clone {
     inlineLoop = nil       // the inlined loop whose body is being compiled: [top, depth, breaks]
     inMeth = false         // inside a method body (or a block within one)
     isMethChunk = false    // compiling a method body itself
+    chunkLoopOwner = false // compiling a block passed to a message: continue returns nil
+    nextLoopOwner = false  // the block about to be compiled is passed to a message
     slotsKnown = nil       // slot names of the enclosing clone body
     membersKnown = nil     // its slot and method names (bare reads and calls)
 
@@ -757,9 +761,13 @@ BcGen = Object clone {
         (k == "Break" || k == "Continue") ifTrue { return true }
         (k == "Block") ifTrue { return self loopCtlEscapesList(n body) }
         (k == "Send") ifTrue {
-            // a loop catches its body's
-            (self isLoopSend(n)) ifTrue { return self loopCtlEscapes(n recv) }
-            return (self loopCtlEscapes(n recv)) || (self loopCtlEscapesList(n items))
+            // a block literal passed to a message keeps its own: the send
+            // ends on its break, its run ends on its continue
+            (self loopCtlEscapes(n recv)) ifTrue { return true }
+            cond = self isCondMessage(n name)
+            hit = n items find { |a| ((a != nil && a kind == "Block" && cond == false) == false) &&
+                                     (self loopCtlEscapes(a)) }
+            return hit != nil
         }
         (k == "Binary") ifTrue { return (self loopCtlEscapes(n left)) || (self loopCtlEscapes(n right)) }
         (k == "Assign") ifTrue { return self loopCtlEscapes(n value) }
@@ -812,6 +820,87 @@ BcGen = Object clone {
         b = n items at(0)
         c != nil && c kind == "Block" && c params size == 0 && b params size == 0 &&
             (self loopJumpsList(b body))
+    }
+
+    // --- break / continue in a block passed to a message (ast.c owned_ctl) ---
+    // Each belongs to the innermost loop around it: an inlined loop (a jump)
+    // or a block literal passed to a message other than ifTrue/ifFalse and a
+    // whileTrue/whileFalse body (isLoopArg). A break ends that call (nil): such
+    // a send (sendCatchesBreak) tags its blocks and catches it. A continue ends
+    // that run of the block (nil). Raised in a block run inside it (try,
+    // `{ ... } value`), either is caught by the block (blockSubRaises).
+
+    isCondMessage(m) { m == "ifTrue" || m == "ifFalse" }
+
+    isLoopArg(send, arg) {
+        arg != nil && arg kind == "Block" && (self isCondMessage(send name)) == false &&
+            (self isLoopSend(send)) == false
+    }
+
+    sendCatchesBreak(n) {
+        (n == nil || n kind != "Send") ifTrue { return false }
+        (n items find { |a| (self isLoopArg(n, a)) && (self ownedCtlList(a body, "Break", false, false)) }) != nil
+    }
+
+    blockSubRaises(b, kind) {
+        b != nil && b kind == "Block" && (self ownedCtlList(b body, kind, true, false))
+    }
+
+    ownedCtlList(list, kind, subOnly, inSub) {
+        (list == nil) ifTrue { return false }
+        (list find { |n| self ownedCtl(n, kind, subOnly, inSub) }) != nil
+    }
+
+    // a block run where it is written: its statements, in a sub-block
+    ownedCtlSub(b, kind, subOnly) {
+        (b == nil) ifTrue { return false }
+        (b kind != "Block") ifTrue { return self ownedCtl(b, kind, subOnly, true) }
+        self ownedCtlList(b body, kind, subOnly, true)
+    }
+
+    ownedCtl(n, kind, subOnly, inSub) {
+        (n == nil) ifTrue { return false }
+        k = n kind
+        (k == "Break" || k == "Continue") ifTrue { return k == kind && (inSub || (subOnly == false)) }
+        (k == "Send") ifTrue {
+            r = n recv
+            (self isInlineIf(n)) ifTrue {
+                return (self ownedCtl(r, kind, subOnly, inSub)) ||
+                       (self ownedCtlList((n items at(0)) body, kind, subOnly, inSub))
+            }
+            // an inlined loop's body is its own
+            (self isInlineWhile(n)) ifTrue { return self ownedCtlList(r body, kind, subOnly, inSub) }
+            (r != nil && r kind == "Block") ifTrue {
+                (self ownedCtlSub(r, kind, subOnly)) ifTrue { return true }
+            } ifFalse {
+                (self ownedCtl(r, kind, subOnly, inSub)) ifTrue { return true }
+            }
+            cond = self isCondMessage(n name)
+            hit = n items find { |a|
+                isBlock = a != nil && a kind == "Block"
+                (isBlock && cond && (self ownedCtlSub(a, kind, subOnly))) ||
+                    (isBlock == false && (self ownedCtl(a, kind, subOnly, inSub)))
+            }
+            return hit != nil
+        }
+        (k == "TryCatch") ifTrue {
+            return (self ownedCtlSub(n tryBlock, kind, subOnly)) ||
+                   (self ownedCtlSub(n catchBlock, kind, subOnly)) ||
+                   (self ownedCtlSub(n finallyBlock, kind, subOnly))
+        }
+        (k == "Assign") ifTrue { return self ownedCtl(n value, kind, subOnly, inSub) }
+        (k == "Binary") ifTrue {
+            return (self ownedCtl(n left, kind, subOnly, inSub)) || (self ownedCtl(n right, kind, subOnly, inSub))
+        }
+        (k == "Return" || k == "Raise") ifTrue { return self ownedCtl(n expr, kind, subOnly, inSub) }
+        (k == "Array") ifTrue { return self ownedCtlList(n items, kind, subOnly, inSub) }
+        (k == "DictLit") ifTrue { return self ownedCtlList(n vals, kind, subOnly, inSub) }
+        (k == "SlotAssign") ifTrue {
+            return (self ownedCtl(n recv, kind, subOnly, inSub)) || (self ownedCtl(n value, kind, subOnly, inSub))
+        }
+        (k == "Destructure") ifTrue { return self ownedCtl(n value, kind, subOnly, inSub) }
+        (k == "Clone") ifTrue { return self ownedCtl(n recv, kind, subOnly, inSub) }
+        false
     }
 
     jumpBack(target) {
@@ -874,7 +963,7 @@ BcGen = Object clone {
     compileChunk(body, params, caps, isMethod) {
         id = chunkBase + chunkList size
         // a body is all from one file: the file of the block or method node
-        rec = [nil, nil, [], [], [], 0, false, curFile]
+        rec = [nil, nil, [], [], [], 0, false, curFile, false]
         chunkList push(rec)
         pnames = rec at(2)
         params each { |p| pnames push(p name) }
@@ -891,6 +980,11 @@ BcGen = Object clone {
         outerLoop = inlineLoop
         outerInMeth = inMeth
         outerIsMeth = isMethChunk
+        outerLoopOwner = chunkLoopOwner
+        // a block passed to a message: its continue ends this run (nil)
+        chunkLoopOwner = isMethod == false && nextLoopOwner
+        nextLoopOwner = false
+        rec setAt(8, chunkLoopOwner)
 
         buf = []
         bufLines = []
@@ -1026,10 +1120,33 @@ BcGen = Object clone {
         depth = outerDepth
         inMeth = outerInMeth
         isMethChunk = outerIsMeth
+        chunkLoopOwner = outerLoopOwner
         id
     }
 
     // --- expressions ---
+
+    // a send's arguments (a block literal passed here owns its break and
+    // continue) and the send; sel: the message actually sent (`foo(args)`
+    // sent to self is `foo`). A break in one of its blocks ends the call.
+    sendArgs(n, sel) {
+        // classified as the send that is made (isLoopArg)
+        s = n
+        (sel != n name) ifTrue {
+            s = Node make("Send", n line)
+            s name = sel
+            s items = n items
+        }
+        n items each { |a|
+            nextLoopOwner = self isLoopArg(s, a)
+            self expr(a)
+            nextLoopOwner = false
+        }
+        brk = self sendCatchesBreak(s)
+        fn = brk ifTrue { N_SEND_BREAK } ifFalse { N_SEND }
+        n isSuper ifTrue { fn = brk ifTrue { N_SUPER_SEND_BREAK } ifFalse { N_SUPER_SEND } }
+        self native(fn, 2 + n items size)
+    }
 
     expr(n) {
         (n == nil || failed) ifTrue { return nil }
@@ -1049,15 +1166,13 @@ BcGen = Object clone {
              (self selfSlotName(n recv name))) ifTrue {
                 self native(N_LOAD_SELF, 0)
                 self pushString(n recv name)
-                n items each { |a| self expr(a) }
-                return self native(N_SEND, 2 + n items size)
+                return self sendArgs(n, n recv name)
             }
             (chunkDepth > 0 && (self isInlineIf(n))) ifTrue { return self inlineIf(n, true) }
             (chunkDepth > 0 && (self isInlineWhile(n))) ifTrue { return self inlineWhile(n, true) }
             self expr(n recv)
             self pushString(n name)
-            n items each { |a| self expr(a) }
-            return self native(n isSuper ifTrue { N_SUPER_SEND } ifFalse { N_SEND }, 2 + n items size)
+            return self sendArgs(n, n name)
         }
         (k == "Binary") ifTrue { return self binaryExpr(n) }
         (k == "Block") ifTrue { return self blockExpr(n) }
@@ -1313,6 +1428,11 @@ BcGen = Object clone {
         }
         // in an inlined loop's body, break and continue jump
         ((k == "Break" || k == "Continue") && inlineLoop != nil) ifTrue { return self loopJump(k == "Break") }
+        // in a block passed to a message, continue ends this run: nil
+        (k == "Continue" && chunkLoopOwner) ifTrue {
+            self pushNil
+            return self native(N_STOP_VM, 0)
+        }
         (k == "Break") ifTrue {
             self pushString("BreakSignal")
             self native(N_LOAD_GLOBAL, 1)
@@ -1485,7 +1605,8 @@ BcGen = Object clone {
         { i < chunkList size } whileTrue {
             rec = chunkList at(i)
             out push("chunk " + i toString + " locals " + (rec at(5)) toString + " blockReturn " +
-                     ((rec at(6)) ifTrue { "1" } ifFalse { "0" }))
+                     ((rec at(6)) ifTrue { "1" } ifFalse { "0" }) + " loopOwner " +
+                     ((rec at(8)) ifTrue { "1" } ifFalse { "0" }))
             ps = rec at(2)
             (ps size > MAX_PARAMS) ifTrue { ps = ps slice(0, MAX_PARAMS) }
             pl = ["params"]

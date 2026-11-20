@@ -47,6 +47,9 @@ typedef struct {
     int in_function;
     int fn_has_ret_frame; /* method catching non-local returns (see emit_ret_frame) */
     int fn_is_block;     /* emitting a block function (always returns an owned value) */
+    int fn_loop_owner;   /* ... of a block literal passed to a message: its break ends
+                          * that call, its continue this run (ast_block_is_loop_arg) */
+    int next_loop_owner; /* the block about to be emitted is passed to a message */
     int use_slot_recv;   /* top-level block: self is the receiver it was invoked
                           * as a method on (clay_slot_method_self), held in __recv */
     char **fn_vars;

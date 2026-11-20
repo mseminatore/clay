@@ -348,9 +348,10 @@ int ast_is_inline_if(AstNode *n) {
  * runs in place when each break and continue that stops or restarts it can
  * be a jump: the ones among the body's statements, also through the
  * statements of inlined ifTrue/ifFalse blocks that are statements themselves
- * or give the body's value. One anywhere else (in an expression, a nested
- * block, try, ...) is raised as usual and must reach the loop's runtime
- * method, so that loop is sent. Loops in a loop's body catch their own. */
+ * or give the body's value. One anywhere else (in an expression, a try
+ * block, `{ ... } value`, ...) is raised as usual and must reach the loop's
+ * runtime method, so that loop is sent. A block literal passed to a message
+ * (a loop's body among them) keeps its own break and continue. */
 
 /* x whileTrue { ... } / whileFalse with a block literal argument */
 static int is_loop_send(AstNode *n) {
@@ -360,6 +361,10 @@ static int is_loop_send(AstNode *n) {
     if (!m || (strcmp(m, "whileTrue") != 0 && strcmp(m, "whileFalse") != 0)) return 0;
     AstNode *b = n->as.send.args.items[0];
     return b && b->type == NODE_BLOCK;
+}
+
+static int is_cond_message(const char *m) {
+    return m && (strcmp(m, "ifTrue") == 0 || strcmp(m, "ifFalse") == 0);
 }
 
 static int loop_ctl_escapes(AstNode *n);
@@ -379,10 +384,18 @@ static int loop_ctl_escapes(AstNode *n) {
             return 1;
         case NODE_BLOCK:
             return loop_ctl_escapes_list(&n->as.block.body);
-        case NODE_SEND:
-            if (is_loop_send(n))   /* the loop catches its body's */
-                return loop_ctl_escapes(n->as.send.receiver);
-            return loop_ctl_escapes(n->as.send.receiver) || loop_ctl_escapes_list(&n->as.send.args);
+        case NODE_SEND: {
+            /* a block literal passed to a message keeps its own: the send
+             * ends on its break, its run ends on its continue */
+            if (loop_ctl_escapes(n->as.send.receiver)) return 1;
+            int cond = is_cond_message(n->as.send.message);
+            for (int i = 0; i < n->as.send.args.count; i++) {
+                AstNode *a = n->as.send.args.items[i];
+                if (a && a->type == NODE_BLOCK && !cond) continue;
+                if (loop_ctl_escapes(a)) return 1;
+            }
+            return 0;
+        }
         case NODE_BINARY:
             return loop_ctl_escapes(n->as.binary.left) || loop_ctl_escapes(n->as.binary.right);
         case NODE_ASSIGN:
@@ -444,6 +457,113 @@ int ast_is_inline_while(AstNode *n) {
     AstNode *body = n->as.send.args.items[0];
     return cond && cond->type == NODE_BLOCK && cond->as.block.params.count == 0 &&
            body->as.block.params.count == 0 && loop_jumps_list(&body->as.block.body);
+}
+
+/* --- break / continue in a block passed to a message ---
+ * Each break and continue belongs to the innermost loop around it: an
+ * inlined whileTrue/whileFalse (a jump), or a block literal passed to a
+ * message other than ifTrue/ifFalse. A break ends that message's call (nil,
+ * unless the method catches it itself, as each, times and whileTrue do); a
+ * continue ends that run of the block (nil). The blocks of ifTrue/ifFalse
+ * and try/catch and a block a message is sent to run where they are, so
+ * theirs belong to the code around them. Called on such a block's body:
+ * the bodies of inlined ifTrue/ifFalse and whileTrue conditions are its own
+ * code; any other block run from it is a sub-block (sub_only counts only
+ * the ones in those, which have to be raised). */
+static int owned_ctl(AstNode *n, int kind, int sub_only, int in_sub);
+
+static int owned_ctl_list(NodeList *l, int kind, int sub_only, int in_sub) {
+    for (int i = 0; i < l->count; i++)
+        if (owned_ctl(l->items[i], kind, sub_only, in_sub)) return 1;
+    return 0;
+}
+
+/* a block run where it is written: its statements, in a sub-block */
+static int owned_ctl_sub(AstNode *b, int kind, int sub_only) {
+    if (!b) return 0;
+    if (b->type != NODE_BLOCK) return owned_ctl(b, kind, sub_only, 1);
+    return owned_ctl_list(&b->as.block.body, kind, sub_only, 1);
+}
+
+static int owned_ctl(AstNode *n, int kind, int sub_only, int in_sub) {
+    if (!n) return 0;
+    switch (n->type) {
+        case NODE_BREAK:
+        case NODE_CONTINUE:
+            return (int)n->type == kind && (in_sub || !sub_only);
+        case NODE_SEND: {
+            AstNode *r = n->as.send.receiver;
+            if (ast_is_inline_if(n))
+                return owned_ctl(r, kind, sub_only, in_sub) ||
+                       owned_ctl_list(&n->as.send.args.items[0]->as.block.body, kind, sub_only, in_sub);
+            if (ast_is_inline_while(n))   /* the body is the loop's */
+                return owned_ctl_list(&r->as.block.body, kind, sub_only, in_sub);
+            if (r && r->type == NODE_BLOCK) {
+                if (owned_ctl_sub(r, kind, sub_only)) return 1;
+            } else if (owned_ctl(r, kind, sub_only, in_sub)) {
+                return 1;
+            }
+            int cond = is_cond_message(n->as.send.message);
+            for (int i = 0; i < n->as.send.args.count; i++) {
+                AstNode *a = n->as.send.args.items[i];
+                if (a && a->type == NODE_BLOCK) {
+                    if (cond && owned_ctl_sub(a, kind, sub_only)) return 1;
+                } else if (owned_ctl(a, kind, sub_only, in_sub)) {
+                    return 1;
+                }
+            }
+            return 0;
+        }
+        case NODE_TRY_CATCH:
+            return owned_ctl_sub(n->as.try_catch.try_block, kind, sub_only) ||
+                   owned_ctl_sub(n->as.try_catch.catch_block, kind, sub_only) ||
+                   owned_ctl_sub(n->as.try_catch.finally_block, kind, sub_only);
+        case NODE_ASSIGN:
+            return owned_ctl(n->as.assign.value, kind, sub_only, in_sub);
+        case NODE_BINARY:
+            return owned_ctl(n->as.binary.left, kind, sub_only, in_sub) ||
+                   owned_ctl(n->as.binary.right, kind, sub_only, in_sub);
+        case NODE_RETURN:
+            return owned_ctl(n->as.return_stmt.expr, kind, sub_only, in_sub);
+        case NODE_ARRAY_LIT:
+            return owned_ctl_list(&n->as.array_lit.elements, kind, sub_only, in_sub);
+        case NODE_DICT_LIT:
+            return owned_ctl_list(&n->as.dict_lit.values, kind, sub_only, in_sub);
+        case NODE_RAISE:
+            return owned_ctl(n->as.raise.expr, kind, sub_only, in_sub);
+        case NODE_SLOT_ASSIGN:
+            return owned_ctl(n->as.slot_assign.receiver, kind, sub_only, in_sub) ||
+                   owned_ctl(n->as.slot_assign.value, kind, sub_only, in_sub);
+        case NODE_DESTRUCTURE:
+            return owned_ctl(n->as.destructure.value, kind, sub_only, in_sub);
+        case NODE_CLONE:
+            return owned_ctl(n->as.clone.proto, kind, sub_only, in_sub);
+        default:
+            return 0;   /* a stored block, method bodies, literals, ... */
+    }
+}
+
+/* The body of a whileTrue/whileFalse sent as a message keeps the plain
+ * signals, which Block's whileTrue catches (a break gives the last body
+ * value, as an inlined loop does) */
+int ast_block_is_loop_arg(AstNode *send, AstNode *arg) {
+    return send && send->type == NODE_SEND && arg && arg->type == NODE_BLOCK &&
+           !is_cond_message(send->as.send.message) && !is_loop_send(send);
+}
+
+int ast_send_catches_break(AstNode *n) {
+    if (!n || n->type != NODE_SEND) return 0;
+    for (int i = 0; i < n->as.send.args.count; i++) {
+        AstNode *a = n->as.send.args.items[i];
+        if (ast_block_is_loop_arg(n, a) &&
+            owned_ctl_list(&a->as.block.body, NODE_BREAK, 0, 0)) return 1;
+    }
+    return 0;
+}
+
+int ast_block_sub_raises(AstNode *block, int kind) {
+    return block && block->type == NODE_BLOCK &&
+           owned_ctl_list(&block->as.block.body, kind, 1, 0);
 }
 
 /* --- Non-local return analysis ---

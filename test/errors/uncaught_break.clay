@@ -1,5 +1,10 @@
-// A break that gets past every loop at run time: here a block literal
-// passed to a method that just calls it (Ruby raises LocalJumpError)
-Runner = Object clone { run(b) { b value } }
-Runner run({ break })
+// A break ends the call its block was passed to. A block kept and run after
+// that call returned has nothing to end (Ruby raises LocalJumpError)
+Keeper = Object clone {
+    saved = nil
+    keep(b) { saved = b; "kept" }
+    run() { saved value }
+}
+Keeper keep({ break })
+Keeper run
 "not reached" println

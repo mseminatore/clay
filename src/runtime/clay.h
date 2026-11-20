@@ -203,7 +203,9 @@ struct ClayObject {
             ClayMethodFunc func;
             ClayValue     *env;
             int            env_size;
-            int            env_are_cells; /* 1 = env entries are ClayCell pointers */
+            unsigned       env_are_cells : 1; /* 1 = env entries are ClayCell pointers */
+            unsigned       break_id : 31;     /* nonzero: its break ends the call with
+                                               * this id (clay_tag_blocks) */
             ClayObject    *outer_self;    /* VM blocks: self of the method that made
                                            * them (retained; NULL at top level) */
         } block;
@@ -364,6 +366,11 @@ ClayValue   clay_send_owned(ClayValue receiver, const char *selector, int argc, 
 ClayValue   clay_self_get(ClayValue self, const char *name);  /* bare `name` in a method, owned */
 ClayValue   clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
                                   const char *selector, int argc, ClayValue *argv);
+/* The same, for a send whose block literal has a break: nil if one ends it */
+ClayValue   clay_send_owned_catch_break(ClayValue receiver, const char *selector,
+                                        int argc, ClayValue *argv);
+ClayValue   clay_send_super_owned_catch_break(ClayValue receiver, ClayObject *defining_obj,
+                                              const char *selector, int argc, ClayValue *argv);
 
 /* Used by generated functions on return: `rv` holds a reference owned by the
  * function; if it is the receiver (or, for methods, an argument), give that
@@ -548,6 +555,7 @@ typedef struct ClayTryFrame {
     int trace_depth;
     int trace_overflow;
     ClayValue return_id;    /* nonzero: catches non-local returns for this method call */
+    int break_id;           /* nonzero: catches the break of blocks tagged with it */
     int unwind_depth;       /* clay_unwind_list count when pushed */
     unsigned char engine_state[CLAY_TRY_ENGINE_STATE_SIZE];
 } ClayTryFrame;
@@ -591,6 +599,22 @@ int  clay_is_control_signal(ClayValue error);
 #define CLAY_SIGNAL_BREAK    1
 #define CLAY_SIGNAL_CONTINUE 2
 int  clay_loop_signal(ClayValue error);
+/* Is error the given plain signal (CLAY_SIGNAL_BREAK or _CONTINUE; not a
+ * break tagged with an id)? If so it is consumed; otherwise the caller
+ * re-raises it. */
+int  clay_take_signal(ClayValue error, int which);
+/* A break in a block literal passed to a message ends that call, with nil.
+ * The send gets a new id (clay_break_id_next), tags the blocks it passes
+ * that have none (clay_tag_blocks), and runs in a frame that catches the
+ * break carrying its id (clay_catch_break: 1 if one ended fn(ctx), 0 if it
+ * returned; other errors pass through). The block raises it with
+ * clay_raise_break(its break_id); with no id that is the plain signal (a
+ * whileTrue body's, which Block's whileTrue catches). Loop methods catch
+ * only plain ones (clay_loop_signal). */
+int  clay_break_id_next(void);
+void clay_tag_blocks(int id, int argc, ClayValue *argv);
+int  clay_catch_break(void (*fn)(void *), void *ctx, int id);
+void clay_raise_break(int id);   /* does not return */
 
 /* Non-local return: `return v` inside a block returns from the method the
  * block was written in. Each such method activation gets an id; the block

@@ -129,6 +129,8 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
      * longjmp propagates to the caller's try handler. */
     ClayValue raised_err = CLAY_NIL;
     int had_exception = 0;
+    int continued = 0;
+    int break_id = 0;      /* re-raise as the break that ends this block's call */
 
     ClayTryFrame _tf;
     if (clay_try_push(&_tf) == 0) {
@@ -153,6 +155,15 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
         /* Exception caught — save it, restore VM state, then re-raise */
         raised_err = clay_error_stack.current_error;
         had_exception = 1;
+        /* In a block passed to a message, a continue (raised here, or in a
+         * try block, say) ends this run of it, with nil; a plain break
+         * becomes the one that ends the call it was passed to */
+        if (chunk->loop_owner && clay_take_signal(raised_err, CLAY_SIGNAL_CONTINUE)) {
+            had_exception = 0;
+            continued = 1;
+        } else if (self->as.block.break_id && clay_take_signal(raised_err, CLAY_SIGNAL_BREAK)) {
+            break_id = (int)self->as.block.break_id;
+        }
     }
 
     /* Write back captured values from locals to env (by-reference semantics) */
@@ -166,7 +177,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     /* Get return value (last value on stack) */
     ClayValue retval = CLAY_NIL;
     clayvm_value_t retval_vm = CLAYVM_NIL_VAL;
-    if (!had_exception && g_vm->sp > (int)base) {
+    if (!had_exception && !continued && g_vm->sp > (int)base) {
         retval_vm = g_vm->stack[g_vm->sp - 1];
         retval = vm_to_clay(retval_vm);
         vm_retain_val(retval_vm); /* keep retval alive through cleanup */
@@ -190,6 +201,7 @@ static ClayValue bc_block_trampoline(ClayObject *self, int argc, ClayValue *argv
     g_method_self = saved_method_self;
 
     /* Re-raise after VM state is safely restored */
+    if (break_id) clay_raise_break(break_id);
     if (had_exception) {
         clay_raise(raised_err);
         return CLAY_NIL; /* unreachable */
@@ -1403,6 +1415,46 @@ static void vm_regs_restore(clayvm_vm_t *vm, const VmTryRegs *st) {
     vm->frame_count = st->frame_count;
 }
 
+/* send_break / super_send_break: a send whose block literal has a break
+ * (ast_send_catches_break). A break ending the call gives nil. On that path
+ * the try hooks put sp back over the operands (as the send left them during
+ * the call), which are released here. */
+typedef struct {
+    clayvm_vm_t *vm;
+    int argc;
+    int super;
+} VmBreakSend;
+
+
+static void vm_break_send(void *p) {
+    VmBreakSend *s = (VmBreakSend *)p;
+    if (s->super) native_super_send_fn(s->vm, s->argc);
+    else native_send_fn(s->vm, s->argc);
+}
+
+static int vm_send_catching_break(clayvm_vm_t *vm, int argc, int super) {
+    int bottom = vm->sp - argc;
+    int id = clay_break_id_next();
+    for (int i = bottom + 2; i < vm->sp; i++) {   /* the arguments */
+        ClayValue a = vm_to_clay(vm->stack[i]);
+        clay_tag_blocks(id, 1, &a);
+    }
+    VmBreakSend s = { vm, argc, super };
+    if (clay_catch_break(vm_break_send, &s, id)) {
+        while (vm->sp > bottom) vm_release_val(vm->stack[--vm->sp]);
+        clayvm_vm_push(vm, CLAYVM_NIL_VAL);
+    }
+    return 0;
+}
+
+static int native_send_break_fn(clayvm_vm_t *vm, int argc) {
+    return vm_send_catching_break(vm, argc, 0);
+}
+
+static int native_super_send_break_fn(clayvm_vm_t *vm, int argc) {
+    return vm_send_catching_break(vm, argc, 1);
+}
+
 /* native_try_catch(try_block, catch_block, finally_block) — either of the
  * last two may be nil. finally always runs: after the try block, after the
  * catch block, and before an error leaves (an error with no catch, an error
@@ -1814,6 +1866,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_chain_false = clayvm_native_register(&vm->natives, "chain_false", native_chain_false_fn, 1);
     bc->native_if_ran = clayvm_native_register(&vm->natives, "if_ran", native_if_ran_fn, 2);
     bc->native_if_skipped = clayvm_native_register(&vm->natives, "if_skipped", native_if_skipped_fn, 1);
+    bc->native_send_break = clayvm_native_register(&vm->natives, "send_break", native_send_break_fn, -1);
+    bc->native_super_send_break = clayvm_native_register(&vm->natives, "super_send_break", native_super_send_break_fn, -1);
 
     /* Pre-register Clay builtin prototypes as globals */
     struct { const char *name; ClayObject *obj; } builtins[] = {
@@ -1967,8 +2021,8 @@ static void vm_check_base(int base, int have, const char *what) {
     }
 }
 
-/* [code, lines, paramNames, captureNames, captureSlots, localCount, hasBlockReturn, file]
- * (file, the body's source path, is optional) */
+/* [code, lines, paramNames, captureNames, captureSlots, localCount, hasBlockReturn, file,
+ *  loopOwner] (file, the body's source path, and loopOwner are optional) */
 static BcChunk *vm_load_chunk(ClayValue v) {
     ClayObject *a = vm_arg_array(v, "a chunk");
     if (clay_array_size(a) < 7)
@@ -1992,6 +2046,7 @@ static BcChunk *vm_load_chunk(ClayValue v) {
     chunk->has_block_return = clay_array_at(a, 6) == CLAY_TRUE;
     if (clay_array_size(a) > 7 && CLAY_IS_TYPE(clay_array_at(a, 7), CLAY_TYPE_STRING))
         chunk->file = clay_intern_file(clay_string_data(CLAY_OBJ(clay_array_at(a, 7))));
+    chunk->loop_owner = clay_array_size(a) > 8 && clay_array_at(a, 8) == CLAY_TRUE;
     return chunk;
 }
 

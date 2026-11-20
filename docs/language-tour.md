@@ -503,8 +503,44 @@ inside a top-level block, `(x > 1) ifTrue { return "big" }` ends just the
 }
 ```
 
-Works with `times`, `each`, `whileTrue`, and `whileFalse`, and in a block
-literal passed to any other message, such as an iterator you write yourself.
+This works the same with `times`, `whileTrue`, `whileFalse`, and any other
+message you pass a block literal to, including methods you write yourself.
+As in Ruby, a `break` in such a block ends the call it was passed to, and that
+call gives `nil`. A `continue` ends just that run of the block, which gives
+`nil` too:
+
+```clay
+evens = [1, 2, 3, 4, 5] map { |n|
+  (n > 4) ifTrue { break }
+  n * 2
+}
+evens println             // nil: the break ended map
+
+halves = [1, 2, 3, 4] map { |n|
+  (n % 2 == 1) ifTrue { continue }
+  n / 2
+}
+halves println            // [nil, 1, nil, 2]
+```
+
+That holds however the method runs the block, so `break` stops an iterator
+you write, even a recursive one:
+
+```clay
+Tree = Object clone {
+  walk(t, b) {
+    t each { |c| (c type == "Array") ifTrue { self walk(c, b) } ifFalse { b value(c) } }
+    "walked"
+  }
+}
+Tree walk([1, [2, [3, 4]], 5], { |x|
+  (x == 3) ifTrue { break }
+  x println               // prints 1, 2
+})
+```
+
+The exception is a `whileTrue` or `whileFalse` loop: a `break` there gives the
+value of the body's last complete run (see [While loops](#while-loops)).
 
 As in most languages, a `break` or `continue` belongs to the loop it is
 written in. It can go in a loop's body or in a block literal passed to a
@@ -530,8 +566,9 @@ done = { |n| n > 2 }
 }
 ```
 
-If a block literal is passed to a method that calls it outside any loop, its
-`break` ends the program with ``BreakSignal: 'break' outside a loop``.
+A method can also keep a block and run it after the call it was passed to has
+returned. A `break` in it then has no call left to end, so it raises
+a `RuntimeError` (`'break' in a block whose call has already returned`).
 
 ## Imports
 
@@ -696,6 +733,9 @@ i = 0
   i = i + 1
 }
 ```
+
+The loop's value is the value of the body's last complete run (`nil` if it
+never ran), also when a `break` ends it.
 
 In methods and blocks, a loop whose two blocks are written right there is
 compiled in place, like `ifTrue`: no blocks are made and no messages sent, and

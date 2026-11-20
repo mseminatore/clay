@@ -172,6 +172,17 @@ int ast_is_inline_if(AstNode *n);
 /* `{ c } whileTrue { ... }` / whileFalse with parameterless block literals,
  * whose breaks and continues can all be jumps (see ast.c) */
 int ast_is_inline_while(AstNode *n);
+
+/* break and continue in a block literal passed to a message (not ifTrue,
+ * ifFalse or the body of a whileTrue/whileFalse: ast_block_is_loop_arg)
+ * belong to it. A break ends the message's call with nil: such a send
+ * (ast_send_catches_break) tags its blocks with an id and catches the break
+ * carrying it. A continue ends that run of the block with nil. Either one
+ * raised in a block run inside it (a try block, `{ ... } value`) is caught
+ * by the block: ast_block_sub_raises(block, NODE_BREAK or NODE_CONTINUE). */
+int ast_block_is_loop_arg(AstNode *send, AstNode *arg);
+int ast_send_catches_break(AstNode *n);
+int ast_block_sub_raises(AstNode *block, int kind);
 int ast_block_contains_return(AstNode *block);
 
 #endif /* CLAY_AST_H */

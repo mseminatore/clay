@@ -1150,7 +1150,8 @@ static int dump_bytecode(const char *filename) {
     printf("\n");
     for (int c = 0; c < bc.chunk_count; c++) {
         BcChunk *ch = bc.chunks[c];
-        printf("chunk %d locals %d blockReturn %d\n", c, ch->local_count, ch->has_block_return);
+        printf("chunk %d locals %d blockReturn %d loopOwner %d\n", c, ch->local_count,
+               ch->has_block_return, ch->loop_owner);
         printf("params");
         for (int i = 0; i < ch->param_count && i < 16; i++) printf(" %s", ch->param_names[i]);
         printf("\ncaptures");

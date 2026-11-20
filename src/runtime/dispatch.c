@@ -380,6 +380,40 @@ ClayValue clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
                       receiver, argc, argv);
 }
 
+typedef struct {
+    ClayValue receiver;
+    ClayObject *defining_obj;   /* super send: lookup starts above it */
+    const char *selector;
+    int argc;
+    ClayValue *argv;
+    ClayValue result;
+} BreakSend;
+
+static void break_send(void *p) {
+    BreakSend *s = (BreakSend *)p;
+    s->result = s->defining_obj
+        ? clay_send_super_owned(s->receiver, s->defining_obj, s->selector, s->argc, s->argv)
+        : clay_send_owned(s->receiver, s->selector, s->argc, s->argv);
+}
+
+static ClayValue send_catching_break(BreakSend *s) {
+    int id = clay_break_id_next();
+    clay_tag_blocks(id, s->argc, s->argv);
+    return clay_catch_break(break_send, s, id) ? CLAY_NIL : s->result;
+}
+
+ClayValue clay_send_owned_catch_break(ClayValue receiver, const char *selector,
+                                      int argc, ClayValue *argv) {
+    BreakSend s = { receiver, NULL, selector, argc, argv, CLAY_NIL };
+    return send_catching_break(&s);
+}
+
+ClayValue clay_send_super_owned_catch_break(ClayValue receiver, ClayObject *defining_obj,
+                                            const char *selector, int argc, ClayValue *argv) {
+    BreakSend s = { receiver, defining_obj, selector, argc, argv, CLAY_NIL };
+    return send_catching_break(&s);
+}
+
 ClayValue clay_return_value(ClayValue rv, ClayValue self, int argc, ClayValue *argv) {
     if (!CLAY_IS_OBJ(rv) || rv == CLAY_TRUE || rv == CLAY_FALSE) return rv;
     int aliased = (rv == self);

@@ -1,1 +1,4 @@
-BreakSignal: 'break' outside a loop
+test/errors/uncaught_break.clay:8: RuntimeError: 'break' in a block whose call has already returned
+  at test/errors/uncaught_break.clay:8 in block
+  at test/errors/uncaught_break.clay:6 in run
+  at test/errors/uncaught_break.clay:9 at top level

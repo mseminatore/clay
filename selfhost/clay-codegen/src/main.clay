@@ -216,6 +216,7 @@ FnDef = Object clone {
     cloneSlots = nil
     cloneMembers = nil      // its clone body's slot and method names
     inMethodCtx = false
+    loopOwner = false       // a block literal passed to a message (fnLoopOwner)
 
     make(fname, ctx, n, caps, inCtx) {
         d = self clone
@@ -274,6 +275,9 @@ CodeGen = Object clone {
     useSlotRecv = false
     fnIsBlock = false
     fnHasRetFrame = false
+    fnLoopOwner = false     // ... of a block passed to a message: break ends that call,
+                            // continue this run (isLoopArg)
+    nextLoopOwner = false   // the block about to be emitted is passed to a message
     fnVars = nil
     fnCells = nil
     superProto = nil
@@ -324,6 +328,8 @@ CodeGen = Object clone {
         useSlotRecv = false
         fnIsBlock = false
         fnHasRetFrame = false
+        fnLoopOwner = false
+        nextLoopOwner = false
         fnVars = []
         fnCells = []
         superProto = nil
@@ -874,25 +880,32 @@ CodeGen = Object clone {
         }
         recv = self expr(n recv)
         (recv == nil) ifTrue { return nil }
+        // a block literal passed here owns its break and continue
         args = []
-        n items each { |a| args push(self expr(a)) }
+        n items each { |a|
+            nextLoopOwner = self isLoopArg(n, a)
+            args push(self expr(a))
+            nextLoopOwner = false
+        }
+        // a break in one of its blocks ends the call (nil)
+        brk = (self sendCatchesBreak(n)) ifTrue { "_catch_break" } ifFalse { "" }
         t = self tempName
         self emitLine(n)
         argc = args size
         list = "{" + (args map { |a| a ?? "(null)" } join(", ")) + "}"
         (n isSuper && superProto != nil) ifTrue {
             (argc == 0) ifTrue {
-                self line("ClayValue " + t + " = clay_send_super_owned(" + recv + ", CLAY_OBJ(" + superProto +
-                          "), \"" + n name + "\", 0, NULL);")
+                self line("ClayValue " + t + " = clay_send_super_owned" + brk + "(" + recv + ", CLAY_OBJ(" +
+                          superProto + "), \"" + n name + "\", 0, NULL);")
             } ifFalse {
-                self line("ClayValue " + t + " = clay_send_super_owned(" + recv + ", CLAY_OBJ(" + superProto +
-                          "), \"" + n name + "\", " + argc toString + ", (ClayValue[])" + list + ");")
+                self line("ClayValue " + t + " = clay_send_super_owned" + brk + "(" + recv + ", CLAY_OBJ(" +
+                          superProto + "), \"" + n name + "\", " + argc toString + ", (ClayValue[])" + list + ");")
             }
         } ifFalse {
             (argc == 0) ifTrue {
                 self line("ClayValue " + t + " = clay_send_owned(" + recv + ", \"" + n name + "\", 0, NULL);")
             } ifFalse {
-                self line("ClayValue " + t + " = clay_send_owned(" + recv + ", \"" + n name + "\", " +
+                self line("ClayValue " + t + " = clay_send_owned" + brk + "(" + recv + ", \"" + n name + "\", " +
                           argc toString + ", (ClayValue[])" + list + ");")
             }
         }
@@ -1094,6 +1107,8 @@ CodeGen = Object clone {
     }
 
     block(n) {
+        owner = nextLoopOwner
+        nextLoopOwner = false
         fname = n fnName
         (fname == nil) ifTrue {
             Console print("codegen: block has no pre-assigned name\n")
@@ -1103,6 +1118,7 @@ CodeGen = Object clone {
         caps = []
         n body each { |s| self scan(s, params, caps) }
         md = FnDef make(fname, nil, n, caps, methodCtx)
+        md loopOwner = owner
         collected push(md)
         (inMethod && knownMembers != nil) ifTrue {
             md cloneSlots = knownSlots
@@ -1431,6 +1447,20 @@ CodeGen = Object clone {
             self emitLine(n)
             return self loopJump(inlineLoop, k == "Break")
         }
+        // in a block passed to a message, break ends that call and continue
+        // ends this run (nil)
+        (k == "Break" && fnLoopOwner) ifTrue {
+            self emitLine(n)
+            self line("clay_raise_break((int)self->as.block.break_id);")
+            return nil
+        }
+        (k == "Continue" && fnLoopOwner) ifTrue {
+            self emitLine(n)
+            self rvSet("CLAY_NIL")
+            self inlineExitReleases
+            self functionExit
+            return nil
+        }
         (k == "Break") ifTrue {
             self emitLine(n)
             self line("clay_raise(CLAY_VAL(clay_BreakSignal));")
@@ -1541,9 +1571,13 @@ CodeGen = Object clone {
         (k == "Break" || k == "Continue") ifTrue { return true }
         (k == "Block") ifTrue { return self loopCtlEscapesList(n body) }
         (k == "Send") ifTrue {
-            // a loop catches its body's
-            (self isLoopSend(n)) ifTrue { return self loopCtlEscapes(n recv) }
-            return (self loopCtlEscapes(n recv)) || (self loopCtlEscapesList(n items))
+            // a block literal passed to a message keeps its own: the send
+            // ends on its break, its run ends on its continue
+            (self loopCtlEscapes(n recv)) ifTrue { return true }
+            cond = self isCondMessage(n name)
+            hit = n items find { |a| ((a != nil && a kind == "Block" && cond == false) == false) &&
+                                     (self loopCtlEscapes(a)) }
+            return hit != nil
         }
         (k == "Binary") ifTrue { return (self loopCtlEscapes(n left)) || (self loopCtlEscapes(n right)) }
         (k == "Assign") ifTrue { return self loopCtlEscapes(n value) }
@@ -1596,6 +1630,87 @@ CodeGen = Object clone {
         b = n items at(0)
         c != nil && c kind == "Block" && c params size == 0 && b params size == 0 &&
             (self loopJumpsList(b body))
+    }
+
+    // --- break / continue in a block passed to a message (ast.c owned_ctl) ---
+    // Each belongs to the innermost loop around it: an inlined loop (a jump)
+    // or a block literal passed to a message other than ifTrue/ifFalse and a
+    // whileTrue/whileFalse body (isLoopArg). A break ends that call (nil): such
+    // a send (sendCatchesBreak) tags its blocks and catches it. A continue ends
+    // that run of the block (nil). Raised in a block run inside it (try,
+    // `{ ... } value`), either is caught by the block (blockSubRaises).
+
+    isCondMessage(m) { m == "ifTrue" || m == "ifFalse" }
+
+    isLoopArg(send, arg) {
+        arg != nil && arg kind == "Block" && (self isCondMessage(send name)) == false &&
+            (self isLoopSend(send)) == false
+    }
+
+    sendCatchesBreak(n) {
+        (n == nil || n kind != "Send") ifTrue { return false }
+        (n items find { |a| (self isLoopArg(n, a)) && (self ownedCtlList(a body, "Break", false, false)) }) != nil
+    }
+
+    blockSubRaises(b, kind) {
+        b != nil && b kind == "Block" && (self ownedCtlList(b body, kind, true, false))
+    }
+
+    ownedCtlList(list, kind, subOnly, inSub) {
+        (list == nil) ifTrue { return false }
+        (list find { |n| self ownedCtl(n, kind, subOnly, inSub) }) != nil
+    }
+
+    // a block run where it is written: its statements, in a sub-block
+    ownedCtlSub(b, kind, subOnly) {
+        (b == nil) ifTrue { return false }
+        (b kind != "Block") ifTrue { return self ownedCtl(b, kind, subOnly, true) }
+        self ownedCtlList(b body, kind, subOnly, true)
+    }
+
+    ownedCtl(n, kind, subOnly, inSub) {
+        (n == nil) ifTrue { return false }
+        k = n kind
+        (k == "Break" || k == "Continue") ifTrue { return k == kind && (inSub || (subOnly == false)) }
+        (k == "Send") ifTrue {
+            r = n recv
+            (self isInlineIf(n)) ifTrue {
+                return (self ownedCtl(r, kind, subOnly, inSub)) ||
+                       (self ownedCtlList((n items at(0)) body, kind, subOnly, inSub))
+            }
+            // an inlined loop's body is its own
+            (self isInlineWhile(n)) ifTrue { return self ownedCtlList(r body, kind, subOnly, inSub) }
+            (r != nil && r kind == "Block") ifTrue {
+                (self ownedCtlSub(r, kind, subOnly)) ifTrue { return true }
+            } ifFalse {
+                (self ownedCtl(r, kind, subOnly, inSub)) ifTrue { return true }
+            }
+            cond = self isCondMessage(n name)
+            hit = n items find { |a|
+                isBlock = a != nil && a kind == "Block"
+                (isBlock && cond && (self ownedCtlSub(a, kind, subOnly))) ||
+                    (isBlock == false && (self ownedCtl(a, kind, subOnly, inSub)))
+            }
+            return hit != nil
+        }
+        (k == "TryCatch") ifTrue {
+            return (self ownedCtlSub(n tryBlock, kind, subOnly)) ||
+                   (self ownedCtlSub(n catchBlock, kind, subOnly)) ||
+                   (self ownedCtlSub(n finallyBlock, kind, subOnly))
+        }
+        (k == "Assign") ifTrue { return self ownedCtl(n value, kind, subOnly, inSub) }
+        (k == "Binary") ifTrue {
+            return (self ownedCtl(n left, kind, subOnly, inSub)) || (self ownedCtl(n right, kind, subOnly, inSub))
+        }
+        (k == "Return" || k == "Raise") ifTrue { return self ownedCtl(n expr, kind, subOnly, inSub) }
+        (k == "Array") ifTrue { return self ownedCtlList(n items, kind, subOnly, inSub) }
+        (k == "DictLit") ifTrue { return self ownedCtlList(n vals, kind, subOnly, inSub) }
+        (k == "SlotAssign") ifTrue {
+            return (self ownedCtl(n recv, kind, subOnly, inSub)) || (self ownedCtl(n value, kind, subOnly, inSub))
+        }
+        (k == "Destructure") ifTrue { return self ownedCtl(n value, kind, subOnly, inSub) }
+        (k == "Clone") ifTrue { return self ownedCtl(n recv, kind, subOnly, inSub) }
+        false
     }
 
     // break / continue of the inlined loop being emitted: release what the
@@ -1907,11 +2022,37 @@ CodeGen = Object clone {
         } ifFalse {
             savedRecv = useSlotRecv
             savedIsBlock = fnIsBlock
+            savedLoopOwner = fnLoopOwner
+            savedRetFrame = fnHasRetFrame
             fnIsBlock = true
+            fnLoopOwner = d loopOwner
+            fnHasRetFrame = false
             useSlotRecv = (d captures contains("_method_self")) == false
             out push("    CLAY_STACK_CHECK();\n")
             out push("    clay_trace_enter(CLAY_FRAME_BLOCK);\n")
             out push("    int __uw = clay_uw_mark();\n")
+            // a block passed to a message: a continue raised in a block run
+            // inside it ends this run with nil, a plain break there becomes
+            // the one that ends its call (before any locals exist)
+            fnLoopOwner ifTrue {
+                subCont = self blockSubRaises(n, "Continue")
+                subBrk = self blockSubRaises(n, "Break")
+                (subCont || subBrk) ifTrue {
+                    out push("    ClayTryFrame __sig_tf;\n")
+                    out push("    if (clay_try_push(&__sig_tf) != 0) {\n")
+                    out push("        ClayValue __sig = clay_error_stack.current_error;\n")
+                    subCont ifTrue {
+                        out push("        if (clay_take_signal(__sig, CLAY_SIGNAL_CONTINUE)) return CLAY_NIL;\n")
+                    }
+                    subBrk ifTrue {
+                        out push("        if (clay_take_signal(__sig, CLAY_SIGNAL_BREAK)) " +
+                                 "clay_raise_break((int)self->as.block.break_id);\n")
+                    }
+                    out push("        clay_raise(__sig);\n")
+                    out push("    }\n")
+                    fnHasRetFrame = true
+                }
+            }
             useSlotRecv ifTrue { out push("    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n") }
             blockBoxed = boxed size
             i = 0
@@ -1942,6 +2083,8 @@ CodeGen = Object clone {
             indent = savedIndent
             useSlotRecv = savedRecv
             fnIsBlock = savedIsBlock
+            fnLoopOwner = savedLoopOwner
+            fnHasRetFrame = savedRetFrame
             boxed = boxed slice(0, blockBoxed)
         }
 

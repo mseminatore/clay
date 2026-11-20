@@ -695,6 +695,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     int saved_scope_depth = bc->scope_depth;
     int saved_in_method = bc->in_method;
     int saved_chunk_is_method = bc->chunk_is_method;
+    int saved_chunk_loop_owner = bc->chunk_loop_owner;
     int saved_max_local_count = bc->max_local_count;
     void *saved_inline_exit = bc->inline_exit;
     void *saved_inline_loop = bc->inline_loop;
@@ -717,6 +718,10 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->len = 0;
     if (is_method) bc->in_method = 1;
     bc->chunk_is_method = is_method;
+    /* a block passed to a message: its continue ends this run (nil) */
+    bc->chunk_loop_owner = !is_method && bc->next_loop_owner;
+    bc->next_loop_owner = 0;
+    chunk->loop_owner = bc->chunk_loop_owner;
 
     /* Register params as locals (slot 0, 1, ...) */
     for (int i = 0; i < chunk->param_count && i < 16; i++) {
@@ -899,6 +904,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->scope_depth = saved_scope_depth;
     bc->in_method = saved_in_method;
     bc->chunk_is_method = saved_chunk_is_method;
+    bc->chunk_loop_owner = saved_chunk_loop_owner;
     bc->enclosing_locals = saved_enclosing;
     bc->enclosing_local_count = saved_enclosing_count;
     if (saved_local_count > 0)
@@ -1320,13 +1326,20 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             /* Push selector as string constant */
             int sel_idx = add_constant_string(bc, node->as.send.message);
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)sel_idx);
-            /* Push args */
+            /* Push args (a block literal passed here owns its break/continue) */
             for (int i = 0; i < node->as.send.args.count; i++) {
-                bc_emit_expr(bc, node->as.send.args.items[i]);
+                AstNode *arg = node->as.send.args.items[i];
+                bc->next_loop_owner = ast_block_is_loop_arg(node, arg);
+                bc_emit_expr(bc, arg);
+                bc->next_loop_owner = 0;
             }
-            /* Call native send or super_send */
+            /* Call native send or super_send; a break in one of its blocks
+             * ends the call (send_break) */
             emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-            int send_fn = node->as.send.is_super ? bc->native_super_send : bc->native_send;
+            int catches = ast_send_catches_break(node);
+            int send_fn = node->as.send.is_super
+                ? (catches ? bc->native_super_send_break : bc->native_super_send)
+                : (catches ? bc->native_send_break : bc->native_send);
             emit_u16(bc, (uint16_t)send_fn);
             emit_byte(bc, (uint8_t)(2 + node->as.send.args.count));
             break;
@@ -1804,6 +1817,16 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     /* In an inlined loop's body, break and continue jump */
     if ((node->type == NODE_BREAK || node->type == NODE_CONTINUE) && bc->inline_loop) {
         bc_emit_loop_jump(bc, (BcLoop *)bc->inline_loop, node->type == NODE_BREAK);
+        return;
+    }
+
+    /* In a block passed to a message, continue ends this run: nil */
+    if (node->type == NODE_CONTINUE && bc->chunk_loop_owner) {
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+        emit_u16(bc, (uint16_t)bc->native_stop_vm);
+        emit_byte(bc, 0);
         return;
     }
 

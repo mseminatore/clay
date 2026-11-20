@@ -333,6 +333,7 @@ void clay_try_save_state(ClayTryFrame *frame) {
     frame->trace_depth = clay_call_trace.depth;
     frame->trace_overflow = clay_call_trace.overflow;
     frame->return_id = 0;
+    frame->break_id = 0;
     frame->unwind_depth = unwind_list()->count;
     /* No VM yet: a frame left zeroed restores "no VM state" should one be
      * created before it unwinds (the VM prototype starts one on demand) */
@@ -530,17 +531,86 @@ int clay_is_control_signal(ClayValue error) {
                  strcmp(t, "ReturnSignal") == 0);
 }
 
+/* A break raised by a block tagged with an id (clay_raise_break) */
+static int break_tag(ClayValue error) {
+    if (!CLAY_IS_OBJ(error) || error == CLAY_VAL(clay_BreakSignal)) return 0;
+    ClayValue id = clay_get_slot(CLAY_OBJ(error), "_id");
+    return CLAY_IS_INT(id) ? (int)clay_to_int(id) : 0;
+}
+
 int clay_loop_signal(ClayValue error) {
-    /* the usual signals are the singletons; a clone of one counts too */
+    /* the usual signals are the singletons; a clone of one counts too, but
+     * not a break that ends a particular call (tagged) */
     if (error == CLAY_VAL(clay_BreakSignal)) return CLAY_SIGNAL_BREAK;
     if (error == CLAY_VAL(clay_ContinueSignal)) return CLAY_SIGNAL_CONTINUE;
-    if (is_return_signal(error)) return 0;
+    if (is_return_signal(error) || break_tag(error)) return 0;
     const char *t = error_type_name(error);
     int sig = 0;
     if (t && strcmp(t, "BreakSignal") == 0) sig = CLAY_SIGNAL_BREAK;
     else if (t && strcmp(t, "ContinueSignal") == 0) sig = CLAY_SIGNAL_CONTINUE;
     if (sig) clay_release_val(error);
     return sig;
+}
+
+int clay_take_signal(ClayValue error, int which) {
+    ClayObject *single = which == CLAY_SIGNAL_BREAK ? clay_BreakSignal : clay_ContinueSignal;
+    if (error == CLAY_VAL(single)) return 1;
+    if (is_return_signal(error) || break_tag(error)) return 0;
+    const char *t = error_type_name(error);
+    if (!t || strcmp(t, which == CLAY_SIGNAL_BREAK ? "BreakSignal" : "ContinueSignal") != 0)
+        return 0;
+    clay_release_val(error);
+    return 1;
+}
+
+/* --- break ends the call its block was passed to --- */
+
+static CLAY_THREAD_LOCAL int g_break_id = 0;
+
+int clay_break_id_next(void) {
+    if (++g_break_id >= 0x7fffffff) g_break_id = 1;   /* fits a block's 31 bits */
+    return g_break_id;
+}
+
+void clay_tag_blocks(int id, int argc, ClayValue *argv) {
+    for (int i = 0; i < argc; i++) {
+        ClayValue a = argv[i];
+        if (CLAY_IS_OBJ(a) && a != CLAY_TRUE && a != CLAY_FALSE &&
+            CLAY_OBJ(a)->type == CLAY_TYPE_BLOCK && CLAY_OBJ(a)->as.block.break_id == 0)
+            CLAY_OBJ(a)->as.block.break_id = (unsigned)id;
+    }
+}
+
+int clay_catch_break(void (*fn)(void *), void *ctx, int id) {
+    ClayTryFrame tf;
+    if (clay_try_push(&tf) == 0) {
+        tf.break_id = id;
+        fn(ctx);
+        clay_try_pop();
+        return 0;
+    }
+    ClayValue err = clay_error_stack.current_error;
+    if (break_tag(err) == id) {
+        clay_release_val(err);
+        return 1;
+    }
+    clay_raise(err);
+    return 0;   /* unreachable */
+}
+
+void clay_raise_break(int id) {
+    if (id == 0) clay_raise(CLAY_VAL(clay_BreakSignal));
+    /* The call is live only while its frame is on the stack (a block kept
+     * and run after it returned has nothing to end) */
+    ClayTryFrame *f = clay_error_stack.head;
+    while (f && f->break_id != id) f = f->prev;
+    if (!f) {
+        clay_raise(CLAY_VAL(clay_error_new("'break' in a block whose call has already returned",
+                                           "RuntimeError")));
+    }
+    ClayObject *sig = clay_clone(clay_BreakSignal);
+    clay_set_slot_take(sig, "_id", clay_int(id));
+    clay_raise(CLAY_VAL(sig));
 }
 
 static CLAY_THREAD_LOCAL intptr_t g_return_id = 0;

@@ -28,6 +28,8 @@ typedef struct {
     int     capture_slots[BC_MAX_CAPTURES]; /* enclosing scope slot index for each capture */
     int     local_count;       /* total locals (params + temps) in this chunk */
     int     has_block_return;  /* method whose blocks `return` from it (non-local return) */
+    int     loop_owner;        /* a block literal passed to a message: a continue
+                                * raised inside it ends this run (nil) */
     int    *line_map;    /* source line map: line_map[offset] = source line */
     const char *file;    /* the source file of the body (interned), or NULL */
 } BcChunk;
@@ -99,6 +101,8 @@ typedef struct {
     int native_chain_false;
     int native_if_ran;          /* if_ran(c, v) → the value when the block ran and gave v */
     int native_if_skipped;      /* if_skipped(c) → the value when it didn't run */
+    int native_send_break;      /* send(...) for a send whose block has a break: nil if one ends it */
+    int native_super_send_break; /* the same for super_send */
 
     int had_error;
 
@@ -129,6 +133,8 @@ typedef struct {
     /* Method context flag — 1 when compiling inside a method body */
     int      in_method;
     int      chunk_is_method;  /* compiling a method body (not a block) */
+    int      chunk_loop_owner; /* compiling a block passed to a message: continue returns nil */
+    int      next_loop_owner;  /* the block about to be compiled is passed to a message */
     int      chunk_depth;      /* > 0 inside a method or block body (where
                                 * ifTrue/ifFalse blocks are inlined) */
     void    *inline_exit;      /* the inlined block body being compiled, where a

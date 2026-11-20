@@ -483,6 +483,7 @@ typedef struct MethodDef {
     int clone_slot_count;
     int clone_member_count;   /* clone_slots[clone_slot_count..]: its method names */
     int in_method_ctx;  /* a method, or a block created (transitively) inside one */
+    int loop_owner;     /* a block literal passed to a message (CodeGen fn_loop_owner) */
     struct MethodDef *next;
 } MethodDef;
 
@@ -500,6 +501,7 @@ static void collect_method(const char *func_name, const char *obj_ctx, AstNode *
     m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
     m->node = node;
     m->in_method_ctx = 1;
+    m->loop_owner = 0;
     capture_init(&m->captures);
     m->clone_slots = NULL;
     m->clone_slot_count = 0;
@@ -515,6 +517,7 @@ static void collect_method_with_captures(const char *func_name, const char *obj_
     m->obj_context = obj_ctx ? strdup(obj_ctx) : NULL;
     m->node = node;
     m->in_method_ctx = cur_method_ctx;
+    m->loop_owner = 0;
     m->captures = *caps; /* take ownership */
     caps->names = NULL; caps->count = 0; caps->capacity = 0;
     m->clone_slots = NULL;
@@ -1112,15 +1115,20 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
     char *recv = emit_expr(cg, node->as.send.receiver);
     if (!recv) return NULL;
 
-    /* Emit arguments */
+    /* Emit arguments (a block literal passed here owns its break/continue) */
     int argc = node->as.send.args.count;
     char **arg_temps = NULL;
     if (argc > 0) {
         arg_temps = (char **)malloc(sizeof(char *) * (size_t)argc);
         for (int i = 0; i < argc; i++) {
-            arg_temps[i] = emit_expr(cg, node->as.send.args.items[i]);
+            AstNode *arg = node->as.send.args.items[i];
+            cg->next_loop_owner = ast_block_is_loop_arg(node, arg);
+            arg_temps[i] = emit_expr(cg, arg);
+            cg->next_loop_owner = 0;
         }
     }
+    /* a break in one of its blocks ends the call (nil) */
+    const char *brk = ast_send_catches_break(node) ? "_catch_break" : "";
 
     char *t = temp_name(cg);
     emit_line(cg, node);
@@ -1128,11 +1136,11 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
     if (node->as.send.is_super && cg->super_proto) {
         /* super send: start lookup from defining prototype's parent */
         if (argc == 0) {
-            fprintf(cg->out, "ClayValue %s = clay_send_super_owned(%s, CLAY_OBJ(%s), \"%s\", 0, NULL);\n",
-                    t, recv, cg->super_proto, node->as.send.message);
+            fprintf(cg->out, "ClayValue %s = clay_send_super_owned%s(%s, CLAY_OBJ(%s), \"%s\", 0, NULL);\n",
+                    t, brk, recv, cg->super_proto, node->as.send.message);
         } else {
-            fprintf(cg->out, "ClayValue %s = clay_send_super_owned(%s, CLAY_OBJ(%s), \"%s\", %d, (ClayValue[]){",
-                    t, recv, cg->super_proto, node->as.send.message, argc);
+            fprintf(cg->out, "ClayValue %s = clay_send_super_owned%s(%s, CLAY_OBJ(%s), \"%s\", %d, (ClayValue[]){",
+                    t, brk, recv, cg->super_proto, node->as.send.message, argc);
             for (int i = 0; i < argc; i++) {
                 if (i > 0) fprintf(cg->out, ", ");
                 fprintf(cg->out, "%s", arg_temps[i]);
@@ -1143,8 +1151,8 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
         fprintf(cg->out, "ClayValue %s = clay_send_owned(%s, \"%s\", 0, NULL);\n",
                 t, recv, node->as.send.message);
     } else {
-        fprintf(cg->out, "ClayValue %s = clay_send_owned(%s, \"%s\", %d, (ClayValue[]){",
-                t, recv, node->as.send.message, argc);
+        fprintf(cg->out, "ClayValue %s = clay_send_owned%s(%s, \"%s\", %d, (ClayValue[]){",
+                t, brk, recv, node->as.send.message, argc);
         for (int i = 0; i < argc; i++) {
             if (i > 0) fprintf(cg->out, ", ");
             fprintf(cg->out, "%s", arg_temps[i]);
@@ -1474,6 +1482,8 @@ static char *emit_binary(CodeGen *cg, AstNode *node) {
 }
 
 static char *emit_block(CodeGen *cg, AstNode *node) {
+    int loop_owner = cg->next_loop_owner;
+    cg->next_loop_owner = 0;
     const char *fname = lookup_name(node);
     if (!fname) {
         fprintf(stderr, "codegen: block has no pre-assigned name\n");
@@ -1496,6 +1506,7 @@ static char *emit_block(CodeGen *cg, AstNode *node) {
     free(param_names);
 
     collect_method_with_captures(fname, NULL, node, &caps);
+    collected_methods->loop_owner = loop_owner;
     /* Propagate known slots from enclosing method to block */
     if (cg->in_method && cg->known_slots) {  /* slots and/or methods */
         collected_methods->clone_slots = cg->known_slots;
@@ -2451,6 +2462,22 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
         return;
     }
 
+    /* In a block passed to a message, break ends that call and continue
+     * ends this run (nil) */
+    if (node->type == NODE_BREAK && cg->fn_loop_owner) {
+        emit_line(cg, node);
+        emit_indent(cg);
+        fprintf(cg->out, "clay_raise_break((int)self->as.block.break_id);\n");
+        return;
+    }
+    if (node->type == NODE_CONTINUE && cg->fn_loop_owner) {
+        emit_line(cg, node);
+        emit_rv_set(cg, "CLAY_NIL");
+        emit_inline_exit_releases(cg);
+        emit_function_exit(cg);
+        return;
+    }
+
     /* Break: raise BreakSignal */
     if (node->type == NODE_BREAK) {
         emit_line(cg, node);
@@ -2680,11 +2707,36 @@ static void emit_method_bodies(CodeGen *cg) {
              * block-valued slot), its self is that receiver. */
             int saved_use_slot_recv = cg->use_slot_recv;
             int saved_fn_is_block = cg->fn_is_block;
+            int saved_fn_loop_owner = cg->fn_loop_owner;
+            int saved_fn_has_ret_frame = cg->fn_has_ret_frame;
             cg->fn_is_block = 1;
+            cg->fn_loop_owner = cur->loop_owner;
+            cg->fn_has_ret_frame = 0;
             cg->use_slot_recv = !capture_has(&cur->captures, "_method_self");
             fprintf(cg->out, "    CLAY_STACK_CHECK();\n");
             fprintf(cg->out, "    clay_trace_enter(CLAY_FRAME_BLOCK);\n");
             fprintf(cg->out, "    int __uw = clay_uw_mark();\n");
+            /* A block passed to a message: a continue raised in a block run
+             * inside it (a try block, say) ends this run with nil, and a
+             * plain break there becomes the one that ends its call. Pushed
+             * before any locals exist (the unwind releases them). */
+            if (cg->fn_loop_owner) {
+                int sub_cont = ast_block_sub_raises(node, NODE_CONTINUE);
+                int sub_brk = ast_block_sub_raises(node, NODE_BREAK);
+                if (sub_cont || sub_brk) {
+                    fprintf(cg->out, "    ClayTryFrame __sig_tf;\n");
+                    fprintf(cg->out, "    if (clay_try_push(&__sig_tf) != 0) {\n");
+                    fprintf(cg->out, "        ClayValue __sig = clay_error_stack.current_error;\n");
+                    if (sub_cont)
+                        fprintf(cg->out, "        if (clay_take_signal(__sig, CLAY_SIGNAL_CONTINUE)) return CLAY_NIL;\n");
+                    if (sub_brk)
+                        fprintf(cg->out, "        if (clay_take_signal(__sig, CLAY_SIGNAL_BREAK)) "
+                                "clay_raise_break((int)self->as.block.break_id);\n");
+                    fprintf(cg->out, "        clay_raise(__sig);\n");
+                    fprintf(cg->out, "    }\n");
+                    cg->fn_has_ret_frame = 1;   /* popped on the way out */
+                }
+            }
             if (cg->use_slot_recv)
                 fprintf(cg->out, "    ClayObject *__recv = clay_slot_method_self; (void)__recv;\n");
             /* Declare captured variables from env as cell pointers */
@@ -2718,6 +2770,8 @@ static void emit_method_bodies(CodeGen *cg) {
 
             cg->use_slot_recv = saved_use_slot_recv;
             cg->fn_is_block = saved_fn_is_block;
+            cg->fn_loop_owner = saved_fn_loop_owner;
+            cg->fn_has_ret_frame = saved_fn_has_ret_frame;
             /* Clear boxed state for this block scope */
             while (cg->boxed_count > saved_boxed_count) {
                 cg->boxed_count--;
@@ -2792,6 +2846,8 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->in_function = 0;
     cg->use_slot_recv = 0;
     cg->fn_is_block = 0;
+    cg->fn_loop_owner = 0;
+    cg->next_loop_owner = 0;
     cg->fn_has_ret_frame = 0;
     cg->plugin_exe_path = NULL;
     cg->native_plugins = NULL;

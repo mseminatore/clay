@@ -168,10 +168,23 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   locals of the branch, released when it ends.
 - **Inlined whileTrue/whileFalse**: `{ c } whileTrue { ... }` with parameterless block literals runs in
   place too, when every `break`/`continue` that targets it can be a jump (`ast_is_inline_while`: none in
-  a nested block or an expression); otherwise it is sent. `bc_emit_inline_while` / `emit_inline_while`
-  (selfhost `inlineWhile` in both ports). That is sound because break/continue are lexical: `check.c`
-  `check_loop_control` (selfhost `GlobalCheck _loop`) rejects one outside a loop body or a block literal
-  passed to a message (ifTrue/ifFalse and try blocks and a send's receiver block are transparent).
+  a try block, a receiver block or an expression; a block passed to a message keeps its own); otherwise
+  it is sent. `bc_emit_inline_while` / `emit_inline_while`
+  (selfhost `inlineWhile` in both ports).
+- **break / continue**: lexical, as in Ruby. `check.c` `check_loop_control` (selfhost `GlobalCheck _loop`)
+  rejects one outside a loop body or a block literal passed to a message (ifTrue/ifFalse and try blocks and
+  a send's receiver block are transparent). Each belongs to the innermost inlined loop (a jump) or block
+  literal passed to a message other than ifTrue/ifFalse or a whileTrue/whileFalse body
+  (`ast_block_is_loop_arg`). A continue ends that run of the block with nil (`stop_vm` / function exit).
+  A break ends the call: such a send (`ast_send_catches_break`) is `send_break` in the VM /
+  `clay_send_owned_catch_break` in C, which gets a `clay_break_id_next()` id, tags its block args
+  (`ClayBlock.break_id`) and catches only the break carrying that id; the block raises it with
+  `clay_raise_break` (the VM trampoline converts a plain one; codegen raises it directly). Signals raised in
+  a sub-block (try, `{ } value`) are caught and converted by the owning block (VM trampoline, codegen
+  `__sig_tf` when `ast_block_sub_raises`). Loop natives (each, times, ...) catch only plain (untagged)
+  breaks, which now come only from whileTrue/whileFalse bodies sent as messages. Chunks record
+  `loop_owner` (unit field 8; `--bytecode` prints it). Selfhost: `isLoopArg`, `sendCatchesBreak`,
+  `blockSubRaises`, `ownedCtl` in both ports.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.
