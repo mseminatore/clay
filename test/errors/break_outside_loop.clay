@@ -1,0 +1,21 @@
+// A break or continue belongs to the loop it is written in, as in most
+// languages; one with no loop to go to is reported before the program runs
+// (CTest: clay_error_break_outside_loop). Fine: a loop's body, a block
+// literal passed to a message (each, times, ...), and inside those the
+// blocks of ifTrue/ifFalse and try/catch, and a loop's condition.
+Walker = Object clone {
+    stop() { break }                       // line 7: a method body has no loop
+    skip(f = { continue }) { f }           // line 8: a default value's block
+    fine(xs) {
+        xs each { |x| (x > 1) ifTrue { break } }
+        { true } whileTrue { try { continue } catch { |e| nil } }
+        [1] each { |x| { (x == 2) ifTrue { break }; false } whileTrue { } }
+    }
+}
+stop = { break }                           // line 15: a stored block
+(1 < 2) ifTrue { continue }                // line 16: top-level, no loop
+{ break } value                            // line 17: run in place, no loop
+handlers = [{ break }]                     // line 18: a block in an array
+5 times { |i| try { (i == 2) ifTrue { continue } } catch { |e| nil } }
+apply = { |b| b value }
+apply({ break })                           // a block passed to a call

@@ -102,7 +102,7 @@ static char *replace_ext(const char *path, const char *new_ext) {
  * works when clay is found via PATH. Empty if unknown. */
 static char g_exe_path_buf[1024] = "";
 static char g_exe_dir[1024] = "";
-/* --no-check: skip the undefined-variable check (compiler comparison tools
+/* --no-check: skip the checks before compiling (compiler comparison tools
  * translate syntax fixtures that aren't runnable programs) */
 static int g_no_check = 0;
 
@@ -1114,7 +1114,7 @@ static int dump_bytecode(const char *filename) {
         return 1;
     }
     if (prepare_native_bricks() != 0 ||
-        (!g_no_check && check_undefined_variables(program, filename) > 0)) {
+        (!g_no_check && check_program(program, filename) > 0)) {
         fprintf(stderr, "clay: compilation failed\n");
         return 1;
     }
@@ -1209,7 +1209,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
         return 1;
     }
     if (prepare_native_bricks() != 0 ||
-        (!g_no_check && check_undefined_variables(program, filename) > 0)) {
+        (!g_no_check && check_program(program, filename) > 0)) {
         fprintf(stderr, "clay: compilation failed\n");
         ast_free(program);
         free(source);
@@ -1336,7 +1336,7 @@ static int clay_main(int argc, char *argv[]) {
             printf("Usage: clay [options] [source.clay]\n\n");
             printf("Options:\n");
             printf("  --version     Print the Clay version and exit\n");
-            printf("  --no-check    Don't report undefined variables before compiling\n");
+            printf("  --no-check    Don't check for undefined variables or a stray break/continue\n");
             printf("  --compile     Compile to native binary via C (instead of running in VM)\n");
             printf("  -o <output>   Output binary name (implies --compile)\n");
             printf("  -c            Emit C code only, no compile (implies --compile)\n");
@@ -1487,7 +1487,7 @@ static int clay_main(int argc, char *argv[]) {
     clay_plugin_auto_load(g_exe_path);
 
     if (prepare_native_bricks() != 0 ||
-        (!g_no_check && check_undefined_variables(program, source_file) > 0)) {
+        (!g_no_check && check_program(program, source_file) > 0)) {
         fprintf(stderr, "clay: compilation failed\n");
         ast_free(program);
         free(source);

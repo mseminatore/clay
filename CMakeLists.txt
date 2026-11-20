@@ -673,7 +673,7 @@ set_tests_properties(clay_native_brick clay_native_brick_compiled PROPERTIES
 # Compile errors: each test/errors/<name>.clay must fail with exactly
 # test/errors/<name>.out, in the VM and with --compile (clayc is checked
 # against clay in cmake/selfhost_run.cmake)
-foreach(err undefined_variable undefined_in_import)
+foreach(err undefined_variable undefined_in_import break_outside_loop)
     add_test(NAME clay_error_${err}
              COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
                  -DSRC=test/errors/${err}.clay -DEXPECT_FAIL=1
@@ -716,7 +716,7 @@ add_test(NAME clay_dap_breakpoint_import
 # Runtime errors: a program that ends with an uncaught error prints exactly
 # test/errors/<name>.out (the error and its traceback), in the VM and native
 # (clayc is checked against clay in cmake/selfhost_run.cmake)
-foreach(err uncaught_trace uncaught_deep uncaught_fiber uncaught_import)
+foreach(err uncaught_trace uncaught_deep uncaught_fiber uncaught_import uncaught_break)
     add_test(NAME clay_error_${err}
              COMMAND ${CMAKE_COMMAND} -DCLAY=$<TARGET_FILE:clay_compiler>
                  -DSRC=test/errors/${err}.clay

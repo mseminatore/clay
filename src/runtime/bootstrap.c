@@ -905,13 +905,13 @@ void clay_bootstrap(void) {
     /* Loop control signal singletons (Error clones for break/continue) */
     clay_BreakSignal = clay_clone(clay_Error);
     clay_BreakSignal->refcount = CLAY_REFCOUNT_IMMORTAL;
-    clay_set_slot_take(clay_BreakSignal, "_message", CLAY_VAL(clay_string_new("break")));
+    clay_set_slot_take(clay_BreakSignal, "_message", CLAY_VAL(clay_string_new("'break' outside a loop")));
     clay_set_slot_take(clay_BreakSignal, "_type", CLAY_VAL(clay_string_new("BreakSignal")));
     clay_set_slot_take(clay_BreakSignal, "_name", CLAY_VAL(clay_string_new("BreakSignal")));
 
     clay_ContinueSignal = clay_clone(clay_Error);
     clay_ContinueSignal->refcount = CLAY_REFCOUNT_IMMORTAL;
-    clay_set_slot_take(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("continue")));
+    clay_set_slot_take(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("'continue' outside a loop")));
     clay_set_slot_take(clay_ContinueSignal, "_type", CLAY_VAL(clay_string_new("ContinueSignal")));
     clay_set_slot_take(clay_ContinueSignal, "_name", CLAY_VAL(clay_string_new("ContinueSignal")));
 

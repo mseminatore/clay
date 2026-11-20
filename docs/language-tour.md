@@ -503,10 +503,35 @@ inside a top-level block, `(x > 1) ifTrue { return "big" }` ends just the
 }
 ```
 
-Works with `times`, `each`, `whileTrue`, and `whileFalse`. A `break` or
-`continue` belongs to the loop it is written in: one in a block or method that
-the loop's body only calls may not stop a `whileTrue` loop (see
-[While loops](#while-loops)).
+Works with `times`, `each`, `whileTrue`, and `whileFalse`, and in a block
+literal passed to any other message, such as an iterator you write yourself.
+
+As in most languages, a `break` or `continue` belongs to the loop it is
+written in. It can go in a loop's body or in a block literal passed to a
+message, including inside the `ifTrue`/`ifFalse` and `try`/`catch` blocks
+there. Anywhere else is a compile error, because there is no loop for it to
+leave:
+
+```clay norun
+Walker = Object clone {
+  stop() { break }        // error: a method body is not a loop
+}
+skip = { continue }       // error: a block kept for later is not a loop
+```
+
+So a method or a stored block can't stop the caller's loop. Return a value and
+let the loop decide:
+
+```clay
+done = { |n| n > 2 }
+[1, 2, 3, 4] each { |n|
+  (done value(n)) ifTrue { break }
+  n println   // prints 1, 2
+}
+```
+
+If a block literal is passed to a method that calls it outside any loop, its
+`break` ends the program with ``BreakSignal: 'break' outside a loop``.
 
 ## Imports
 
@@ -674,11 +699,9 @@ i = 0
 
 In methods and blocks, a loop whose two blocks are written right there is
 compiled in place, like `ifTrue`: no blocks are made and no messages sent, and
-its `break` and `continue` are plain jumps. The loop still behaves like the
-message, except that a `break` or `continue` raised somewhere else (in a block
-made outside the loop, or in a method the body calls) passes it by instead of
-stopping it. A loop with a `break` or `continue` inside another block, such as
-a `try` block, is sent as a message, so those still work.
+its `break` and `continue` are plain jumps. It behaves exactly like the
+message. A loop with a `break` or `continue` inside another block, such as a
+`try` block, is sent as a message instead.
 
 ## Arrays
 

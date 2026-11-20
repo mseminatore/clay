@@ -1,0 +1,7 @@
+test/errors/break_outside_loop.clay:7: error: 'break' must be inside a loop or a block passed to a message (like each or times)
+test/errors/break_outside_loop.clay:8: error: 'continue' must be inside a loop or a block passed to a message (like each or times)
+test/errors/break_outside_loop.clay:15: error: 'break' must be inside a loop or a block passed to a message (like each or times)
+test/errors/break_outside_loop.clay:16: error: 'continue' must be inside a loop or a block passed to a message (like each or times)
+test/errors/break_outside_loop.clay:17: error: 'break' must be inside a loop or a block passed to a message (like each or times)
+test/errors/break_outside_loop.clay:18: error: 'break' must be inside a loop or a block passed to a message (like each or times)
+clay: compilation failed

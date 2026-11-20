@@ -1,0 +1,5 @@
+// A break that gets past every loop at run time: here a block literal
+// passed to a method that just calls it (Ruby raises LocalJumpError)
+Runner = Object clone { run(b) { b value } }
+Runner run({ break })
+"not reached" println

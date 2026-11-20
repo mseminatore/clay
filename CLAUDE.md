@@ -80,8 +80,8 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
    `codegen.c` emits human-readable C with `#line` directives for debuggability. `bc_compiler.c`
    compiles the AST directly to bytecode for the VM; the runtime side of the VM (native functions,
    block/method trampolines, the `VM` prototype) is `src/runtime/vm_bridge.c`, part of the runtime
-   library so native programs can run bytecode too. `check.c` reports undefined variables before
-   either backend runs (mirrored by `GlobalCheck` in `selfhost/clay-parser`; `--no-check` skips it).
+   library so native programs can run bytecode too. `check.c` reports undefined variables and a
+   `break`/`continue` with no loop before either backend runs (mirrored by `GlobalCheck` in `selfhost/clay-parser`; `--no-check` skips it).
    `bricks.c` implements the package manager; `native_bricks.c` builds and loads native bricks
    (`brick.json` "native": C sources compiled into a plugin on first import, linked statically by
    `--compile`).
@@ -169,7 +169,9 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 - **Inlined whileTrue/whileFalse**: `{ c } whileTrue { ... }` with parameterless block literals runs in
   place too, when every `break`/`continue` that targets it can be a jump (`ast_is_inline_while`: none in
   a nested block or an expression); otherwise it is sent. `bc_emit_inline_while` / `emit_inline_while`
-  (selfhost `inlineWhile` in both ports); a break or continue raised from called code isn't caught.
+  (selfhost `inlineWhile` in both ports). That is sound because break/continue are lexical: `check.c`
+  `check_loop_control` (selfhost `GlobalCheck _loop`) rejects one outside a loop body or a block literal
+  passed to a message (ifTrue/ifFalse and try blocks and a send's receiver block are transparent).
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.

@@ -1274,7 +1274,12 @@ Parser = Object clone {
 // assigned at the top level of the program or its imports, not a parameter
 // or assignment of an enclosing block, not a builtin or plugin prototype.
 // Method bodies aren't checked (a bare name there may be one of self's
-// slots). report(program, mainFile) prints each and returns the count.
+// slots). Then each break or continue with no loop to go to (check.c
+// check_loop_control): a loop body or a block literal passed to a message is
+// a loop; the blocks of ifTrue/ifFalse, try/catch and a block a message is
+// sent to belong to the code around them; any other block, a method body
+// and top-level code have none. report(program, mainFile) prints each and
+// returns the count.
 GlobalCheck = Object clone {
     builtins = ["Object", "Number", "String", "Array", "Block", "Nil", "Boolean", "Error",
                 "Dict", "Math", "Console", "File", "System", "FFI", "Date", "Http",
@@ -1295,6 +1300,7 @@ GlobalCheck = Object clone {
         (System pluginGlobals) each { |g| (self _plugins) set(g, true) }
         self _collect(program items, self _globals)
         self _walk(program)
+        self _loop(program, false)
         self _errors
     }
 
@@ -1355,6 +1361,68 @@ GlobalCheck = Object clone {
         (k == "Raise" || k == "Return") ifTrue { return self _walk(n expr) }
         (k == "SlotAssign") ifTrue { self _walk(n recv); return self _walk(n value) }
         (k == "Destructure") ifTrue { return self _walk(n value) }
+        nil
+    }
+
+    // --- break / continue ---
+
+    _loopAll(list, inLoop) { (list != nil) ifTrue { list each { |n| self _loop(n, inLoop) } } }
+
+    // parameters' default values run where the block or method is called
+    _loopDefaults(params) {
+        params each { |p| ((p kind) == "Assign") ifTrue { self _loop(p value, false) } }
+    }
+
+    // a block's statements; any other node is walked as usual
+    _loopIn(n, inLoop) {
+        (n != nil && (n kind) == "Block") ifTrue {
+            self _loopDefaults(n params)
+            return self _loopAll(n body, inLoop)
+        }
+        self _loop(n, inLoop)
+    }
+
+    _loop(n, inLoop) {
+        (n == nil) ifTrue { return nil }
+        k = n kind
+        (k == "Break" || k == "Continue") ifTrue {
+            inLoop ifFalse {
+                Console error(((n file) ?? (self _main)) + ":" + (n line) toString + ": error: '" +
+                              ((k == "Break") ifTrue { "break" } ifFalse { "continue" }) +
+                              "' must be inside a loop or a block passed to a message (like each or times)\n")
+                self _errors = self _errors + 1
+            }
+            return nil
+        }
+        (k == "Block") ifTrue { return self _loopIn(n, false) }
+        (k == "Send") ifTrue {
+            self _loopIn(n recv, inLoop)
+            cond = (n name) == "ifTrue" || (n name) == "ifFalse"
+            (n items) each { |a|
+                (a != nil && (a kind) == "Block") ifTrue {
+                    self _loopIn(a, cond ifTrue { inLoop } ifFalse { true })
+                } ifFalse { self _loop(a, inLoop) }
+            }
+            return nil
+        }
+        (k == "TryCatch") ifTrue {
+            self _loopIn(n tryBlock, inLoop)
+            self _loopIn(n catchBlock, inLoop)
+            return self _loopIn(n finallyBlock, inLoop)
+        }
+        (k == "MethodDef") ifTrue {
+            self _loopDefaults(n params)
+            return self _loopAll(n body, false)
+        }
+        (k == "Assign" || k == "SlotDef") ifTrue { return self _loop(n value, inLoop) }
+        (k == "Binary") ifTrue { self _loop(n left, inLoop); return self _loop(n right, inLoop) }
+        (k == "Clone") ifTrue { self _loop(n recv, inLoop); return self _loopAll(n items, inLoop) }
+        (k == "Array") ifTrue { return self _loopAll(n items, inLoop) }
+        (k == "Program") ifTrue { return self _loopAll(n items, false) }
+        (k == "DictLit") ifTrue { return self _loopAll(n vals, inLoop) }
+        (k == "Raise" || k == "Return") ifTrue { return self _loop(n expr, inLoop) }
+        (k == "SlotAssign") ifTrue { self _loop(n recv, inLoop); return self _loop(n value, inLoop) }
+        (k == "Destructure") ifTrue { return self _loop(n value, inLoop) }
         nil
     }
 }

@@ -3,6 +3,7 @@
  *
  * check_undefined_variables: a misspelled name is otherwise nil in the VM
  * (found much later, somewhere else) and a C compiler error in native code.
+ * check_loop_control: a break or continue with no loop to go to.
  */
 #include "check.h"
 #include <stdio.h>
@@ -128,6 +129,118 @@ static void walk(Checker *c, AstNode *n) {
         case NODE_PROGRAM:     walk_list(c, &n->as.program.stmts); break;
         default:               break;   /* literals, self, break, continue, import */
     }
+}
+
+/* --- break / continue --- */
+
+/* A break or continue belongs to the loop it is written in, as in most
+ * languages: the body of a whileTrue/whileFalse, or a block literal passed
+ * to a message (each, times, a user iterator...). The blocks of ifTrue and
+ * ifFalse, try/catch/finally and a block a message is sent to (a loop's
+ * condition, `{ ... } value`) run where they are written, so they are part
+ * of the code around them. Any other block (stored, returned, a slot's
+ * value), a method body and top-level code have no loop. */
+
+typedef struct {
+    const char *main_file;
+    int errors;
+} LoopCheck;
+
+static void loop_walk(LoopCheck *c, AstNode *n, int in_loop);
+
+static void loop_walk_list(LoopCheck *c, NodeList *l, int in_loop) {
+    for (int i = 0; i < l->count; i++) loop_walk(c, l->items[i], in_loop);
+}
+
+/* A block's statements; its parameters' default values run where it's called */
+static void loop_walk_block(LoopCheck *c, AstNode *b, int in_loop) {
+    for (int i = 0; i < b->as.block.params.count; i++) {
+        AstNode *p = b->as.block.params.items[i];
+        if (p && p->type == NODE_ASSIGN) loop_walk(c, p->as.assign.value, 0);
+    }
+    loop_walk_list(c, &b->as.block.body, in_loop);
+}
+
+static int is_cond_message(const char *m) {
+    return m && (strcmp(m, "ifTrue") == 0 || strcmp(m, "ifFalse") == 0);
+}
+
+static void loop_walk(LoopCheck *c, AstNode *n, int in_loop) {
+    if (!n) return;
+    switch (n->type) {
+        case NODE_BREAK:
+        case NODE_CONTINUE:
+            if (!in_loop) {
+                fprintf(stderr, "%s:%d: error: '%s' must be inside a loop or a block "
+                        "passed to a message (like each or times)\n",
+                        n->file ? n->file : c->main_file, n->line,
+                        n->type == NODE_BREAK ? "break" : "continue");
+                c->errors++;
+            }
+            break;
+        case NODE_BLOCK:       loop_walk_block(c, n, 0); break;
+        case NODE_SEND: {
+            AstNode *r = n->as.send.receiver;
+            if (r && r->type == NODE_BLOCK) loop_walk_block(c, r, in_loop);
+            else loop_walk(c, r, in_loop);
+            int cond = is_cond_message(n->as.send.message);
+            for (int i = 0; i < n->as.send.args.count; i++) {
+                AstNode *a = n->as.send.args.items[i];
+                if (a && a->type == NODE_BLOCK) loop_walk_block(c, a, cond ? in_loop : 1);
+                else loop_walk(c, a, in_loop);
+            }
+            break;
+        }
+        case NODE_TRY_CATCH: {
+            AstNode *parts[3] = { n->as.try_catch.try_block, n->as.try_catch.catch_block,
+                                  n->as.try_catch.finally_block };
+            for (int i = 0; i < 3; i++) {
+                if (parts[i] && parts[i]->type == NODE_BLOCK) loop_walk_block(c, parts[i], in_loop);
+                else loop_walk(c, parts[i], in_loop);
+            }
+            break;
+        }
+        case NODE_METHOD_DEF:
+            for (int i = 0; i < n->as.method_def.params.count; i++) {
+                AstNode *p = n->as.method_def.params.items[i];
+                if (p && p->type == NODE_ASSIGN) loop_walk(c, p->as.assign.value, 0);
+            }
+            loop_walk_list(c, &n->as.method_def.body, 0);
+            break;
+        case NODE_ASSIGN:      loop_walk(c, n->as.assign.value, in_loop); break;
+        case NODE_BINARY:
+            loop_walk(c, n->as.binary.left, in_loop);
+            loop_walk(c, n->as.binary.right, in_loop);
+            break;
+        case NODE_SLOT_DEF:    loop_walk(c, n->as.slot_def.value, in_loop); break;
+        case NODE_CLONE:
+            loop_walk(c, n->as.clone.proto, in_loop);
+            loop_walk_list(c, &n->as.clone.members, in_loop);
+            break;
+        case NODE_ARRAY_LIT:   loop_walk_list(c, &n->as.array_lit.elements, in_loop); break;
+        case NODE_DICT_LIT:    loop_walk_list(c, &n->as.dict_lit.values, in_loop); break;
+        case NODE_RAISE:       loop_walk(c, n->as.raise.expr, in_loop); break;
+        case NODE_SLOT_ASSIGN:
+            loop_walk(c, n->as.slot_assign.receiver, in_loop);
+            loop_walk(c, n->as.slot_assign.value, in_loop);
+            break;
+        case NODE_RETURN:      loop_walk(c, n->as.return_stmt.expr, in_loop); break;
+        case NODE_DESTRUCTURE: loop_walk(c, n->as.destructure.value, in_loop); break;
+        case NODE_PROGRAM:     loop_walk_list(c, &n->as.program.stmts, 0); break;
+        default:               break;
+    }
+}
+
+int check_loop_control(AstNode *program, const char *main_file) {
+    if (!program) return 0;
+    LoopCheck c = { main_file, 0 };
+    loop_walk(&c, program, 0);
+    return c.errors;
+}
+
+int check_program(AstNode *program, const char *main_file) {
+    int errors = check_undefined_variables(program, main_file);
+    return errors + check_loop_control(program, main_file);
 }
 
 int check_undefined_variables(AstNode *program, const char *main_file) {
