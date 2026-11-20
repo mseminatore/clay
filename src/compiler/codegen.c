@@ -107,7 +107,7 @@ static void emit_temp_cleanup_from(CodeGen *cg, int from, const char *result_tem
 }
 
 static void emit_temp_cleanup(CodeGen *cg, const char *result_temp) {
-    emit_temp_cleanup_from(cg, 0, result_temp);
+    emit_temp_cleanup_from(cg, cg->temp_base, result_temp);
 }
 
 static const char *c_safe_name(const char *name);
@@ -564,7 +564,10 @@ static void free_name_table(void) {
     name_counter = 0;
 }
 
-/* Recursively walk AST and assign function names to all blocks and methods */
+static int prewalk_fn_depth = 0;   /* inside a method or block body */
+
+/* Recursively walk AST and assign function names to all blocks and methods
+ * (not to blocks that are inlined: emit_inline_if) */
 static void prewalk_assign_names(AstNode *node, const char *parent_name) {
     if (!node) return;
     switch (node->type) {
@@ -573,8 +576,10 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             snprintf(buf, sizeof(buf), "_clay_block_%d", name_counter++);
             register_name(node, buf);
             /* Walk body for nested blocks */
+            prewalk_fn_depth++;
             for (int i = 0; i < node->as.block.body.count; i++)
                 prewalk_assign_names(node->as.block.body.items[i], buf);
+            prewalk_fn_depth--;
             break;
         }
         case NODE_METHOD_DEF: {
@@ -584,8 +589,10 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             snprintf(buf, sizeof(buf), "_clay_method_%s_%s_%d",
                      obj_m, meth_m, name_counter++);
             register_name(node, buf);
+            prewalk_fn_depth++;
             for (int i = 0; i < node->as.method_def.body.count; i++)
                 prewalk_assign_names(node->as.method_def.body.items[i], buf);
+            prewalk_fn_depth--;
             break;
         }
         case NODE_CLONE:
@@ -597,7 +604,22 @@ static void prewalk_assign_names(AstNode *node, const char *parent_name) {
             prewalk_assign_names(node->as.assign.value, node->as.assign.name);
             break;
         case NODE_SEND:
+            if (prewalk_fn_depth > 0 && ast_is_inline_while(node)) {
+                NodeList *cond = &node->as.send.receiver->as.block.body;
+                NodeList *body = &node->as.send.args.items[0]->as.block.body;
+                for (int i = 0; i < cond->count; i++)
+                    prewalk_assign_names(cond->items[i], parent_name);
+                for (int i = 0; i < body->count; i++)
+                    prewalk_assign_names(body->items[i], parent_name);
+                break;
+            }
             prewalk_assign_names(node->as.send.receiver, parent_name);
+            if (prewalk_fn_depth > 0 && ast_is_inline_if(node)) {
+                NodeList *body = &node->as.send.args.items[0]->as.block.body;
+                for (int i = 0; i < body->count; i++)
+                    prewalk_assign_names(body->items[i], parent_name);
+                break;
+            }
             for (int i = 0; i < node->as.send.args.count; i++)
                 prewalk_assign_names(node->as.send.args.items[i], parent_name);
             break;
@@ -1181,8 +1203,17 @@ static void prebox_captures(CodeGen *cg, AstNode *node) {
             break;
         }
         case NODE_SEND:
+            if (cg->in_function && ast_is_inline_while(node)) {
+                prebox_captures_list(cg, &node->as.send.receiver->as.block.body);
+                prebox_captures_list(cg, &node->as.send.args.items[0]->as.block.body);
+                break;
+            }
             prebox_captures(cg, node->as.send.receiver);
-            prebox_captures_list(cg, &node->as.send.args);
+            if (cg->in_function && ast_is_inline_if(node))
+                /* an inlined block's statements run in this function */
+                prebox_captures_list(cg, &node->as.send.args.items[0]->as.block.body);
+            else
+                prebox_captures_list(cg, &node->as.send.args);
             break;
         case NODE_BINARY:
             prebox_captures(cg, node->as.binary.left);
@@ -1731,8 +1762,13 @@ static int call_targets_self(CodeGen *cg, const char *name) {
     return cg->in_method;
 }
 
+static char *emit_inline_if(CodeGen *cg, AstNode *node, int want_value);
+static char *emit_inline_while(CodeGen *cg, AstNode *node, int want_value);
+
 static char *emit_expr(CodeGen *cg, AstNode *node) {
     if (!node) return NULL;
+    if (cg->in_function && ast_is_inline_if(node)) return emit_inline_if(cg, node, 1);
+    if (cg->in_function && ast_is_inline_while(node)) return emit_inline_while(cg, node, 1);
     if (node->type == NODE_SEND && node->as.send.is_call &&
         call_targets_self(cg, node->as.send.receiver->as.ident.name)) {
         AstNode self_node = *node->as.send.receiver;
@@ -1742,7 +1778,7 @@ static char *emit_expr(CodeGen *cg, AstNode *node) {
         send.as.send.receiver = &self_node;
         send.as.send.message = node->as.send.receiver->as.ident.name;
         send.as.send.is_call = 0;
-        return emit_expr(cg, &send);
+        return emit_send(cg, &send);
     }
     switch (node->type) {
         case NODE_INT_LIT:    return emit_int_lit(cg, node);
@@ -1943,6 +1979,359 @@ static void emit_param_decl(CodeGen *cg, const char *pname, int i, AstNode *defa
     fn_track_var(cg, pname);
 }
 
+/* --- Inlined ifTrue/ifFalse ---
+ * In a method or block function, `c ifTrue { ... }` / `c ifFalse { ... }` with
+ * a parameterless block literal (ast_is_inline_if) runs the block's
+ * statements in a C `if`, as bc_compiler.c's bc_emit_inline_if does (see
+ * there for the semantics). The block's own variables (the ones a block
+ * function would declare) are C locals of the branch, nil and with their
+ * implicit-slot flags set each time it runs, released when it ends; captured
+ * ones get a fresh cell each run. Its value goes to `dest` (via __rv, which
+ * the enclosing statement sets again afterwards). */
+typedef struct InlineScope {
+    struct InlineScope *outer;
+    const char *dest;     /* receives the body's value (owned), or NULL */
+    char **vars;          /* owned C variables declared for the body */
+    int var_count;
+    char **cells;         /* cells made for the body */
+    int cell_count;
+    char label[32];       /* end of the body (a top-level block's `return`) */
+    int label_used;
+} InlineScope;
+
+static void emit_fn_body_stmt(CodeGen *cg, AstNode *stmt, int is_method, int want_value);
+static void emit_stmt(CodeGen *cg, AstNode *node);
+
+/* Release what the inlined bodies around a `return` that leaves the function
+ * own: their variables and cells, and the enclosing statements' temps (left
+ * on the lists for the code after the body) */
+static void emit_inline_exit_releases(CodeGen *cg) {
+    for (InlineScope *sc = (InlineScope *)cg->inline_scope; sc; sc = sc->outer) {
+        for (int i = 0; i < sc->var_count; i++) {
+            emit_indent(cg);
+            fprintf(cg->out, "clay_release_val(%s);\n", c_safe_name(sc->vars[i]));
+        }
+        for (int i = 0; i < sc->cell_count; i++) {
+            emit_indent(cg);
+            fprintf(cg->out, "clay_cell_release(%s_cell);\n", c_safe_name(sc->cells[i]));
+        }
+    }
+    for (int i = 0; i < cg->temp_base; i++) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(%s);\n", cg->owned_temps[i]);
+    }
+}
+
+/* Would `name = v` in a block function make a new local of the block?
+ * (emit_fn_assign's last case; another file's top-level variable also does
+ * in a top-level block, see emit_shadow_decls) */
+static int inline_new_local(CodeGen *cg, AstNode *stmt) {
+    const char *name = stmt->as.assign.name;
+    if (has_slot_flag(cg, name) || is_known_slot(cg, name) || is_boxed(cg, name)) return 0;
+    if (!is_fn_local(cg, name)) return 1;
+    return !cur_method_ctx && is_toplevel_var(cg, name) && !is_builtin_global(name) &&
+           !toplevel_in_file(cg, name, stmt->file);
+}
+
+static void emit_inline_body(CodeGen *cg, NodeList *body, const char *dest) {
+    InlineScope sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.outer = (InlineScope *)cg->inline_scope;
+    sc.dest = dest;
+    snprintf(sc.label, sizeof(sc.label), "__inl_end_%d", cg->temp_counter++);
+    int saved_base = cg->temp_base;
+    int saved_locals = cg->local_count;
+    int saved_boxed = cg->boxed_count;
+    int cap = 0;
+    char mark[32];   /* the unwind list before the block's variables */
+    snprintf(mark, sizeof(mark), "__uw_inl_%d", cg->temp_counter++);
+    int marked = 0;
+
+    /* the block's variables, nil (and their flags set) each time it runs */
+    for (int i = 0; i < body->count; i++) {
+        AstNode *stmt = body->items[i];
+        if (!stmt || stmt->type != NODE_ASSIGN || !inline_new_local(cg, stmt)) continue;
+        const char *name = stmt->as.assign.name;
+        int is_new = 1;
+        for (int k = saved_locals; k < cg->local_count; k++)
+            if (strcmp(cg->local_names[k], name) == 0) is_new = 0;
+        if (!is_new) continue;
+        if (!marked) {
+            emit_indent(cg);
+            fprintf(cg->out, "int %s = clay_uw_mark();\n", mark);
+            marked = 1;
+        }
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s = CLAY_NIL; clay_uw_var(&%s);\n",
+                c_safe_name(name), c_safe_name(name));
+        push_local(cg, name);
+        name_list_push(&sc.vars, &sc.var_count, &cap, name);
+        if (is_local(cg, "_method_self") && !is_builtin_global(name)) {
+            char flag[160];
+            slot_flag_name(name, flag, sizeof(flag));
+            emit_indent(cg);
+            fprintf(cg->out, "ClayValue %s = clay_has_slot(%s, \"%s\") ? CLAY_TRUE : CLAY_FALSE;\n",
+                    flag, method_self_expr(cg), name);
+            push_local(cg, flag);
+        }
+    }
+    /* the ones blocks made here capture: a fresh cell each run */
+    int boxed_from = cg->boxed_count;
+    prebox_captures_list(cg, body);
+    cap = 0;
+    if (!marked && cg->boxed_count > boxed_from) {
+        /* (the cells are made above: they are the list's top entries) */
+        emit_indent(cg);
+        fprintf(cg->out, "int %s = clay_uw_mark();\n", mark);
+        marked = 1;
+    }
+    for (int i = boxed_from; i < cg->boxed_count; i++) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_cell(&%s_cell);\n", c_safe_name(cg->boxed_names[i]));
+        name_list_push(&sc.cells, &sc.cell_count, &cap, cg->boxed_names[i]);
+    }
+
+    cg->inline_scope = &sc;
+    cg->temp_base = cg->owned_temp_count;
+    for (int i = 0; i < body->count; i++)
+        emit_fn_body_stmt(cg, body->items[i], 0, dest && i == body->count - 1);
+    AstNode *last = body->count > 0 ? body->items[body->count - 1] : NULL;
+    if (dest && last && last->type != NODE_RETURN && last->type != NODE_BREAK &&
+        last->type != NODE_CONTINUE && last->type != NODE_DESTRUCTURE) {
+        emit_indent(cg);
+        fprintf(cg->out, "%s = __rv; clay_retain_val(%s);\n", dest, dest);
+    }
+    if (sc.label_used) {
+        emit_indent(cg);
+        fprintf(cg->out, "%s: ;\n", sc.label);
+    }
+    if (marked) {
+        /* (clay_uw_drop only drops temporaries) */
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_reset(%s);\n", mark);
+    }
+    for (int i = 0; i < sc.var_count; i++) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(%s);\n", c_safe_name(sc.vars[i]));
+        free(sc.vars[i]);
+    }
+    for (int i = 0; i < sc.cell_count; i++) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_cell_release(%s_cell);\n", c_safe_name(sc.cells[i]));
+        free(sc.cells[i]);
+    }
+    free(sc.vars);
+    free(sc.cells);
+    cg->temp_base = saved_base;
+    cg->inline_scope = sc.outer;
+    while (cg->local_count > saved_locals) free(cg->local_names[--cg->local_count]);
+    while (cg->boxed_count > saved_boxed) free(cg->boxed_names[--cg->boxed_count]);
+}
+
+static int is_compare_op(AstNode *n) {
+    if (!n || n->type != NODE_BINARY) return 0;
+    const char *op = n->as.binary.op;
+    return strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 || strcmp(op, "<") == 0 ||
+           strcmp(op, ">") == 0 || strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0;
+}
+
+/* Open `if (<cond sel matches>) {`. A comparison is tested directly; anything
+ * else through clay_cond_test. Returns the receiver's temp (NULL for a
+ * comparison, whose value is true or false). */
+static char *emit_if_open(CodeGen *cg, AstNode *send, AstNode *cond, int want_true, int chain) {
+    char *recv = NULL;
+    if (is_compare_op(cond)) {
+        char *b = emit_binary(cg, cond);
+        emit_indent(cg);
+        fprintf(cg->out, "if (%sCLAY_IS_TRUTHY(%s)) {\n", want_true ? "" : "!", b);
+        free(b);
+    } else {
+        recv = emit_expr(cg, cond);
+        emit_line(cg, send);
+        emit_indent(cg);
+        fprintf(cg->out, "if (clay_cond_test(%s, %d, %d)) {\n", recv, want_true, chain);
+    }
+    cg->indent++;
+    return recv;
+}
+
+static void emit_if_else(CodeGen *cg) {
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "} else {\n");
+    cg->indent++;
+}
+
+static void emit_if_close(CodeGen *cg) {
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "}\n");
+}
+
+static char *emit_inline_if(CodeGen *cg, AstNode *node, int want_value) {
+    AstNode *recv = node->as.send.receiver;
+    NodeList *body = &node->as.send.args.items[0]->as.block.body;
+    int is_true = strcmp(node->as.send.message, "ifTrue") == 0;
+
+    /* cells for what blocks inside capture outlive the branches */
+    prebox_captures(cg, node);
+    char *t = NULL;
+    if (want_value) {
+        t = temp_name(cg);
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s = CLAY_NIL;\n", t);
+        push_owned_temp(cg, t);
+    }
+
+    if (ast_is_inline_if(recv)) {
+        /* c s1 { a } s2 { b }: a when s1 matches c, else b */
+        int first_true = strcmp(recv->as.send.message, "ifTrue") == 0;
+        free(emit_if_open(cg, recv, recv->as.send.receiver, first_true, 1));
+        emit_inline_body(cg, &recv->as.send.args.items[0]->as.block.body, t);
+        emit_if_else(cg);
+        emit_inline_body(cg, body, t);
+        emit_if_close(cg);
+        return t;
+    }
+
+    char *r = emit_if_open(cg, node, recv, is_true, 0);
+    emit_inline_body(cg, body, t);
+    if (want_value) {
+        /* a lone ifTrue/ifFalse gives a condition result; a comparison's
+         * receiver is true or false, so `true` stands in for it */
+        const char *rv = r ? r : "CLAY_TRUE";
+        emit_indent(cg);
+        fprintf(cg->out, "{ ClayValue __v = %s; %s = clay_cond_ran(%s, __v); clay_release_val(__v); }\n",
+                t, t, rv);
+        emit_if_else(cg);
+        emit_indent(cg);
+        fprintf(cg->out, "%s = clay_cond_skipped(%s);\n", t, rv);
+    }
+    emit_if_close(cg);
+    free(r);
+    return t;
+}
+
+/* --- Inlined whileTrue/whileFalse ---
+ * A loop whose breaks and continues can all be jumps (ast_is_inline_while)
+ * is a C `for (;;)` running both blocks as inlined bodies, as
+ * bc_emit_inline_while does. Each run starts from the unwind mark __lp_<id>;
+ * a break or continue releases what the inlined bodies inside the loop and
+ * their statements own, then jumps to __brk_<id> / __cont_<id>. The loop's
+ * value (the body's last) is kept in its result temp. */
+typedef struct InlineLoop {
+    InlineScope *scope;   /* cg->inline_scope outside the loop */
+    int temp_mark;        /* owned temps from here are the body's statements' */
+    int id;
+    int cont_used;
+} InlineLoop;
+
+/* break / continue of the inlined loop being emitted */
+static void emit_loop_jump(CodeGen *cg, InlineLoop *lp, int is_break) {
+    for (InlineScope *sc = (InlineScope *)cg->inline_scope; sc && sc != lp->scope; sc = sc->outer) {
+        for (int i = 0; i < sc->var_count; i++) {
+            emit_indent(cg);
+            fprintf(cg->out, "clay_release_val(%s);\n", c_safe_name(sc->vars[i]));
+        }
+        for (int i = 0; i < sc->cell_count; i++) {
+            emit_indent(cg);
+            fprintf(cg->out, "clay_cell_release(%s_cell);\n", c_safe_name(sc->cells[i]));
+        }
+    }
+    for (int i = lp->temp_mark; i < cg->temp_base; i++) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_release_val(%s);\n", cg->owned_temps[i]);
+    }
+    emit_indent(cg);
+    fprintf(cg->out, "clay_uw_reset(__lp_%d); goto __%s_%d;\n", lp->id,
+            is_break ? "brk" : "cont", lp->id);
+    if (!is_break) lp->cont_used = 1;
+}
+
+static char *emit_inline_while(CodeGen *cg, AstNode *node, int want_value) {
+    NodeList *cond = &node->as.send.receiver->as.block.body;
+    NodeList *body = &node->as.send.args.items[0]->as.block.body;
+    int is_true = strcmp(node->as.send.message, "whileTrue") == 0;
+
+    /* cells for what blocks inside capture outlive the loop */
+    prebox_captures(cg, node);
+    char *t = NULL;
+    if (want_value) {
+        t = temp_name(cg);
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s = CLAY_NIL;\n", t);
+        push_owned_temp(cg, t);
+    }
+    InlineLoop lp;
+    lp.scope = (InlineScope *)cg->inline_scope;
+    lp.temp_mark = cg->owned_temp_count;
+    lp.id = cg->temp_counter++;
+    lp.cont_used = 0;
+    char c[32], b[32];
+    snprintf(c, sizeof(c), "__c_%d", lp.id);
+    snprintf(b, sizeof(b), "__b_%d", lp.id);
+
+    emit_indent(cg);
+    fprintf(cg->out, "for (;;) {\n");
+    cg->indent++;
+    emit_indent(cg);
+    fprintf(cg->out, "int __lp_%d = clay_uw_mark();\n", lp.id);
+    emit_indent(cg);
+    fprintf(cg->out, "ClayValue %s = CLAY_NIL; clay_uw_temp(&%s);\n", c, c);
+    void *outer = cg->inline_loop;
+    cg->inline_loop = NULL;   /* a break in the condition is raised */
+    emit_inline_body(cg, cond, c);
+    emit_indent(cg);
+    fprintf(cg->out, "if (%sCLAY_IS_TRUTHY(%s)) { clay_uw_reset(__lp_%d); clay_release_val(%s); goto __brk_%d; }\n",
+            is_true ? "!" : "", c, lp.id, c, lp.id);
+    emit_indent(cg);
+    fprintf(cg->out, "clay_uw_reset(__lp_%d); clay_release_val(%s);\n", lp.id, c);
+    if (want_value) {
+        emit_indent(cg);
+        fprintf(cg->out, "ClayValue %s = CLAY_NIL; clay_uw_temp(&%s);\n", b, b);
+    }
+    cg->inline_loop = &lp;
+    emit_inline_body(cg, body, want_value ? b : NULL);
+    cg->inline_loop = outer;
+    if (want_value) {
+        emit_indent(cg);
+        fprintf(cg->out, "clay_uw_reset(__lp_%d); clay_release_val(%s); %s = %s;\n", lp.id, t, t, b);
+    }
+    if (lp.cont_used) {
+        emit_indent(cg);
+        fprintf(cg->out, "__cont_%d: ;\n", lp.id);
+    }
+    cg->indent--;
+    emit_indent(cg);
+    fprintf(cg->out, "}\n");
+    emit_indent(cg);
+    fprintf(cg->out, "__brk_%d: ;\n", lp.id);
+    return t;
+}
+
+/* A statement of a method (is_method) or block body, or of an inlined body
+ * (as a block's); its value becomes __rv. Without want_value an inlined
+ * ifTrue/ifFalse statement gives none. */
+static void emit_fn_body_stmt(CodeGen *cg, AstNode *stmt, int is_method, int want_value) {
+    if (stmt->type == NODE_ASSIGN) {
+        emit_fn_assign(cg, stmt, is_method);
+    } else if (stmt->type == NODE_SLOT_ASSIGN || stmt->type == NODE_RETURN ||
+               stmt->type == NODE_BREAK || stmt->type == NODE_CONTINUE ||
+               stmt->type == NODE_DESTRUCTURE) {
+        emit_stmt(cg, stmt);
+    } else if (!want_value && ast_is_inline_if(stmt)) {
+        emit_line(cg, stmt);
+        emit_inline_if(cg, stmt, 0);
+        emit_temp_cleanup(cg, NULL);
+    } else if (!want_value && ast_is_inline_while(stmt)) {
+        emit_line(cg, stmt);
+        emit_inline_while(cg, stmt, 0);
+        emit_temp_cleanup(cg, NULL);
+    } else {
+        emit_fn_expr_stmt(cg, stmt);
+    }
+}
+
 /* --- Emit statements --- */
 
 static void emit_stmt(CodeGen *cg, AstNode *node) {
@@ -2008,12 +2397,29 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
             fprintf(cg->out, "{ ClayValue __ret_v = %s;\n", val ? val : "CLAY_NIL");
             cg->indent++;
             emit_temp_cleanup(cg, val);
+            emit_inline_exit_releases(cg);
             emit_function_releases(cg);
             emit_indent(cg);
             fprintf(cg->out, "clay_release_val(__rv);\n");
             emit_indent(cg);
             fprintf(cg->out, "clay_raise_return(__ret_v, __ret_id_cell->value); }\n");
             cg->indent--;
+            free(val);
+            return;
+        }
+        InlineScope *isc = (InlineScope *)cg->inline_scope;
+        if (isc && cg->fn_is_block) {
+            /* in a top-level block `return` ends just the inlined block */
+            char *val = node->as.return_stmt.expr ? emit_expr(cg, node->as.return_stmt.expr) : NULL;
+            if (val && isc->dest) {
+                emit_retains(cg, val, 1 - is_owned_temp(cg, val));
+                emit_indent(cg);
+                fprintf(cg->out, "%s = %s;\n", isc->dest, val);
+            }
+            emit_temp_cleanup(cg, isc->dest ? val : NULL);
+            emit_indent(cg);
+            fprintf(cg->out, "goto %s;\n", isc->label);
+            isc->label_used = 1;
             free(val);
             return;
         }
@@ -2025,13 +2431,23 @@ static void emit_stmt(CodeGen *cg, AstNode *node) {
                 emit_temp_cleanup(cg, val);
                 free(val);
             }
+        } else if (cg->in_function) {
+            emit_rv_set(cg, "CLAY_NIL");   /* a bare `return` gives nil */
         }
         if (cg->in_function) {
+            emit_inline_exit_releases(cg);
             emit_function_exit(cg);
         } else {
             emit_indent(cg);
             fprintf(cg->out, "return __rv;\n");
         }
+        return;
+    }
+
+    /* In an inlined loop's body, break and continue jump */
+    if ((node->type == NODE_BREAK || node->type == NODE_CONTINUE) && cg->inline_loop) {
+        emit_line(cg, node);
+        emit_loop_jump(cg, (InlineLoop *)cg->inline_loop, node->type == NODE_BREAK);
         return;
     }
 
@@ -2223,7 +2639,7 @@ static void emit_method_bodies(CodeGen *cg) {
              * raising a ReturnSignal tagged with this call's id; catch it here.
              * (The frame is pushed before any locals exist; on that path the
              * method's own locals are not released.) */
-            if (ast_has_block_return(&node->as.method_def.body)) {
+            if (ast_has_block_return_inlined(&node->as.method_def.body)) {
                 fprintf(cg->out,
                     "    ClayValue __ret_id = clay_return_id_next();\n"
                     "    ClayTryFrame __ret_tf;\n"
@@ -2252,20 +2668,9 @@ static void emit_method_bodies(CodeGen *cg) {
             emit_slot_fallback_decls(cg, &node->as.method_def.body);
             int saved_indent = cg->indent;
             cg->indent = 1;
-            for (int i = 0; i < node->as.method_def.body.count; i++) {
-                AstNode *stmt = node->as.method_def.body.items[i];
-                if (stmt->type == NODE_ASSIGN) {
-                    emit_fn_assign(cg, stmt, 1);
-                } else if (stmt->type == NODE_SLOT_ASSIGN ||
-                           stmt->type == NODE_RETURN ||
-                           stmt->type == NODE_BREAK ||
-                           stmt->type == NODE_CONTINUE ||
-                           stmt->type == NODE_DESTRUCTURE) {
-                    emit_stmt(cg, stmt);
-                } else {
-                    emit_fn_expr_stmt(cg, stmt);
-                }
-            }
+            NodeList *mbody = &node->as.method_def.body;
+            for (int i = 0; i < mbody->count; i++)
+                emit_fn_body_stmt(cg, mbody->items[i], 1, i == mbody->count - 1);
             emit_function_exit(cg);
             cg->indent = saved_indent;
             cg->fn_has_ret_frame = 0;
@@ -2305,20 +2710,9 @@ static void emit_method_bodies(CodeGen *cg) {
                 emit_shadow_decls(cg, &node->as.block.body);
             int saved_indent = cg->indent;
             cg->indent = 1;
-            for (int i = 0; i < node->as.block.body.count; i++) {
-                AstNode *stmt = node->as.block.body.items[i];
-                if (stmt->type == NODE_ASSIGN) {
-                    emit_fn_assign(cg, stmt, 0);
-                } else if (stmt->type == NODE_SLOT_ASSIGN ||
-                           stmt->type == NODE_RETURN ||
-                           stmt->type == NODE_BREAK ||
-                           stmt->type == NODE_CONTINUE ||
-                           stmt->type == NODE_DESTRUCTURE) {
-                    emit_stmt(cg, stmt);
-                } else {
-                    emit_fn_expr_stmt(cg, stmt);
-                }
-            }
+            NodeList *bbody = &node->as.block.body;
+            for (int i = 0; i < bbody->count; i++)
+                emit_fn_body_stmt(cg, bbody->items[i], 0, i == bbody->count - 1);
             emit_function_exit(cg);
             cg->indent = saved_indent;
 
@@ -2392,6 +2786,9 @@ void codegen_init(CodeGen *cg, FILE *out, const char *source_file) {
     cg->owned_temps = NULL;
     cg->owned_temp_count = 0;
     cg->owned_temp_capacity = 0;
+    cg->temp_base = 0;
+    cg->inline_scope = NULL;
+    cg->inline_loop = NULL;
     cg->in_function = 0;
     cg->use_slot_recv = 0;
     cg->fn_is_block = 0;

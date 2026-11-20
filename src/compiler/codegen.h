@@ -32,6 +32,12 @@ typedef struct {
     char **owned_temps;  /* temps holding owned references (need release) */
     int owned_temp_count;
     int owned_temp_capacity;
+    int temp_base;       /* statement cleanup releases owned temps from here
+                          * (an inlined ifTrue body's statements keep the
+                          * enclosing statement's temps) */
+    void *inline_scope;  /* innermost inlined ifTrue/ifFalse body (InlineScope) */
+    void *inline_loop;   /* inlined whileTrue/whileFalse whose body is being
+                          * emitted (InlineLoop): break and continue jump */
     /* Ownership in the method/block function being emitted (not main):
      * C variables that hold a reference, and cells created here — all released
      * when the function returns. */

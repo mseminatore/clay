@@ -228,6 +228,24 @@ FnDef = Object clone {
     }
 }
 
+// An inlined ifTrue/ifFalse body being emitted (codegen.c InlineScope)
+InlineScope = Object clone {
+    outer = nil
+    dest = nil              // receives the body's value (owned), or nil
+    vars = nil              // owned C variables declared for the body
+    cells = nil             // cells made for the body
+    label = ""              // end of the body (a top-level block's `return`)
+    labelUsed = false
+}
+
+// An inlined whileTrue/whileFalse whose body is being emitted (InlineLoop)
+InlineLoop = Object clone {
+    scope = nil             // the inlined body outside the loop
+    tempMark = 0            // owned temps from here are the body's statements'
+    id = 0
+    contUsed = false
+}
+
 // --- the code generator ---
 
 CodeGen = Object clone {
@@ -248,6 +266,10 @@ CodeGen = Object clone {
     knownSlots = nil
     knownMembers = nil      // slot and method names of the enclosing clone body
     ownedTemps = nil
+    tempBase = 0            // statement cleanup releases owned temps from here
+    inlineScope = nil       // innermost inlined ifTrue/ifFalse body
+    inlineLoop = nil        // inlined loop whose body is being emitted
+    prewalkDepth = 0        // prewalk inside a method or block body
     inFunction = false
     useSlotRecv = false
     fnIsBlock = false
@@ -294,6 +316,10 @@ CodeGen = Object clone {
         knownSlots = nil
         knownMembers = nil
         ownedTemps = []
+        tempBase = 0
+        inlineScope = nil
+        inlineLoop = nil
+        prewalkDepth = 0
         inFunction = false
         useSlotRecv = false
         fnIsBlock = false
@@ -352,7 +378,7 @@ CodeGen = Object clone {
         (ownedTemps size > from) ifTrue { self line("clay_uw_drop(" + (ownedTemps size - from) toString + ");") }
         ownedTemps = ownedTemps slice(0, from)
     }
-    tempCleanup(resultTemp) { self tempCleanupFrom(0, resultTemp) }
+    tempCleanup(resultTemp) { self tempCleanupFrom(tempBase, resultTemp) }
 
     // a line with at least one level of indent (declarations at a function's
     // start are written before its body's indent is set)
@@ -493,6 +519,15 @@ CodeGen = Object clone {
         (k == "Block") ifTrue { return self returnWalkList(n body, true, wantInBlock) }
         (k == "Assign") ifTrue { return self returnWalk(n value, inBlock, wantInBlock) }
         (k == "Send") ifTrue {
+            // an inlined block's statements are the method's
+            (self isInlineIf(n)) ifTrue {
+                return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                       (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
+            }
+            (self isInlineWhile(n)) ifTrue {
+                return (self returnWalkList(n recv body, inBlock, wantInBlock)) ||
+                       (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
+            }
             return (self returnWalk(n recv, inBlock, wantInBlock)) ||
                    (self returnWalkList(n items, inBlock, wantInBlock))
         }
@@ -532,7 +567,9 @@ CodeGen = Object clone {
             fname = "_clay_block_" + nameCounter toString
             nameCounter = nameCounter + 1
             self register(n, fname)
+            prewalkDepth = prewalkDepth + 1
             n body each { |s| self prewalk(s, fname) }
+            prewalkDepth = prewalkDepth - 1
             return nil
         }
         (k == "MethodDef") ifTrue {
@@ -540,7 +577,9 @@ CodeGen = Object clone {
                     (CNames mangle(n name)) + "_" + nameCounter toString
             nameCounter = nameCounter + 1
             self register(n, fname)
+            prewalkDepth = prewalkDepth + 1
             n body each { |s| self prewalk(s, fname) }
+            prewalkDepth = prewalkDepth - 1
             return nil
         }
         (k == "Clone") ifTrue {
@@ -550,7 +589,18 @@ CodeGen = Object clone {
         }
         (k == "Assign") ifTrue { return self prewalk(n value, n name) }
         (k == "Send") ifTrue {
+            // an inlined loop's blocks get no functions
+            (prewalkDepth > 0 && (self isInlineWhile(n))) ifTrue {
+                n recv body each { |s| self prewalk(s, parentName) }
+                (n items at(0)) body each { |s| self prewalk(s, parentName) }
+                return nil
+            }
             self prewalk(n recv, parentName)
+            // an inlined block gets no function
+            (prewalkDepth > 0 && (self isInlineIf(n))) ifTrue {
+                (n items at(0)) body each { |s| self prewalk(s, parentName) }
+                return nil
+            }
             n items each { |a| self prewalk(a, parentName) }
             return nil
         }
@@ -712,7 +762,11 @@ CodeGen = Object clone {
         }
         (k == "Ident") ifTrue { return self ident(n) }
         (k == "Self") ifTrue { return self selfExpr(n) }
-        (k == "Send") ifTrue { return self send(n) }
+        (k == "Send") ifTrue {
+            (inFunction && (self isInlineIf(n))) ifTrue { return self inlineIf(n, true) }
+            (inFunction && (self isInlineWhile(n))) ifTrue { return self inlineWhile(n, true) }
+            return self send(n)
+        }
         (k == "Binary") ifTrue { return self binary(n) }
         (k == "Block") ifTrue { return self block(n) }
         (k == "Array") ifTrue {
@@ -874,7 +928,17 @@ CodeGen = Object clone {
             return nil
         }
         (k == "Send") ifTrue {
+            (inFunction && (self isInlineWhile(n))) ifTrue {
+                n recv body each { |s| self preboxCaptures(s) }
+                (n items at(0)) body each { |s| self preboxCaptures(s) }
+                return nil
+            }
             self preboxCaptures(n recv)
+            // an inlined block's statements run in this function
+            (inFunction && (self isInlineIf(n))) ifTrue {
+                (n items at(0)) body each { |s| self preboxCaptures(s) }
+                return nil
+            }
             n items each { |a| self preboxCaptures(a) }
             return nil
         }
@@ -1325,10 +1389,24 @@ CodeGen = Object clone {
                 self line("{ ClayValue __ret_v = " + (v ?? "CLAY_NIL") + ";")
                 indent = indent + 1
                 self tempCleanup(v)
+                self inlineExitReleases
                 self functionReleases
                 self line("clay_release_val(__rv);")
                 self line("clay_raise_return(__ret_v, __ret_id_cell->value); }")
                 indent = indent - 1
+                return nil
+            }
+            (inlineScope != nil && fnIsBlock) ifTrue {
+                // in a top-level block `return` ends just the inlined block
+                sc = inlineScope
+                v = (n expr == nil) ifTrue { nil } ifFalse { self expr(n expr) }
+                (v != nil && sc dest != nil) ifTrue {
+                    self retains(v, 1 - (self own(v)))
+                    self line(sc dest + " = " + v + ";")
+                }
+                self tempCleanup((sc dest != nil) ifTrue { v } ifFalse { nil })
+                self line("goto " + sc label + ";")
+                sc labelUsed = true
                 return nil
             }
             (n expr != nil) ifTrue {
@@ -1338,9 +1416,20 @@ CodeGen = Object clone {
                     self rvSet(v)
                     self tempCleanup(v)
                 }
+            } ifFalse {
+                // a bare `return` gives nil
+                inFunction ifTrue { self rvSet("CLAY_NIL") }
             }
-            inFunction ifTrue { self functionExit } ifFalse { self line("return __rv;") }
+            inFunction ifTrue {
+                self inlineExitReleases
+                self functionExit
+            } ifFalse { self line("return __rv;") }
             return nil
+        }
+        // in an inlined loop's body, break and continue jump
+        ((k == "Break" || k == "Continue") && inlineLoop != nil) ifTrue {
+            self emitLine(n)
+            return self loopJump(inlineLoop, k == "Break")
         }
         (k == "Break") ifTrue {
             self emitLine(n)
@@ -1407,12 +1496,335 @@ CodeGen = Object clone {
         self tempCleanup(nil)
     }
 
-    // a statement of a method or block body
-    bodyStmt(s, isMethod) {
+    // a statement of a method or block body, or of an inlined body (as a
+    // block's); without wantValue an inlined ifTrue/ifFalse gives no value
+    bodyStmt(s, isMethod, wantValue) {
         k = s kind
         (k == "Assign") ifTrue { return self fnAssign(s, isMethod) }
         (k == "SlotAssign" || k == "Return" || k == "Break" || k == "Continue") ifTrue { return self stmt(s) }
+        (wantValue == false && (self isInlineIf(s))) ifTrue {
+            self emitLine(s)
+            self inlineIf(s, false)
+            return self tempCleanup(nil)
+        }
+        (wantValue == false && (self isInlineWhile(s))) ifTrue {
+            self emitLine(s)
+            self inlineWhile(s, false)
+            return self tempCleanup(nil)
+        }
         self fnExprStmt(s)
+    }
+
+    // --- inlined ifTrue/ifFalse (codegen.c emit_inline_if) ---
+
+    isInlineIf(n) {
+        (n == nil || n kind != "Send" || n isSuper || n isCall) ifTrue { return false }
+        (n items size != 1 || (n name != "ifTrue" && n name != "ifFalse")) ifTrue { return false }
+        b = n items at(0)
+        b != nil && b kind == "Block" && b params size == 0
+    }
+
+    // --- inlined whileTrue/whileFalse (codegen.c emit_inline_while) ---
+
+    // x whileTrue { ... } / whileFalse with a block literal argument
+    isLoopSend(n) {
+        (n == nil || n kind != "Send" || n isSuper || n isCall) ifTrue { return false }
+        (n items size != 1 || (n name != "whileTrue" && n name != "whileFalse")) ifTrue { return false }
+        b = n items at(0)
+        b != nil && b kind == "Block"
+    }
+
+    // is there a break or continue in n whose signal could leave it?
+    loopCtlEscapes(n) {
+        (n == nil) ifTrue { return false }
+        k = n kind
+        (k == "Break" || k == "Continue") ifTrue { return true }
+        (k == "Block") ifTrue { return self loopCtlEscapesList(n body) }
+        (k == "Send") ifTrue {
+            // a loop catches its body's
+            (self isLoopSend(n)) ifTrue { return self loopCtlEscapes(n recv) }
+            return (self loopCtlEscapes(n recv)) || (self loopCtlEscapesList(n items))
+        }
+        (k == "Binary") ifTrue { return (self loopCtlEscapes(n left)) || (self loopCtlEscapes(n right)) }
+        (k == "Assign") ifTrue { return self loopCtlEscapes(n value) }
+        (k == "Return") ifTrue { return self loopCtlEscapes(n expr) }
+        (k == "Array") ifTrue { return self loopCtlEscapesList(n items) }
+        (k == "DictLit") ifTrue { return self loopCtlEscapesList(n vals) }
+        (k == "TryCatch") ifTrue {
+            return (self loopCtlEscapes(n tryBlock)) || (self loopCtlEscapes(n catchBlock)) ||
+                   (self loopCtlEscapes(n finallyBlock))
+        }
+        (k == "Raise") ifTrue { return self loopCtlEscapes(n expr) }
+        (k == "SlotAssign") ifTrue { return (self loopCtlEscapes(n recv)) || (self loopCtlEscapes(n value)) }
+        (k == "Destructure") ifTrue { return self loopCtlEscapes(n value) }
+        (k == "Clone") ifTrue {
+            (self loopCtlEscapes(n recv)) ifTrue { return true }
+            return (n items find { |m| m kind == "SlotDef" && (self loopCtlEscapes(m value)) }) != nil
+        }
+        false
+    }
+
+    loopCtlEscapesList(list) {
+        (list == nil) ifTrue { return false }
+        (list find { |n| self loopCtlEscapes(n) }) != nil
+    }
+
+    // can every break/continue in these loop-body statements be a jump?
+    loopJumpsList(list) { (list find { |n| (self loopJumps(n)) == false }) == nil }
+
+    loopJumps(n) {
+        (n == nil || n kind == "Break" || n kind == "Continue") ifTrue { return true }
+        (self isInlineIf(n)) ifTrue {
+            r = n recv
+            (self isInlineIf(r)) ifTrue {
+                ((self loopCtlEscapes(r recv)) || (self loopJumpsList((r items at(0)) body)) == false) ifTrue {
+                    return false
+                }
+            } ifFalse {
+                (self loopCtlEscapes(r)) ifTrue { return false }
+            }
+            return self loopJumpsList((n items at(0)) body)
+        }
+        (self loopCtlEscapes(n)) == false
+    }
+
+    // `{ c } whileTrue { ... }` / whileFalse with parameterless block
+    // literals whose breaks and continues can all be jumps (ast_is_inline_while)
+    isInlineWhile(n) {
+        (self isLoopSend(n)) ifFalse { return false }
+        c = n recv
+        b = n items at(0)
+        c != nil && c kind == "Block" && c params size == 0 && b params size == 0 &&
+            (self loopJumpsList(b body))
+    }
+
+    // break / continue of the inlined loop being emitted: release what the
+    // inlined bodies inside it and their statements own, then jump
+    loopJump(lp, isBreak) {
+        sc = inlineScope
+        { sc != nil && sc != lp scope } whileTrue {
+            sc vars each { |v| self line("clay_release_val(" + (self safe(v)) + ");") }
+            sc cells each { |c| self line("clay_cell_release(" + (self safe(c)) + "_cell);") }
+            sc = sc outer
+        }
+        i = lp tempMark
+        { i < tempBase } whileTrue {
+            self line("clay_release_val(" + (ownedTemps at(i)) + ");")
+            i = i + 1
+        }
+        id = lp id toString
+        self line("clay_uw_reset(__lp_" + id + "); goto __" + (isBreak ifTrue { "brk" } ifFalse { "cont" }) +
+                  "_" + id + ";")
+        isBreak ifFalse { lp contUsed = true }
+    }
+
+    inlineWhile(n, wantValue) {
+        cond = n recv body
+        body = (n items at(0)) body
+        // cells for what blocks inside capture outlive the loop
+        self preboxCaptures(n)
+        t = nil
+        wantValue ifTrue {
+            t = self tempName
+            self line("ClayValue " + t + " = CLAY_NIL;")
+            self pushOwnedTemp(t)
+        }
+        lp = InlineLoop clone
+        lp scope = inlineScope
+        lp tempMark = ownedTemps size
+        lp id = tempCounter
+        tempCounter = tempCounter + 1
+        id = lp id toString
+        c = "__c_" + id
+        b = "__b_" + id
+
+        self line("for (;;) {")
+        indent = indent + 1
+        self line("int __lp_" + id + " = clay_uw_mark();")
+        self line("ClayValue " + c + " = CLAY_NIL; clay_uw_temp(&" + c + ");")
+        outer = inlineLoop
+        // a break in the condition is raised
+        inlineLoop = nil
+        self inlineBody(cond, c)
+        self line("if (" + ((n name == "whileTrue") ifTrue { "!" } ifFalse { "" }) + "CLAY_IS_TRUTHY(" + c +
+                  ")) { clay_uw_reset(__lp_" + id + "); clay_release_val(" + c + "); goto __brk_" + id + "; }")
+        self line("clay_uw_reset(__lp_" + id + "); clay_release_val(" + c + ");")
+        wantValue ifTrue { self line("ClayValue " + b + " = CLAY_NIL; clay_uw_temp(&" + b + ");") }
+        inlineLoop = lp
+        self inlineBody(body, wantValue ifTrue { b } ifFalse { nil })
+        inlineLoop = outer
+        wantValue ifTrue {
+            self line("clay_uw_reset(__lp_" + id + "); clay_release_val(" + t + "); " + t + " = " + b + ";")
+        }
+        lp contUsed ifTrue { self line("__cont_" + id + ": ;") }
+        indent = indent - 1
+        self line("}")
+        self line("__brk_" + id + ": ;")
+        t
+    }
+
+    isCompareOp(n) {
+        (n == nil || n kind != "Binary") ifTrue { return false }
+        op = n name
+        op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
+    }
+
+    // what the inlined bodies around a `return` leaving the function own:
+    // their variables and cells, and the enclosing statements' temps
+    inlineExitReleases() {
+        sc = inlineScope
+        { sc != nil } whileTrue {
+            sc vars each { |v| self line("clay_release_val(" + (self safe(v)) + ");") }
+            sc cells each { |c| self line("clay_cell_release(" + (self safe(c)) + "_cell);") }
+            sc = sc outer
+        }
+        i = 0
+        { i < tempBase } whileTrue {
+            self line("clay_release_val(" + (ownedTemps at(i)) + ");")
+            i = i + 1
+        }
+    }
+
+    // would `name = v` in a block function make a new local of the block?
+    inlineNewLocal(s) {
+        nm = s name
+        ((self hasSlotFlag(nm)) || (self isKnownSlot(nm)) || (self isBoxed(nm))) ifTrue { return false }
+        (self isFnLocal(nm)) ifFalse { return true }
+        methodCtx == false && (self isToplevelVar(nm)) && (self isBuiltinGlobal(nm)) == false &&
+            (self toplevelInFile(nm, s file)) == false
+    }
+
+    inlineBody(body, dest) {
+        sc = InlineScope clone
+        sc outer = inlineScope
+        sc dest = dest
+        sc vars = []
+        sc cells = []
+        sc label = "__inl_end_" + tempCounter toString
+        tempCounter = tempCounter + 1
+        savedBase = tempBase
+        savedLocals = locals size
+        savedBoxed = boxed size
+        mark = "__uw_inl_" + tempCounter toString   // the unwind list before them
+        tempCounter = tempCounter + 1
+        marked = false
+
+        // the block's variables, nil (and their flags set) each time it runs
+        body each { |s|
+            (s != nil && s kind == "Assign" && (self inlineNewLocal(s)) &&
+             ((locals slice(savedLocals, locals size)) contains(s name)) == false) ifTrue {
+                nm = s name
+                marked ifFalse {
+                    self line("int " + mark + " = clay_uw_mark();")
+                    marked = true
+                }
+                c = self safe(nm)
+                self line("ClayValue " + c + " = CLAY_NIL; clay_uw_var(&" + c + ");")
+                locals push(nm)
+                sc vars push(nm)
+                ((self isLocal("_method_self")) && (self isBuiltinGlobal(nm)) == false) ifTrue {
+                    f = self flagName(nm)
+                    self line("ClayValue " + f + " = clay_has_slot(" + (self methodSelfExpr) + ", \"" + nm +
+                              "\") ? CLAY_TRUE : CLAY_FALSE;")
+                    locals push(f)
+                }
+            }
+        }
+        // the ones blocks made here capture: a fresh cell each run
+        boxedFrom = boxed size
+        body each { |s| self preboxCaptures(s) }
+        (marked == false && boxed size > boxedFrom) ifTrue {
+            self line("int " + mark + " = clay_uw_mark();")
+            marked = true
+        }
+        (boxed slice(boxedFrom, boxed size)) each { |b|
+            self line("clay_uw_cell(&" + (self safe(b)) + "_cell);")
+            sc cells push(b)
+        }
+
+        inlineScope = sc
+        tempBase = ownedTemps size
+        i = 0
+        body each { |s|
+            self bodyStmt(s, false, dest != nil && i == body size - 1)
+            i = i + 1
+        }
+        last = (body size > 0) ifTrue { body at(body size - 1) } ifFalse { nil }
+        (dest != nil && last != nil && last kind != "Return" && last kind != "Break" &&
+         last kind != "Continue" && last kind != "Destructure") ifTrue {
+            self line(dest + " = __rv; clay_retain_val(" + dest + ");")
+        }
+        sc labelUsed ifTrue { self line(sc label + ": ;") }
+        // (clay_uw_drop only drops temporaries)
+        marked ifTrue { self line("clay_uw_reset(" + mark + ");") }
+        sc vars each { |v| self line("clay_release_val(" + (self safe(v)) + ");") }
+        sc cells each { |c| self line("clay_cell_release(" + (self safe(c)) + "_cell);") }
+        tempBase = savedBase
+        inlineScope = sc outer
+        locals = locals slice(0, savedLocals)
+        boxed = boxed slice(0, savedBoxed)
+    }
+
+    // open `if (<cond sel matches>) {`: a comparison directly, anything else
+    // through clay_cond_test; the receiver's temp (nil for a comparison)
+    ifOpen(send, cond, wantTrue, chain) {
+        r = nil
+        (self isCompareOp(cond)) ifTrue {
+            b = self binary(cond)
+            self line("if (" + (wantTrue ifTrue { "" } ifFalse { "!" }) + "CLAY_IS_TRUTHY(" + b + ")) {")
+        } ifFalse {
+            r = self expr(cond)
+            self emitLine(send)
+            self line("if (clay_cond_test(" + r + ", " + (wantTrue ifTrue { "1" } ifFalse { "0" }) + ", " +
+                      (chain ifTrue { "1" } ifFalse { "0" }) + ")) {")
+        }
+        indent = indent + 1
+        r
+    }
+
+    ifElse() {
+        indent = indent - 1
+        self line("} else {")
+        indent = indent + 1
+    }
+
+    ifClose() {
+        indent = indent - 1
+        self line("}")
+    }
+
+    inlineIf(n, wantValue) {
+        cond = n recv
+        body = (n items at(0)) body
+        // cells for what blocks inside capture outlive the branches
+        self preboxCaptures(n)
+        t = nil
+        wantValue ifTrue {
+            t = self tempName
+            self line("ClayValue " + t + " = CLAY_NIL;")
+            self pushOwnedTemp(t)
+        }
+        (self isInlineIf(cond)) ifTrue {
+            // c s1 { a } s2 { b }: a when s1 matches c, else b
+            self ifOpen(cond, cond recv, cond name == "ifTrue", true)
+            self inlineBody((cond items at(0)) body, t)
+            self ifElse
+            self inlineBody(body, t)
+            self ifClose
+            return t
+        }
+        r = self ifOpen(n, cond, n name == "ifTrue", false)
+        self inlineBody(body, t)
+        wantValue ifTrue {
+            // a lone ifTrue/ifFalse gives a condition result; `true` stands
+            // in for a comparison's receiver
+            rv = r ?? "CLAY_TRUE"
+            self line("{ ClayValue __v = " + t + "; " + t + " = clay_cond_ran(" + rv + ", __v); clay_release_val(__v); }")
+            self ifElse
+            self line(t + " = clay_cond_skipped(" + rv + ");")
+        }
+        self ifClose
+        t
     }
 
     // --- function bodies ---
@@ -1484,7 +1896,11 @@ CodeGen = Object clone {
             self slotFallbackDecls(n body)
             savedIndent = indent
             indent = 1
-            n body each { |s| self bodyStmt(s, true) }
+            i = 0
+            n body each { |s|
+                self bodyStmt(s, true, i == n body size - 1)
+                i = i + 1
+            }
             self functionExit
             indent = savedIndent
             fnHasRetFrame = false
@@ -1517,7 +1933,11 @@ CodeGen = Object clone {
             methodCtx ifFalse { self shadowDecls(n body) }
             savedIndent = indent
             indent = 1
-            n body each { |s| self bodyStmt(s, false) }
+            i = 0
+            n body each { |s|
+                self bodyStmt(s, false, i == n body size - 1)
+                i = i + 1
+            }
             self functionExit
             indent = savedIndent
             useSlotRecv = savedRecv

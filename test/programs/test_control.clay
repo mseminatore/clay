@@ -89,6 +89,12 @@ Inl = Object clone {
     empty(x) { (x > 0) ifTrue { } ifFalse { 1 } }
     countBig(xs) { n = 0; xs each { |v| (v > 2) ifTrue { continue }; n = n + 1 }; n }
     notBool(x) { x ifTrue { 1 } }
+    // return from inside an expression, and from nested blocks' own variables
+    deep(x) { r = "a" + ((x > 0) ifTrue { return "out" } ifFalse { "b" }); r }
+    deepEach(xs) {
+        xs each { |v| (v > 0) ifTrue { a = v; (a > 1) ifTrue { b = [a * 2]; return b at(0) } } }
+        0
+    }
 }
 Test eq(Inl chain(5), "big")
 Test eq(Inl chain(0), "small")
@@ -113,6 +119,10 @@ Test eq(Inl nested(1), "small")
 Test eq(Inl nested(-1), "neg")
 Test eq(Inl empty(1), nil)
 Test eq(Inl countBig([1, 5, 2, 9]), 2)
+Test eq(Inl deep(1), "out")
+Test eq(Inl deep(0), "ab")
+Test eq(Inl deepEach([0, 1, 3]), 6)
+Test eq(Inl deepEach([0, 1]), 0)
 msg = try { Inl notBool(5); "none" } catch { |e| e message }
 Test ok(msg startsWith("integer does not understand 'ifTrue'"))
 msg = try { Inl notBool(nil); "none" } catch { |e| e message }
@@ -125,12 +135,75 @@ rg = { |x| (x > 1) ifTrue { return "big"; "no" } ifFalse { "x" } }
 Test eq(rg value(5), "big")
 rh = { |x| ((x > 1) ifTrue { (x > 3) ifTrue { return "inner" }; "outer" }) ifFalse { "z" } }
 Test eq(rh value(5), "outer")
+ri = { |x| r = "<" + ((x > 1) ifTrue { a = [x]; return a at(0) } ifFalse { "s" }) + ">"; r }
+Test eq(ri value(5), "<5>")
+Test eq(ri value(0), "<s>")
 
 // whileTrue
 i = 0; s = 0
 { i < 5 } whileTrue { s = s + i; i = i + 1 }
 Test eq(s, 10)
 Test eq(i, 5)
+
+// Inside methods and blocks a loop of block literals runs in place too;
+// it must behave exactly like the message
+Wl = Object clone {
+    sum(n) { i = 0; s = 0; { i < n } whileTrue { s = s + i; i = i + 1 }; s }
+    // the loop's value is its body's last value
+    last(n) { i = 0; { i < n } whileTrue { i = i + 1; i * 10 } }
+    brk(xs) { i = 0; { true } whileTrue { (xs at(i) == 0) ifTrue { break }; i = i + 1 }; i }
+    cont(n) {
+        i = 0; c = 0
+        { i < n } whileTrue { i = i + 1; (i % 2 == 0) ifTrue { continue }; c = c + 1 }
+        c
+    }
+    ret(n) { i = 0; { true } whileTrue { i = i + 1; (i == n) ifTrue { return i * 100 } } }
+    wf(n) { i = 0; { i >= n } whileFalse { i = i + 1 }; i }
+    tailBrk(n) { i = 0; { true } whileTrue { i = i + 1; (i == n) ifTrue { break } ifFalse { i } } }
+    lastBrk(n) { i = 0; r = { true } whileTrue { i = i + 1; (i > n) ifTrue { break }; i * 2 }; r }
+    loneTail(n) { i = 0; { true } whileTrue { i = i + 1; (i > n) ifTrue { break } } }
+    // the body's variables are its own, nil each time it runs
+    fresh() { i = 0; out = []; { i < 3 } whileTrue { r = v; v = i; out push(r); i = i + 1 }; out }
+    closures() { i = 0; fs = []; { i < 3 } whileTrue { j = i; fs push({ j }); i = i + 1 }; fs map { |f| f value } }
+    nested() {
+        i = 0; t = 0
+        { i < 3 } whileTrue {
+            j = 0
+            { j < 3 } whileTrue { (j == 1) ifTrue { j = j + 1; continue }; t = t + 1; j = j + 1 }
+            i = i + 1
+        }
+        t
+    }
+    // a break in a try block or another loop's block is raised as before
+    tryBrk() { i = 0; { true } whileTrue { i = i + 1; try { (i == 3) ifTrue { break } } catch { |e| nil } }; i }
+    eachBrk() { i = 0; { i < 2 } whileTrue { [1, 2, 3] each { |x| (x == 2) ifTrue { break } }; i = i + 1 }; i }
+    // a break in the condition stops the loop around it
+    condBrk() {
+        n = 0
+        [1, 2, 3] each { |x| { (x == 2) ifTrue { break }; false } whileTrue { }; n = n + 1 }
+        n
+    }
+    bareReturn() { 5; return }
+}
+Test eq(Wl sum(5), 10)
+Test eq(Wl last(3), 30)
+Test eq(Wl brk([1, 2, 0, 4]), 2)
+Test eq(Wl cont(10), 5)
+Test eq(Wl ret(4), 400)
+Test eq(Wl wf(3), 3)
+Test eq(Wl tailBrk(3), 2)
+Test eq(Wl lastBrk(2), 4)
+Test eq(Wl loneTail(2) ifFalse { "skipped" }, "skipped")
+Test eq(Wl fresh toString, "[nil, nil, nil]")
+Test eq(Wl closures toString, "[0, 1, 2]")
+Test eq(Wl nested, 6)
+Test eq(Wl tryBrk, 3)
+Test eq(Wl eachBrk, 2)
+Test eq(Wl condBrk, 1)
+Test eq(Wl bareReturn, nil)
+// outside methods `return` ends just the loop's body block (the loop goes on)
+rl = { |n| i = 0; { i < n } whileTrue { i = i + 1; (i == 2) ifTrue { return 99 } }; i }
+Test eq(rl value(5), 5)
 
 // Nested conditionals
 x = 10

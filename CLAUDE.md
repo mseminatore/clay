@@ -164,6 +164,12 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   outside methods ends just the block. The runtime side (`clay_cond_test`/`clay_cond_ran`/
   `clay_cond_skipped` in bootstrap.c) gives the methods' results. Capture prescans and the non-local
   return check (`ast_has_block_return_inlined`) treat such blocks as part of the enclosing code.
+  Codegen does the same in C (`emit_inline_if`; selfhost `inlineIf`): the block's variables are C
+  locals of the branch, released when it ends.
+- **Inlined whileTrue/whileFalse**: `{ c } whileTrue { ... }` with parameterless block literals runs in
+  place too, when every `break`/`continue` that targets it can be a jump (`ast_is_inline_while`: none in
+  a nested block or an expression); otherwise it is sent. `bc_emit_inline_while` / `emit_inline_while`
+  (selfhost `inlineWhile` in both ports); a break or continue raised from called code isn't caught.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.

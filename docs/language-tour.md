@@ -503,7 +503,10 @@ inside a top-level block, `(x > 1) ifTrue { return "big" }` ends just the
 }
 ```
 
-Works with `times`, `each`, `whileTrue`, and `whileFalse`.
+Works with `times`, `each`, `whileTrue`, and `whileFalse`. A `break` or
+`continue` belongs to the loop it is written in: one in a block or method that
+the loop's body only calls may not stop a `whileTrue` loop (see
+[While loops](#while-loops)).
 
 ## Imports
 
@@ -668,6 +671,14 @@ i = 0
   i = i + 1
 }
 ```
+
+In methods and blocks, a loop whose two blocks are written right there is
+compiled in place, like `ifTrue`: no blocks are made and no messages sent, and
+its `break` and `continue` are plain jumps. The loop still behaves like the
+message, except that a `break` or `continue` raised somewhere else (in a block
+made outside the loop, or in a method the body calls) passes it by instead of
+stopping it. A loop with a `break` or `continue` inside another block, such as
+a `try` block, is sent as a message, so those still work.
 
 ## Arrays
 

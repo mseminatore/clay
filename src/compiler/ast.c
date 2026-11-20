@@ -343,6 +343,109 @@ int ast_is_inline_if(AstNode *n) {
     return b && b->type == NODE_BLOCK && b->as.block.params.count == 0;
 }
 
+/* --- Inlined whileTrue/whileFalse ---
+ * `{ c } whileTrue { ... }` (or whileFalse) with parameterless block literals
+ * runs in place when each break and continue that stops or restarts it can
+ * be a jump: the ones among the body's statements, also through the
+ * statements of inlined ifTrue/ifFalse blocks that are statements themselves
+ * or give the body's value. One anywhere else (in an expression, a nested
+ * block, try, ...) is raised as usual and must reach the loop's runtime
+ * method, so that loop is sent. Loops in a loop's body catch their own. */
+
+/* x whileTrue { ... } / whileFalse with a block literal argument */
+static int is_loop_send(AstNode *n) {
+    if (!n || n->type != NODE_SEND || n->as.send.is_super || n->as.send.is_call) return 0;
+    if (n->as.send.args.count != 1) return 0;
+    const char *m = n->as.send.message;
+    if (!m || (strcmp(m, "whileTrue") != 0 && strcmp(m, "whileFalse") != 0)) return 0;
+    AstNode *b = n->as.send.args.items[0];
+    return b && b->type == NODE_BLOCK;
+}
+
+static int loop_ctl_escapes(AstNode *n);
+
+static int loop_ctl_escapes_list(NodeList *l) {
+    for (int i = 0; i < l->count; i++)
+        if (loop_ctl_escapes(l->items[i])) return 1;
+    return 0;
+}
+
+/* Is there a break or continue in n whose signal could leave it? */
+static int loop_ctl_escapes(AstNode *n) {
+    if (!n) return 0;
+    switch (n->type) {
+        case NODE_BREAK:
+        case NODE_CONTINUE:
+            return 1;
+        case NODE_BLOCK:
+            return loop_ctl_escapes_list(&n->as.block.body);
+        case NODE_SEND:
+            if (is_loop_send(n))   /* the loop catches its body's */
+                return loop_ctl_escapes(n->as.send.receiver);
+            return loop_ctl_escapes(n->as.send.receiver) || loop_ctl_escapes_list(&n->as.send.args);
+        case NODE_BINARY:
+            return loop_ctl_escapes(n->as.binary.left) || loop_ctl_escapes(n->as.binary.right);
+        case NODE_ASSIGN:
+            return loop_ctl_escapes(n->as.assign.value);
+        case NODE_RETURN:
+            return loop_ctl_escapes(n->as.return_stmt.expr);
+        case NODE_ARRAY_LIT:
+            return loop_ctl_escapes_list(&n->as.array_lit.elements);
+        case NODE_DICT_LIT:
+            return loop_ctl_escapes_list(&n->as.dict_lit.values);
+        case NODE_TRY_CATCH:
+            return loop_ctl_escapes(n->as.try_catch.try_block) ||
+                   loop_ctl_escapes(n->as.try_catch.catch_block) ||
+                   loop_ctl_escapes(n->as.try_catch.finally_block);
+        case NODE_RAISE:
+            return loop_ctl_escapes(n->as.raise.expr);
+        case NODE_SLOT_ASSIGN:
+            return loop_ctl_escapes(n->as.slot_assign.receiver) ||
+                   loop_ctl_escapes(n->as.slot_assign.value);
+        case NODE_DESTRUCTURE:
+            return loop_ctl_escapes(n->as.destructure.value);
+        case NODE_CLONE:
+            if (loop_ctl_escapes(n->as.clone.proto)) return 1;
+            for (int i = 0; i < n->as.clone.members.count; i++) {
+                AstNode *m = n->as.clone.members.items[i];
+                if (m && m->type == NODE_SLOT_DEF && loop_ctl_escapes(m->as.slot_def.value)) return 1;
+            }
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+/* Can every break/continue in these loop-body statements be a jump? */
+static int loop_jumps_list(NodeList *l) {
+    for (int i = 0; i < l->count; i++) {
+        AstNode *n = l->items[i];
+        if (!n || n->type == NODE_BREAK || n->type == NODE_CONTINUE) continue;
+        if (ast_is_inline_if(n)) {
+            AstNode *recv = n->as.send.receiver;
+            if (ast_is_inline_if(recv)) {
+                if (loop_ctl_escapes(recv->as.send.receiver) ||
+                    !loop_jumps_list(&recv->as.send.args.items[0]->as.block.body))
+                    return 0;
+            } else if (loop_ctl_escapes(recv)) {
+                return 0;
+            }
+            if (!loop_jumps_list(&n->as.send.args.items[0]->as.block.body)) return 0;
+            continue;
+        }
+        if (loop_ctl_escapes(n)) return 0;
+    }
+    return 1;
+}
+
+int ast_is_inline_while(AstNode *n) {
+    if (!is_loop_send(n)) return 0;
+    AstNode *cond = n->as.send.receiver;
+    AstNode *body = n->as.send.args.items[0];
+    return cond && cond->type == NODE_BLOCK && cond->as.block.params.count == 0 &&
+           body->as.block.params.count == 0 && loop_jumps_list(&body->as.block.body);
+}
+
 /* --- Non-local return analysis ---
  * Walk expressions without descending into nested clone bodies (their methods
  * have their own returns). in_block: are we inside a block literal?
@@ -369,6 +472,11 @@ static int ast_return_walk(AstNode *n, int in_block, int want_in_block, int inli
         case NODE_SEND:
             if (inline_ifs && ast_is_inline_if(n))
                 return ast_return_walk(n->as.send.receiver, in_block, want_in_block, inline_ifs) ||
+                       ast_return_walk_list(&n->as.send.args.items[0]->as.block.body,
+                                            in_block, want_in_block, inline_ifs);
+            if (inline_ifs && ast_is_inline_while(n))
+                return ast_return_walk_list(&n->as.send.receiver->as.block.body,
+                                            in_block, want_in_block, inline_ifs) ||
                        ast_return_walk_list(&n->as.send.args.items[0]->as.block.body,
                                             in_block, want_in_block, inline_ifs);
             return ast_return_walk(n->as.send.receiver, in_block, want_in_block, inline_ifs) ||

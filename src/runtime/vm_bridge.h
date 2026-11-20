@@ -133,6 +133,8 @@ typedef struct {
                                 * ifTrue/ifFalse blocks are inlined) */
     void    *inline_exit;      /* the inlined block body being compiled, where a
                                 * `return` outside methods ends it (bc_compiler.c) */
+    void    *inline_loop;      /* the inlined whileTrue/whileFalse whose body is being
+                                * compiled: its break and continue are jumps */
 
     /* Known slot names from the enclosing clone block (for Io-style assignment) */
     const char **known_slots;

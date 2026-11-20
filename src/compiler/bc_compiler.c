@@ -527,6 +527,12 @@ static void bc_prescan_node(BcCompiler *bc, AstNode *node) {
             bc_prescan_node(bc, node->as.assign.value);
             break;
         case NODE_SEND:
+            if (ast_is_inline_while(node)) {
+                /* an inlined loop's blocks' statements are part of this scope */
+                bc_prescan_list(bc, &node->as.send.receiver->as.block.body);
+                bc_prescan_list(bc, &node->as.send.args.items[0]->as.block.body);
+                break;
+            }
             bc_prescan_node(bc, node->as.send.receiver);
             if (ast_is_inline_if(node)) {
                 /* an inlined block's statements are part of this scope */
@@ -691,6 +697,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     int saved_chunk_is_method = bc->chunk_is_method;
     int saved_max_local_count = bc->max_local_count;
     void *saved_inline_exit = bc->inline_exit;
+    void *saved_inline_loop = bc->inline_loop;
     BcLocal *saved_enclosing = bc->enclosing_locals;
     int saved_enclosing_count = bc->enclosing_local_count;
     if (saved_local_count > 0)
@@ -706,6 +713,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->scope_depth = 0;
     bc->chunk_depth++;
     bc->inline_exit = NULL;
+    bc->inline_loop = NULL;
     bc->len = 0;
     if (is_method) bc->in_method = 1;
     bc->chunk_is_method = is_method;
@@ -886,6 +894,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     bc->local_count = saved_local_count;
     bc->max_local_count = saved_max_local_count;
     bc->inline_exit = saved_inline_exit;
+    bc->inline_loop = saved_inline_loop;
     bc->chunk_depth--;
     bc->scope_depth = saved_scope_depth;
     bc->in_method = saved_in_method;
@@ -937,6 +946,14 @@ static int bc_compare_op(AstNode *n) {
     if (strcmp(op, ">=") == 0) return CLAYVM_OP_GTE;
     return -1;
 }
+
+/* An inlined whileTrue/whileFalse (bc_emit_inline_while) */
+typedef struct {
+    int  top;       /* the condition's start (continue's target) */
+    int  depth;     /* values above the loop's stack (lone ifTrue values) */
+    int *breaks;    /* patch positions of the breaks' jumps */
+    int  count, capacity;
+} BcLoop;
 
 /* An inlined block body being compiled: outside methods a `return` in it
  * ends just that block (as it would end the block sent ifTrue), so it jumps
@@ -1070,7 +1087,10 @@ static void bc_emit_inline_if(BcCompiler *bc, AstNode *node, int want_value) {
     if (is_cmp)
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
             (uint16_t)clayvm_vm_add_constant(bc->vm, clay_to_vm(CLAY_TRUE)));
+    BcLoop *loop = (BcLoop *)bc->inline_loop;
+    if (loop) loop->depth++;
     bc_emit_inline_body(bc, body, 1);
+    if (loop) loop->depth--;
     bc_emit_native(bc, bc->native_if_ran, 2);
     int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
     patch_jump(bc, to_skip);
@@ -1079,6 +1099,71 @@ static void bc_emit_inline_if(BcCompiler *bc, AstNode *node, int want_value) {
             (uint16_t)clayvm_vm_add_constant(bc->vm, clay_to_vm(CLAY_TRUE)));
     bc_emit_native(bc, bc->native_if_skipped, 1);
     patch_jump(bc, to_end);
+}
+
+/* --- Inlined whileTrue/whileFalse ---
+ * `{ c } whileTrue { ... }` whose breaks and continues can all be jumps
+ * (ast_is_inline_while) runs both blocks in place, as inlined bodies: a
+ * break jumps past the loop, a continue back to the condition, after popping
+ * what the inlined ifTrue/ifFalse around it left on the stack (`depth`). The
+ * loop's value, the body's last value, is kept in a hidden local. A break or
+ * continue in the condition is raised, as it was from the block. */
+
+static void bc_emit_jump_back(BcCompiler *bc, int target) {
+    emit_op(bc, CLAYVM_OP_JUMP);
+    int offset = target - ((int)bc->len + 2);
+    emit_u16(bc, (uint16_t)(int16_t)offset);
+}
+
+/* break / continue of the inlined loop being compiled */
+static void bc_emit_loop_jump(BcCompiler *bc, BcLoop *loop, int is_break) {
+    for (int i = 0; i < loop->depth; i++) emit_op(bc, CLAYVM_OP_POP);
+    if (!is_break) {
+        bc_emit_jump_back(bc, loop->top);
+        return;
+    }
+    if (loop->count >= loop->capacity) {
+        loop->capacity = loop->capacity ? loop->capacity * 2 : 4;
+        loop->breaks = (int *)realloc(loop->breaks, (size_t)loop->capacity * sizeof(int));
+    }
+    loop->breaks[loop->count++] = emit_jump(bc, CLAYVM_OP_JUMP);
+}
+
+static void bc_emit_inline_while(BcCompiler *bc, AstNode *node, int want_value) {
+    NodeList *cond = &node->as.send.receiver->as.block.body;
+    NodeList *body = &node->as.send.args.items[0]->as.block.body;
+    int is_true = strcmp(node->as.send.message, "whileTrue") == 0;
+    int res = -1;
+    if (want_value) {
+        bc_begin_scope(bc);
+        res = bc_add_local(bc, "?loop");
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)res);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
+    BcLoop loop = { (int)bc->len, 0, NULL, 0, 0 };
+    void *outer = bc->inline_loop;
+    bc->inline_loop = NULL;
+    bc_emit_inline_body(bc, cond, 1);
+    bc_emit_native(bc, bc->native_is_truthy, 1);
+    if (!is_true) emit_op(bc, CLAYVM_OP_NOT);
+    int to_end = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+    bc->inline_loop = &loop;
+    bc_emit_inline_body(bc, body, want_value);
+    if (want_value) {
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)res);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
+    bc_emit_jump_back(bc, loop.top);
+    patch_jump(bc, to_end);
+    for (int i = 0; i < loop.count; i++) patch_jump(bc, loop.breaks[i]);
+    free(loop.breaks);
+    bc->inline_loop = outer;
+    if (want_value) {
+        emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)res);
+        bc_end_scope(bc);
+    }
 }
 
 static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
@@ -1224,6 +1309,10 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         case NODE_SEND: {
             if (bc->chunk_depth > 0 && ast_is_inline_if(node)) {
                 bc_emit_inline_if(bc, node, 1);
+                break;
+            }
+            if (bc->chunk_depth > 0 && ast_is_inline_while(node)) {
+                bc_emit_inline_while(bc, node, 1);
                 break;
             }
             /* Push receiver */
@@ -1712,6 +1801,12 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
         return;
     }
 
+    /* In an inlined loop's body, break and continue jump */
+    if ((node->type == NODE_BREAK || node->type == NODE_CONTINUE) && bc->inline_loop) {
+        bc_emit_loop_jump(bc, (BcLoop *)bc->inline_loop, node->type == NODE_BREAK);
+        return;
+    }
+
     /* Break: raise a BreakSignal */
     if (node->type == NODE_BREAK) {
         int name_idx = add_constant_string(bc, "BreakSignal");
@@ -1740,6 +1835,10 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
 
     if (bc->chunk_depth > 0 && ast_is_inline_if(node)) {
         bc_emit_inline_if(bc, node, 0);
+        return;
+    }
+    if (bc->chunk_depth > 0 && ast_is_inline_while(node)) {
+        bc_emit_inline_while(bc, node, 0);
         return;
     }
 

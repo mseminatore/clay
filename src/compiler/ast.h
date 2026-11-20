@@ -164,10 +164,14 @@ void ast_print(AstNode *node, int indent);
  * (so the method must catch ReturnSignal)? Does a block's subtree contain any
  * `return` (so it must capture its method's return id)? */
 int ast_has_block_return(NodeList *method_body);
-/* The same when inlined ifTrue/ifFalse blocks (ast_is_inline_if) aren't blocks */
+/* The same when inlined ifTrue/ifFalse and whileTrue/whileFalse blocks
+ * (ast_is_inline_if, ast_is_inline_while) aren't blocks */
 int ast_has_block_return_inlined(NodeList *method_body);
 /* `c ifTrue { ... }` / `c ifFalse { ... }` with a parameterless block literal */
 int ast_is_inline_if(AstNode *n);
+/* `{ c } whileTrue { ... }` / whileFalse with parameterless block literals,
+ * whose breaks and continues can all be jumps (see ast.c) */
+int ast_is_inline_while(AstNode *n);
 int ast_block_contains_return(AstNode *block);
 
 #endif /* CLAY_AST_H */
