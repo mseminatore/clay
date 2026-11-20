@@ -363,6 +363,51 @@ static ClayValue bool_run_if(ClayObject *self, int argc, ClayValue *argv, ClayOb
     return cr;
 }
 
+/* --- Inlined ifTrue/ifFalse ---
+ * Both compilers inline `c ifTrue { ... }` / `c ifFalse { ... }` with a block
+ * literal: the block's statements run in place instead of being made into a
+ * block and sent. These helpers give the inlined code the same results as the
+ * methods above. */
+
+/* Should the inlined block of `recv ifTrue` (want_true) or `recv ifFalse` run?
+ * A condition result's ifTrue/ifFalse runs its block when it is unmatched. In
+ * a chain (`c ifTrue { } ifFalse { }` inlined as one test) the receiver must
+ * be true or false. Anything else raises: the usual "does not understand" when
+ * it has no such method, a TypeError when it has one of its own (a block
+ * literal's ifTrue/ifFalse is inlined, so it can't be sent to it). */
+int clay_cond_test(ClayValue recv, int want_true, int chain) {
+    if (recv == CLAY_TRUE) return want_true;
+    if (recv == CLAY_FALSE) return !want_true;
+    const char *sel = want_true ? "ifTrue" : "ifFalse";
+    if (!chain && CLAY_IS_OBJ(recv) && CLAY_OBJ(recv)->type == CLAY_TYPE_COND)
+        return !CLAY_OBJ(recv)->as.cond.matched;
+    if (!CLAY_IS_OBJ(recv) || !clay_cached_lookup(CLAY_OBJ(recv), sel)) {
+        ClayValue none = CLAY_NIL;
+        clay_send_val(recv, sel, 1, &none);   /* raises "does not understand" */
+    }
+    char msg[160];
+    snprintf(msg, sizeof(msg), "%s with a block literal needs true or false "
+             "(the block is run in place, not sent)", sel);
+    clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
+    return 0;
+}
+
+/* The value of an inlined ifTrue/ifFalse whose block ran and gave `val`
+ * (borrowed): a matched condition result for a Boolean receiver, else (an
+ * unmatched condition result's) the value itself. Owned. */
+ClayValue clay_cond_ran(ClayValue recv, ClayValue val) {
+    if (recv == CLAY_TRUE || recv == CLAY_FALSE) return cond_matched(val);
+    clay_retain_val(val);
+    return val;
+}
+
+/* The value of an inlined ifTrue/ifFalse whose block didn't run: unmatched
+ * for a Boolean receiver, else a matched condition result's value. Owned. */
+ClayValue clay_cond_skipped(ClayValue recv) {
+    if (CLAY_IS_OBJ(recv) && cond_is_matched(CLAY_OBJ(recv))) return cond_value(CLAY_OBJ(recv));
+    return CLAY_VAL(clay_cond_unmatched);
+}
+
 static ClayValue bool_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
     return bool_run_if(self, argc, argv, &clay_true_obj);
 }

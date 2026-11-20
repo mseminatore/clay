@@ -58,6 +58,74 @@ Test eq(held ifFalse { "no" }, "xy")
 Test eq(held clone ifFalse { "no" }, "xy")
 Test eq((1 > 2) ifTrue { "x" } clone ifFalse { "no" }, "no")
 
+// Inside methods and blocks a block literal's ifTrue/ifFalse runs in place;
+// it must behave exactly like the message
+Inl = Object clone {
+    tag = "slot"
+    chain(x) { (x > 1) ifTrue { "big" } ifFalse { "small" } }
+    chainVar(b) { b ifFalse { "f" } ifTrue { "t" } }
+    lone(x) { (x > 1) ifTrue { "big" } }
+    loneVar(c) { c ifTrue { "ran" } }
+    early(x) { (x > 1) ifTrue { return "early" }; "late" }
+    earlyEach(xs) { xs each { |v| (v == 2) ifTrue { return v * 10 } }; 0 }
+    // a variable first assigned in the block is the block's own, nil each time
+    fresh() {
+        (true) ifTrue { a = 1 }
+        (true) ifTrue { r = b; b = 2; r } ifFalse { "skipped" }
+    }
+    // blocks made inside capture that run's variable
+    closures(xs) {
+        fs = []
+        xs each { |v| (v > 0) ifTrue { w = v * 2; fs push({ w }) } }
+        fs map { |f| f value }
+    }
+    // an existing slot is still assigned in place (implicit-slot fallback)
+    setTag(v) { (v != nil) ifTrue { tag = v }; tag }
+    nested(x) {
+        (x > 0) ifTrue {
+            (x > 10) ifTrue { "huge" } ifFalse { (x > 5) ifTrue { "big" } ifFalse { "small" } }
+        } ifFalse { "neg" }
+    }
+    empty(x) { (x > 0) ifTrue { } ifFalse { 1 } }
+    countBig(xs) { n = 0; xs each { |v| (v > 2) ifTrue { continue }; n = n + 1 }; n }
+    notBool(x) { x ifTrue { 1 } }
+}
+Test eq(Inl chain(5), "big")
+Test eq(Inl chain(0), "small")
+Test eq(Inl chainVar(true), "t")
+Test eq(Inl chainVar(false), "f")
+Test eq(Inl lone(5) ifFalse { "no" }, "big")
+Test eq(Inl lone(0) ifFalse { "no" }, "no")
+Test eq(Inl loneVar(true) ifFalse { "no" }, "ran")
+Test eq(Inl loneVar((1 < 2) ifTrue { "held" }), "held")
+Test eq(Inl loneVar((1 > 2) ifTrue { "held" }), "ran")
+Test eq(Inl early(5), "early")
+Test eq(Inl early(0), "late")
+Test eq(Inl earlyEach([1, 2, 3]), 20)
+Test eq(Inl fresh, nil)
+Test eq(Inl closures([1, 0, 3]) toString, "[2, 6]")
+ti = Inl clone
+Test eq(ti setTag("new"), "new")
+Test eq(ti setTag(nil), "new")
+Test eq(Inl nested(20), "huge")
+Test eq(Inl nested(7), "big")
+Test eq(Inl nested(1), "small")
+Test eq(Inl nested(-1), "neg")
+Test eq(Inl empty(1), nil)
+Test eq(Inl countBig([1, 5, 2, 9]), 2)
+msg = try { Inl notBool(5); "none" } catch { |e| e message }
+Test ok(msg startsWith("integer does not understand 'ifTrue'"))
+msg = try { Inl notBool(nil); "none" } catch { |e| e message }
+Test ok(msg startsWith("message 'ifTrue' sent to nil"))
+
+// outside methods `return` ends just the ifTrue/ifFalse block it is in
+rf = { |x| (x > 1) ifTrue { return "big" }; "small" }
+Test eq(rf value(5), "small")
+rg = { |x| (x > 1) ifTrue { return "big"; "no" } ifFalse { "x" } }
+Test eq(rg value(5), "big")
+rh = { |x| ((x > 1) ifTrue { (x > 3) ifTrue { return "inner" }; "outer" }) ifFalse { "z" } }
+Test eq(rh value(5), "outer")
+
 // whileTrue
 i = 0; s = 0
 { i < 5 } whileTrue { s = s + i; i = i + 1 }

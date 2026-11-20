@@ -197,6 +197,7 @@ static int bc_add_local(BcCompiler *bc, const char *name) {
     bc->locals[slot].depth = bc->scope_depth;
     bc->locals[slot].is_captured = 0;
     bc->local_count++;
+    if (bc->local_count > bc->max_local_count) bc->max_local_count = bc->local_count;
     return slot;
 }
 
@@ -527,6 +528,11 @@ static void bc_prescan_node(BcCompiler *bc, AstNode *node) {
             break;
         case NODE_SEND:
             bc_prescan_node(bc, node->as.send.receiver);
+            if (ast_is_inline_if(node)) {
+                /* an inlined block's statements are part of this scope */
+                bc_prescan_list(bc, &node->as.send.args.items[0]->as.block.body);
+                break;
+            }
             bc_prescan_list(bc, &node->as.send.args);
             break;
         case NODE_BINARY:
@@ -683,6 +689,8 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     int saved_scope_depth = bc->scope_depth;
     int saved_in_method = bc->in_method;
     int saved_chunk_is_method = bc->chunk_is_method;
+    int saved_max_local_count = bc->max_local_count;
+    void *saved_inline_exit = bc->inline_exit;
     BcLocal *saved_enclosing = bc->enclosing_locals;
     int saved_enclosing_count = bc->enclosing_local_count;
     if (saved_local_count > 0)
@@ -694,7 +702,10 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
 
     /* Start fresh local scope for chunk */
     bc->local_count = 0;
+    bc->max_local_count = 0;
     bc->scope_depth = 0;
+    bc->chunk_depth++;
+    bc->inline_exit = NULL;
     bc->len = 0;
     if (is_method) bc->in_method = 1;
     bc->chunk_is_method = is_method;
@@ -721,7 +732,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
      * local holding this activation's id (registered before the prescan so
      * nested blocks capture it) */
     int ret_slot = -1;
-    if (is_method && ast_has_block_return(body)) {
+    if (is_method && ast_has_block_return_inlined(body)) {
         chunk->has_block_return = 1;
         ret_slot = bc_add_local(bc, "?ret");
     }
@@ -839,7 +850,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
             (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
     }
 
-    chunk->local_count = bc->local_count;
+    chunk->local_count = bc->max_local_count;
 
     emit_op(bc, CLAYVM_OP_HALT);
 
@@ -873,6 +884,9 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     }
 
     bc->local_count = saved_local_count;
+    bc->max_local_count = saved_max_local_count;
+    bc->inline_exit = saved_inline_exit;
+    bc->chunk_depth--;
     bc->scope_depth = saved_scope_depth;
     bc->in_method = saved_in_method;
     bc->chunk_is_method = saved_chunk_is_method;
@@ -892,6 +906,179 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
 static int bc_name_is_self_slot(BcCompiler *bc, const char *name) {
     return bc->in_method && !is_builtin_global(name) &&
            (bc_is_known_member(bc, name) || !bc_is_user_global(bc, name));
+}
+
+/* --- Inlined ifTrue/ifFalse ---
+ * In a method or block body, `c ifTrue { ... }` / `c ifFalse { ... }` with a
+ * parameterless block literal (ast_is_inline_if) runs the block's statements
+ * in place: no block is made or sent. Variables the block assigns are still
+ * its own: locals of an inner scope, nil and with their implicit-slot flags
+ * set each time it runs (as bc_compile_chunk does for a block). Its `return`
+ * returns from the method directly when the body is a method's. The test
+ * itself (clay_cond_test) accepts what the methods do: true and false, and
+ * for a lone ifTrue/ifFalse a condition result. Two in a row,
+ * `c ifTrue { a } ifFalse { b }`, is one test choosing a or b. Codegen and
+ * clay-bytecode inline the same sends. */
+
+static void bc_emit_native(BcCompiler *bc, int fn, int argc) {
+    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
+    emit_u16(bc, (uint16_t)fn);
+    emit_byte(bc, (uint8_t)argc);
+}
+
+static int bc_compare_op(AstNode *n) {
+    if (!n || n->type != NODE_BINARY) return -1;
+    const char *op = n->as.binary.op;
+    if (strcmp(op, "==") == 0) return CLAYVM_OP_EQ;
+    if (strcmp(op, "!=") == 0) return CLAYVM_OP_NEQ;
+    if (strcmp(op, "<")  == 0) return CLAYVM_OP_LT;
+    if (strcmp(op, ">")  == 0) return CLAYVM_OP_GT;
+    if (strcmp(op, "<=") == 0) return CLAYVM_OP_LTE;
+    if (strcmp(op, ">=") == 0) return CLAYVM_OP_GTE;
+    return -1;
+}
+
+/* An inlined block body being compiled: outside methods a `return` in it
+ * ends just that block (as it would end the block sent ifTrue), so it jumps
+ * to the body's end */
+typedef struct {
+    int  want_value;
+    int *jumps;     /* patch positions of the returns' jumps */
+    int  count, capacity;
+} BcInlineExit;
+
+/* Run an inlined block's statements; with want_value its value is left on
+ * the stack */
+static void bc_emit_inline_body(BcCompiler *bc, NodeList *body, int want_value) {
+    BcInlineExit exit = { want_value, NULL, 0, 0 };
+    void *outer_exit = bc->inline_exit;
+    bc->inline_exit = &exit;
+    bc_begin_scope(bc);
+    int pre_start = bc->local_count;
+    bc_preregister_method_locals(bc, body);
+    int pre_end = bc->local_count;
+    if (bc->in_method) {
+        for (int i = pre_start; i < pre_end; i++) {
+            char flag[BC_SLOT_FLAG_MAX];
+            bc_slot_flag_name(bc->locals[i].name, flag, sizeof(flag));
+            bc_add_local(bc, flag);
+        }
+    }
+    int flag_end = bc->local_count;
+    bc_prescan_list(bc, body);
+
+    /* the block's variables start out nil each time it runs */
+    for (int i = pre_start; i < pre_end; i++) {
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)i);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
+    for (int i = pre_end; i < flag_end; i++) {
+        const char *name = bc->locals[pre_start + (i - pre_end)].name;
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_string(bc, name));
+        bc_emit_native(bc, bc->native_self_has_slot, 1);
+        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)i);
+        emit_op(bc, CLAYVM_OP_POP);
+    }
+    for (int i = pre_start; i < flag_end; i++) {
+        if (bc->locals[i].is_captured) {
+            emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)i);
+            bc_emit_native(bc, bc->native_cell_new, 1);
+            emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)i);
+            emit_op(bc, CLAYVM_OP_POP);
+        }
+    }
+
+    int pushed = 0;
+    for (int i = 0; i < body->count; i++) {
+        AstNode *stmt = body->items[i];
+        if (want_value && i == body->count - 1 && stmt->type != NODE_RETURN &&
+            stmt->type != NODE_BREAK && stmt->type != NODE_CONTINUE) {
+            bc_emit_expr(bc, stmt);
+            pushed = 1;
+        } else {
+            bc_emit_stmt(bc, stmt);
+        }
+    }
+    if (want_value && !pushed)
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+    for (int i = 0; i < exit.count; i++) patch_jump(bc, exit.jumps[i]);
+    free(exit.jumps);
+    bc_end_scope(bc);
+    bc->inline_exit = outer_exit;
+}
+
+/* Push 1 if `cond <sel>` should run its block, else 0. A comparison is
+ * tested directly (it always gives true or false); anything else goes
+ * through test_fn (if_true, chain_true, ...), keeping a copy of the value
+ * under the result when keep is set. */
+static void bc_emit_if_test(BcCompiler *bc, AstNode *send, AstNode *cond,
+                            int want_true, int test_fn, int keep) {
+    int cmp = bc_compare_op(cond);
+    if (cmp >= 0) {
+        bc_set_loc(bc, cond);
+        bc_emit_expr(bc, cond->as.binary.left);
+        bc_emit_expr(bc, cond->as.binary.right);
+        emit_op(bc, (uint8_t)cmp);
+        bc_emit_native(bc, bc->native_is_truthy, 1);
+        if (!want_true) emit_op(bc, CLAYVM_OP_NOT);
+        return;
+    }
+    bc_emit_expr(bc, cond);
+    if (keep) emit_op(bc, CLAYVM_OP_DUP);
+    bc_set_loc(bc, send);
+    bc_emit_native(bc, test_fn, 1);
+}
+
+static void bc_emit_inline_if(BcCompiler *bc, AstNode *node, int want_value) {
+    AstNode *recv = node->as.send.receiver;
+    NodeList *body = &node->as.send.args.items[0]->as.block.body;
+    int is_true = strcmp(node->as.send.message, "ifTrue") == 0;
+
+    if (ast_is_inline_if(recv)) {
+        /* c s1 { a } s2 { b }: a when s1 matches c, else b */
+        AstNode *cond = recv->as.send.receiver;
+        int first_true = strcmp(recv->as.send.message, "ifTrue") == 0;
+        bc_emit_if_test(bc, recv, cond, first_true,
+                        first_true ? bc->native_chain_true : bc->native_chain_false, 0);
+        int to_second = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+        bc_emit_inline_body(bc, &recv->as.send.args.items[0]->as.block.body, want_value);
+        int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
+        patch_jump(bc, to_second);
+        bc_emit_inline_body(bc, body, want_value);
+        patch_jump(bc, to_end);
+        return;
+    }
+
+    int test_fn = is_true ? bc->native_if_true : bc->native_if_false;
+    if (!want_value) {
+        bc_emit_if_test(bc, node, recv, is_true, test_fn, 0);
+        int to_end = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+        bc_emit_inline_body(bc, body, 0);
+        patch_jump(bc, to_end);
+        return;
+    }
+
+    /* the value of a lone ifTrue/ifFalse: a condition result (if_ran /
+     * if_skipped), from the receiver kept on the stack; a comparison's is
+     * true or false, so `true` stands in for it */
+    int is_cmp = bc_compare_op(recv) >= 0;
+    bc_emit_if_test(bc, node, recv, is_true, test_fn, 1);
+    int to_skip = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
+    if (is_cmp)
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, clay_to_vm(CLAY_TRUE)));
+    bc_emit_inline_body(bc, body, 1);
+    bc_emit_native(bc, bc->native_if_ran, 2);
+    int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
+    patch_jump(bc, to_skip);
+    if (is_cmp)
+        emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
+            (uint16_t)clayvm_vm_add_constant(bc->vm, clay_to_vm(CLAY_TRUE)));
+    bc_emit_native(bc, bc->native_if_skipped, 1);
+    patch_jump(bc, to_end);
 }
 
 static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
@@ -1035,6 +1222,10 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             break;
 
         case NODE_SEND: {
+            if (bc->chunk_depth > 0 && ast_is_inline_if(node)) {
+                bc_emit_inline_if(bc, node, 1);
+                break;
+            }
             /* Push receiver */
             bc_emit_expr(bc, node->as.send.receiver);
             /* Push selector as string constant */
@@ -1504,6 +1695,17 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
             emit_byte(bc, 2);
             return;
         }
+        BcInlineExit *exit = (BcInlineExit *)bc->inline_exit;
+        if (exit && !bc->chunk_is_method) {
+            /* outside methods: end the inlined block, with this value */
+            if (!exit->want_value) emit_op(bc, CLAYVM_OP_POP);
+            if (exit->count >= exit->capacity) {
+                exit->capacity = exit->capacity ? exit->capacity * 2 : 4;
+                exit->jumps = (int *)realloc(exit->jumps, (size_t)exit->capacity * sizeof(int));
+            }
+            exit->jumps[exit->count++] = emit_jump(bc, CLAYVM_OP_JUMP);
+            return;
+        }
         emit_op(bc, CLAYVM_OP_CALL_NATIVE);
         emit_u16(bc, (uint16_t)bc->native_stop_vm);
         emit_byte(bc, 0);
@@ -1533,6 +1735,11 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
         emit_op(bc, CLAYVM_OP_CALL_NATIVE);
         emit_u16(bc, (uint16_t)bc->native_raise);
         emit_byte(bc, 1);
+        return;
+    }
+
+    if (bc->chunk_depth > 0 && ast_is_inline_if(node)) {
+        bc_emit_inline_if(bc, node, 0);
         return;
     }
 

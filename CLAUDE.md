@@ -157,6 +157,13 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   writes a global only when `x` is assigned at the top level of the block's own file; otherwise `x` is
   the block's local. `bc_is_file_global` (bc_compiler), `emit_shadow_decls` (codegen) and their
   selfhost ports (`isFileGlobal`, `shadowDecls`) implement it — keep them in sync.
+- **Inlined ifTrue/ifFalse**: in a method or block body, `c ifTrue { ... }` / `c ifFalse { ... }` with a
+  parameterless block literal (`ast_is_inline_if`) runs the block's statements in place
+  (`bc_emit_inline_if`; selfhost `inlineIf`), and two in a row are one test. The block's own variables
+  become locals of an inner scope, reset each time it runs; its `return` returns from the method, or
+  outside methods ends just the block. The runtime side (`clay_cond_test`/`clay_cond_ran`/
+  `clay_cond_skipped` in bootstrap.c) gives the methods' results. Capture prescans and the non-local
+  return check (`ast_has_block_return_inlined`) treat such blocks as part of the enclosing code.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
   codegen) set at method/block entry — keep the two in sync.

@@ -420,6 +420,13 @@ sign println           // positive
 ((x > 0) ifFalse { "non-positive" } ifTrue { "positive" }) println   // positive
 ```
 
+In methods and blocks, `ifTrue`/`ifFalse` with a block written right there are
+compiled in place, so they cost no more than an `if` would: the block's code
+runs without a block being made or a message sent. They still behave exactly
+like the messages, but that means they only work on `true`, `false` and what
+`ifTrue`/`ifFalse` return — an object of your own with an `ifTrue` method gets
+a `TypeError` instead of the message.
+
 Blocks capture variables from their enclosing scope (closures). Captured variables are shared by reference — mutations in one closure are visible to all closures that captured the same variable:
 
 ```clay

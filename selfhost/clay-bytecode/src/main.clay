@@ -68,6 +68,7 @@ BcGen = Object clone {
     PUSH_CONST = 0
     POP = 1
     DUP = 2
+    NOT = 15
     JUMP = 16
     JUMP_IF_FALSE = 17
     CALL_NATIVE = 19
@@ -104,6 +105,12 @@ BcGen = Object clone {
     N_TRY_CATCH = 24
     N_RAISE = 25
     N_MAKE_RANGE = 26
+    N_IF_TRUE = 27
+    N_IF_FALSE = 28
+    N_CHAIN_TRUE = 29
+    N_CHAIN_FALSE = 30
+    N_IF_RAN = 31
+    N_IF_SKIPPED = 32
 
     MAX_CODE = 65536
     MAX_LOCALS = 256
@@ -147,7 +154,10 @@ BcGen = Object clone {
     bufFiles = nil         // source file of each byte (bc_compiler.c file_map)
     curFile = nil
     locs = nil             // BcLocal of the current chunk
+    maxLocs = 0            // most locals at once (inlined blocks' scopes end)
     depth = 0
+    chunkDepth = 0         // > 0 in a method or block body (ifs are inlined)
+    inlineExit = nil       // the inlined block body being compiled: [wantValue, jumps]
     inMeth = false         // inside a method body (or a block within one)
     isMethChunk = false    // compiling a method body itself
     slotsKnown = nil       // slot names of the enclosing clone body
@@ -298,7 +308,14 @@ BcGen = Object clone {
         (locs size >= MAX_LOCALS) ifTrue { return -1 }
         s = locs size
         locs push(BcLocal make(n, s, depth))
+        (locs size > maxLocs) ifTrue { maxLocs = locs size }
         s
+    }
+
+    // drop the locals of the scope being left (bc_end_scope)
+    endScope() {
+        { locs size > 0 && (locs at(locs size - 1)) depth >= depth } whileTrue { locs pop }
+        depth = depth - 1
     }
 
     markCaptured(s) {
@@ -471,6 +488,8 @@ BcGen = Object clone {
         (k == "Assign") ifTrue { return self prescan(n value) }
         (k == "Send") ifTrue {
             self prescan(n recv)
+            // an inlined block's statements are part of this scope
+            (self isInlineIf(n)) ifTrue { return self prescanList((n items at(0)) body) }
             return self prescanList(n items)
         }
         (k == "Binary") ifTrue {
@@ -536,6 +555,11 @@ BcGen = Object clone {
         (k == "Block") ifTrue { return self returnWalkList(n body, true, wantInBlock) }
         (k == "Assign") ifTrue { return self returnWalk(n value, inBlock, wantInBlock) }
         (k == "Send") ifTrue {
+            // an inlined ifTrue/ifFalse block isn't a block
+            (self isInlineIf(n)) ifTrue {
+                return (self returnWalk(n recv, inBlock, wantInBlock)) ||
+                       (self returnWalkList((n items at(0)) body, inBlock, wantInBlock))
+            }
             return (self returnWalk(n recv, inBlock, wantInBlock)) ||
                    (self returnWalkList(n items, inBlock, wantInBlock))
         }
@@ -562,6 +586,147 @@ BcGen = Object clone {
 
     hasBlockReturn(body) { self returnWalkList(body, false, true) }
 
+    // --- inlined ifTrue/ifFalse (bc_emit_inline_if) ---
+
+    // `c ifTrue { ... }` / `c ifFalse { ... }` with a parameterless block
+    // literal (ast_is_inline_if)
+    isInlineIf(n) {
+        (n == nil || n kind != "Send" || n isSuper || n isCall) ifTrue { return false }
+        (n items size != 1 || (n name != "ifTrue" && n name != "ifFalse")) ifTrue { return false }
+        b = n items at(0)
+        b != nil && b kind == "Block" && b params size == 0
+    }
+
+    // the opcode of a comparison, or nil
+    compareOp(n) {
+        (n == nil || n kind != "Binary") ifTrue { return nil }
+        compareOps get(n name)
+    }
+
+    // run an inlined block's statements (bc_emit_inline_body)
+    inlineBody(body, wantValue) {
+        // outside methods a `return` ends just this block: a jump to its end
+        exit = [wantValue, []]
+        outerExit = inlineExit
+        inlineExit = exit
+        depth = depth + 1
+        preStart = locs size
+        self preregister(body)
+        preEnd = locs size
+        inMeth ifTrue {
+            i = preStart
+            { i < preEnd } whileTrue {
+                self addLocal("?" + (locs at(i)) lname)
+                i = i + 1
+            }
+        }
+        flagEnd = locs size
+        self prescanList(body)
+
+        i = preStart
+        { i < preEnd } whileTrue {
+            self pushNil
+            self emitOpU16(SET_LOCAL, i)
+            self emitOp(POP)
+            i = i + 1
+        }
+        i = preEnd
+        { i < flagEnd } whileTrue {
+            self pushString((locs at(preStart + (i - preEnd))) lname)
+            self native(N_SELF_HAS_SLOT, 1)
+            self emitOpU16(SET_LOCAL, i)
+            self emitOp(POP)
+            i = i + 1
+        }
+        i = preStart
+        { i < flagEnd } whileTrue {
+            (locs at(i)) captured ifTrue {
+                self emitOpU16(GET_LOCAL, i)
+                self native(N_CELL_NEW, 1)
+                self emitOpU16(SET_LOCAL, i)
+                self emitOp(POP)
+            }
+            i = i + 1
+        }
+
+        pushed = false
+        i = 0
+        { i < body size } whileTrue {
+            st = body at(i)
+            (wantValue && i == body size - 1 && st kind != "Return" && st kind != "Break" &&
+             st kind != "Continue") ifTrue {
+                self expr(st)
+                pushed = true
+            } ifFalse {
+                self stmt(st)
+            }
+            i = i + 1
+        }
+        (wantValue && pushed == false) ifTrue { self pushNil }
+        (exit at(1)) each { |j| self patchJump(j) }
+        self endScope
+        inlineExit = outerExit
+    }
+
+    // push 1 if the block runs, else 0 (bc_emit_if_test)
+    ifTest(send, cond, wantTrue, testFn, keep) {
+        cmp = self compareOp(cond)
+        (cmp != nil) ifTrue {
+            self setLoc(cond)
+            self expr(cond left)
+            self expr(cond right)
+            self emitOp(cmp)
+            self native(N_IS_TRUTHY, 1)
+            wantTrue ifFalse { self emitOp(NOT) }
+            return nil
+        }
+        self expr(cond)
+        keep ifTrue { self emitOp(DUP) }
+        self setLoc(send)
+        self native(testFn, 1)
+    }
+
+    inlineIf(n, wantValue) {
+        recv = n recv
+        body = (n items at(0)) body
+        isTrue = n name == "ifTrue"
+
+        (self isInlineIf(recv)) ifTrue {
+            // c s1 { a } s2 { b }: a when s1 matches c, else b
+            firstTrue = recv name == "ifTrue"
+            self ifTest(recv, recv recv, firstTrue,
+                        firstTrue ifTrue { N_CHAIN_TRUE } ifFalse { N_CHAIN_FALSE }, false)
+            toSecond = self emitJump(JUMP_IF_FALSE)
+            self inlineBody((recv items at(0)) body, wantValue)
+            toEnd = self emitJump(JUMP)
+            self patchJump(toSecond)
+            self inlineBody(body, wantValue)
+            return self patchJump(toEnd)
+        }
+
+        testFn = isTrue ifTrue { N_IF_TRUE } ifFalse { N_IF_FALSE }
+        wantValue ifFalse {
+            self ifTest(n, recv, isTrue, testFn, false)
+            toEnd = self emitJump(JUMP_IF_FALSE)
+            self inlineBody(body, false)
+            return self patchJump(toEnd)
+        }
+
+        // a lone one's value: a condition result from the receiver kept on
+        // the stack (`true` stands in for a comparison)
+        isCmp = (self compareOp(recv)) != nil
+        self ifTest(n, recv, isTrue, testFn, true)
+        toSkip = self emitJump(JUMP_IF_FALSE)
+        isCmp ifTrue { self pushConst(self addConstant(true, "")) }
+        self inlineBody(body, true)
+        self native(N_IF_RAN, 2)
+        toEnd = self emitJump(JUMP)
+        self patchJump(toSkip)
+        isCmp ifTrue { self pushConst(self addConstant(true, "")) }
+        self native(N_IF_SKIPPED, 1)
+        self patchJump(toEnd)
+    }
+
     // --- chunks ---
 
     // Compile a block or method body into a new chunk (bc_compile_chunk);
@@ -582,6 +747,8 @@ BcGen = Object clone {
         outerFile = curFile
         outerLocs = locs
         outerDepth = depth
+        outerMaxLocs = maxLocs
+        outerExit = inlineExit
         outerInMeth = inMeth
         outerIsMeth = isMethChunk
 
@@ -589,7 +756,10 @@ BcGen = Object clone {
         bufLines = []
         bufFiles = []
         locs = []
+        maxLocs = 0
         depth = 0
+        chunkDepth = chunkDepth + 1
+        inlineExit = nil
         isMethod ifTrue { inMeth = true }
         isMethChunk = isMethod
 
@@ -697,7 +867,7 @@ BcGen = Object clone {
         }
         (body size == 0) ifTrue { self pushNil }
 
-        rec setAt(5, locs size)
+        rec setAt(5, maxLocs)
         self emitOp(HALT)
         rec setAt(0, buf)
         rec setAt(1, bufLines)
@@ -708,6 +878,9 @@ BcGen = Object clone {
         bufFiles = outerFiles
         curFile = outerFile
         locs = outerLocs
+        maxLocs = outerMaxLocs
+        inlineExit = outerExit
+        chunkDepth = chunkDepth - 1
         depth = outerDepth
         inMeth = outerInMeth
         isMethChunk = outerIsMeth
@@ -737,6 +910,7 @@ BcGen = Object clone {
                 n items each { |a| self expr(a) }
                 return self native(N_SEND, 2 + n items size)
             }
+            (chunkDepth > 0 && (self isInlineIf(n))) ifTrue { return self inlineIf(n, true) }
             self expr(n recv)
             self pushString(n name)
             n items each { |a| self expr(a) }
@@ -987,6 +1161,11 @@ BcGen = Object clone {
                 self getLocalValue(retId)
                 return self native(N_RAISE_RETURN, 2)
             }
+            (inlineExit != nil && isMethChunk == false) ifTrue {
+                // outside methods: end the inlined block, with this value
+                (inlineExit at(0)) ifFalse { self emitOp(POP) }
+                return (inlineExit at(1)) push(self emitJump(JUMP))
+            }
             return self native(N_STOP_VM, 0)
         }
         (k == "Break") ifTrue {
@@ -999,6 +1178,7 @@ BcGen = Object clone {
             self native(N_LOAD_GLOBAL, 1)
             return self native(N_RAISE, 1)
         }
+        (chunkDepth > 0 && (self isInlineIf(n))) ifTrue { return self inlineIf(n, false) }
         self expr(n)
         self emitOp(POP)
     }

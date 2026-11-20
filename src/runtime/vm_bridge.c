@@ -1322,6 +1322,53 @@ static int native_is_nil_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* --- Inlined ifTrue/ifFalse (bc_compiler.c bc_emit_inline_if) ---
+ * The operands are read in place and popped only after the runtime call, so
+ * an error it raises leaves them on the stack for the frame to release. */
+static int native_if_test(clayvm_vm_t *vm, int want_true, int chain) {
+    clayvm_value_t v = vm->stack[vm->sp - 1];
+    int run = clay_cond_test(vm_to_clay(v), want_true, chain);
+    vm->sp--;
+    vm_release_val(v);
+    clayvm_vm_push(vm, CLAYVM_INT64(run));
+    return 0;
+}
+
+static int native_if_true_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc; return native_if_test(vm, 1, 0);
+}
+static int native_if_false_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc; return native_if_test(vm, 0, 0);
+}
+static int native_chain_true_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc; return native_if_test(vm, 1, 1);
+}
+static int native_chain_false_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc; return native_if_test(vm, 0, 1);
+}
+
+/* if_ran(c, v): the inlined expression's value when its block gave v */
+static int native_if_ran_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t v = clayvm_vm_pop(vm);
+    clayvm_value_t c = clayvm_vm_pop(vm);
+    ClayValue result = clay_cond_ran(vm_to_clay(c), vm_to_clay(v));
+    vm_release_val(v);
+    vm_release_val(c);
+    clayvm_vm_push(vm, clay_to_vm(result));
+    return 0;
+}
+
+/* if_skipped(c): its value when the block didn't run */
+static int native_if_skipped_fn(clayvm_vm_t *vm, int argc) {
+    (void)argc;
+    clayvm_value_t c = clayvm_vm_pop(vm);
+    ClayValue result = clay_cond_skipped(vm_to_clay(c));
+    vm_release_val(c);
+    clayvm_vm_push(vm, clay_to_vm(result));
+    return 0;
+}
+
 /* native_stop_vm() — stop the dispatch loop (for early return).
  * The top-of-stack value is preserved as the return value. */
 static int native_stop_vm_fn(clayvm_vm_t *vm, int argc) {
@@ -1761,6 +1808,12 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     bc->native_try_catch = clayvm_native_register(&vm->natives, "try_catch", native_try_catch_fn, 3);
     bc->native_raise = clayvm_native_register(&vm->natives, "raise", native_raise_fn, 1);
     bc->native_make_range = clayvm_native_register(&vm->natives, "make_range", native_make_range_fn, 2);
+    bc->native_if_true = clayvm_native_register(&vm->natives, "if_true", native_if_true_fn, 1);
+    bc->native_if_false = clayvm_native_register(&vm->natives, "if_false", native_if_false_fn, 1);
+    bc->native_chain_true = clayvm_native_register(&vm->natives, "chain_true", native_chain_true_fn, 1);
+    bc->native_chain_false = clayvm_native_register(&vm->natives, "chain_false", native_chain_false_fn, 1);
+    bc->native_if_ran = clayvm_native_register(&vm->natives, "if_ran", native_if_ran_fn, 2);
+    bc->native_if_skipped = clayvm_native_register(&vm->natives, "if_skipped", native_if_skipped_fn, 1);
 
     /* Pre-register Clay builtin prototypes as globals */
     struct { const char *name; ClayObject *obj; } builtins[] = {

@@ -297,6 +297,12 @@ ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
 ClayMethod *clay_cached_lookup(ClayObject *obj, const char *selector);
 ClayMethod *clay_lookup_nearest(ClayObject *obj, const char *name);   /* NULL if a slot is nearer */
 
+/* Inlined `c ifTrue { ... }` / `c ifFalse { ... }` (bootstrap.c): does the
+ * block run, and the expression's value (owned) when it did or didn't */
+int         clay_cond_test(ClayValue recv, int want_true, int chain);
+ClayValue   clay_cond_ran(ClayValue recv, ClayValue val);
+ClayValue   clay_cond_skipped(ClayValue recv);
+
 /* Invoke a method, setting context before call */
 ClayValue clay_invoke(ClayMethod *m, ClayObject *obj, int argc, ClayValue *argv);
 

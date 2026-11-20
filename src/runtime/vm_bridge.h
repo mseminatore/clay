@@ -92,6 +92,13 @@ typedef struct {
     int native_cell_set_rev;    /* cell_set_rev(value, cell) → value */
     int native_method_return_id; /* method_return_id() → id of the method call being entered */
     int native_raise_return;    /* raise_return(value, id) — non-local return from a block */
+    /* Inlined ifTrue/ifFalse with a block literal (clay_cond_test & co.) */
+    int native_if_true;         /* if_true(c) → 1 if `c ifTrue` runs its block, else 0 */
+    int native_if_false;        /* if_false(c) → the same for ifFalse */
+    int native_chain_true;      /* chain_true(c) → 1/0, c must be true or false */
+    int native_chain_false;
+    int native_if_ran;          /* if_ran(c, v) → the value when the block ran and gave v */
+    int native_if_skipped;      /* if_skipped(c) → the value when it didn't run */
 
     int had_error;
 
@@ -112,6 +119,7 @@ typedef struct {
     /* Local variable tracking for current compilation scope */
     BcLocal locals[BC_MAX_LOCALS];
     int     local_count;
+    int     max_local_count;  /* most locals at once: inlined blocks' scopes end */
     int     scope_depth;
 
     /* Enclosing scope locals (for capture scanning) */
@@ -121,6 +129,10 @@ typedef struct {
     /* Method context flag — 1 when compiling inside a method body */
     int      in_method;
     int      chunk_is_method;  /* compiling a method body (not a block) */
+    int      chunk_depth;      /* > 0 inside a method or block body (where
+                                * ifTrue/ifFalse blocks are inlined) */
+    void    *inline_exit;      /* the inlined block body being compiled, where a
+                                * `return` outside methods ends it (bc_compiler.c) */
 
     /* Known slot names from the enclosing clone block (for Io-style assignment) */
     const char **known_slots;

@@ -332,60 +332,81 @@ void ast_print(AstNode *node, int indent) {
     print_node(node, indent, NULL);
 }
 
+/* Is n `c ifTrue { ... }` or `c ifFalse { ... }` with a block literal that
+ * takes no parameters? The compilers run such a block in place (inline). */
+int ast_is_inline_if(AstNode *n) {
+    if (!n || n->type != NODE_SEND || n->as.send.is_super || n->as.send.is_call) return 0;
+    if (n->as.send.args.count != 1) return 0;
+    const char *m = n->as.send.message;
+    if (!m || (strcmp(m, "ifTrue") != 0 && strcmp(m, "ifFalse") != 0)) return 0;
+    AstNode *b = n->as.send.args.items[0];
+    return b && b->type == NODE_BLOCK && b->as.block.params.count == 0;
+}
+
 /* --- Non-local return analysis ---
  * Walk expressions without descending into nested clone bodies (their methods
- * have their own returns). in_block: are we inside a block literal? */
-static int ast_return_walk(AstNode *n, int in_block, int want_in_block);
+ * have their own returns). in_block: are we inside a block literal?
+ * inline_ifs: the blocks of inlined ifTrue/ifFalse (ast_is_inline_if) are part
+ * of the code around them, not blocks. */
+static int ast_return_walk(AstNode *n, int in_block, int want_in_block, int inline_ifs);
 
-static int ast_return_walk_list(NodeList *l, int in_block, int want_in_block) {
+static int ast_return_walk_list(NodeList *l, int in_block, int want_in_block, int inline_ifs) {
     for (int i = 0; i < l->count; i++)
-        if (ast_return_walk(l->items[i], in_block, want_in_block)) return 1;
+        if (ast_return_walk(l->items[i], in_block, want_in_block, inline_ifs)) return 1;
     return 0;
 }
 
-static int ast_return_walk(AstNode *n, int in_block, int want_in_block) {
+static int ast_return_walk(AstNode *n, int in_block, int want_in_block, int inline_ifs) {
     if (!n) return 0;
     switch (n->type) {
         case NODE_RETURN:
             if (!want_in_block || in_block) return 1;
-            return ast_return_walk(n->as.return_stmt.expr, in_block, want_in_block);
+            return ast_return_walk(n->as.return_stmt.expr, in_block, want_in_block, inline_ifs);
         case NODE_BLOCK:
-            return ast_return_walk_list(&n->as.block.body, 1, want_in_block);
+            return ast_return_walk_list(&n->as.block.body, 1, want_in_block, inline_ifs);
         case NODE_ASSIGN:
-            return ast_return_walk(n->as.assign.value, in_block, want_in_block);
+            return ast_return_walk(n->as.assign.value, in_block, want_in_block, inline_ifs);
         case NODE_SEND:
-            return ast_return_walk(n->as.send.receiver, in_block, want_in_block) ||
-                   ast_return_walk_list(&n->as.send.args, in_block, want_in_block);
+            if (inline_ifs && ast_is_inline_if(n))
+                return ast_return_walk(n->as.send.receiver, in_block, want_in_block, inline_ifs) ||
+                       ast_return_walk_list(&n->as.send.args.items[0]->as.block.body,
+                                            in_block, want_in_block, inline_ifs);
+            return ast_return_walk(n->as.send.receiver, in_block, want_in_block, inline_ifs) ||
+                   ast_return_walk_list(&n->as.send.args, in_block, want_in_block, inline_ifs);
         case NODE_BINARY:
-            return ast_return_walk(n->as.binary.left, in_block, want_in_block) ||
-                   ast_return_walk(n->as.binary.right, in_block, want_in_block);
+            return ast_return_walk(n->as.binary.left, in_block, want_in_block, inline_ifs) ||
+                   ast_return_walk(n->as.binary.right, in_block, want_in_block, inline_ifs);
         case NODE_ARRAY_LIT:
-            return ast_return_walk_list(&n->as.array_lit.elements, in_block, want_in_block);
+            return ast_return_walk_list(&n->as.array_lit.elements, in_block, want_in_block, inline_ifs);
         case NODE_DICT_LIT:
-            return ast_return_walk_list(&n->as.dict_lit.values, in_block, want_in_block);
+            return ast_return_walk_list(&n->as.dict_lit.values, in_block, want_in_block, inline_ifs);
         case NODE_TRY_CATCH:
-            return ast_return_walk(n->as.try_catch.try_block, in_block, want_in_block) ||
-                   ast_return_walk(n->as.try_catch.catch_block, in_block, want_in_block) ||
-                   ast_return_walk(n->as.try_catch.finally_block, in_block, want_in_block);
+            return ast_return_walk(n->as.try_catch.try_block, in_block, want_in_block, inline_ifs) ||
+                   ast_return_walk(n->as.try_catch.catch_block, in_block, want_in_block, inline_ifs) ||
+                   ast_return_walk(n->as.try_catch.finally_block, in_block, want_in_block, inline_ifs);
         case NODE_RAISE:
-            return ast_return_walk(n->as.raise.expr, in_block, want_in_block);
+            return ast_return_walk(n->as.raise.expr, in_block, want_in_block, inline_ifs);
         case NODE_SLOT_ASSIGN:
-            return ast_return_walk(n->as.slot_assign.receiver, in_block, want_in_block) ||
-                   ast_return_walk(n->as.slot_assign.value, in_block, want_in_block);
+            return ast_return_walk(n->as.slot_assign.receiver, in_block, want_in_block, inline_ifs) ||
+                   ast_return_walk(n->as.slot_assign.value, in_block, want_in_block, inline_ifs);
         case NODE_DESTRUCTURE:
-            return ast_return_walk(n->as.destructure.value, in_block, want_in_block);
+            return ast_return_walk(n->as.destructure.value, in_block, want_in_block, inline_ifs);
         case NODE_CLONE:
-            return ast_return_walk(n->as.clone.proto, in_block, want_in_block);
+            return ast_return_walk(n->as.clone.proto, in_block, want_in_block, inline_ifs);
         default:
             return 0;   /* literals, identifiers, method/slot defs, break, ... */
     }
 }
 
 int ast_has_block_return(NodeList *method_body) {
-    return ast_return_walk_list(method_body, 0, 1);
+    return ast_return_walk_list(method_body, 0, 1, 0);
+}
+
+int ast_has_block_return_inlined(NodeList *method_body) {
+    return ast_return_walk_list(method_body, 0, 1, 1);
 }
 
 int ast_block_contains_return(AstNode *block) {
     return block && block->type == NODE_BLOCK &&
-           ast_return_walk_list(&block->as.block.body, 1, 0);
+           ast_return_walk_list(&block->as.block.body, 1, 0, 0);
 }
