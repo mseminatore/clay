@@ -604,6 +604,13 @@ static ClayValue system_live_objects(ClayObject *self, int argc, ClayValue *argv
     return clay_int((intptr_t)(clay_alloc_count - clay_dealloc_count));
 }
 
+/* System collect - free unreachable reference cycles now (it also happens by
+ * itself); the number of objects freed */
+static ClayValue system_collect(ClayObject *self, int argc, ClayValue *argv) {
+    (void)self; (void)argc; (void)argv;
+    return clay_int((intptr_t)clay_gc_collect());
+}
+
 /* System memory - the process's resident memory in bytes, as the OS reports
  * it (everything: objects, the VM, buffers); nil if it can't be read */
 static ClayValue system_memory(ClayObject *self, int argc, ClayValue *argv) {
@@ -734,6 +741,7 @@ static ClayValue system_clock(ClayObject *self, int argc, ClayValue *argv) {
 
 void clay_bootstrap(void) {
     clay_stack_init();       /* the main thread's C stack, for CLAY_STACK_CHECK */
+    clay_gc_init();          /* this thread runs the program: it collects cycles */
 #ifdef _WIN32
     /* Enable UTF-8 output and ANSI color sequences on Windows console */
     {
@@ -910,6 +918,7 @@ void clay_bootstrap(void) {
     clay_set_method(clay_System, "allocCount", system_alloc_count);
     clay_set_method(clay_System, "deallocCount", system_dealloc_count);
     clay_set_method(clay_System, "liveObjects", system_live_objects);
+    clay_set_method(clay_System, "collect", system_collect);
     clay_set_method(clay_System, "memory", system_memory);
     clay_set_method(clay_System, "exit", system_exit);
     clay_set_method(clay_System, "run", system_run);

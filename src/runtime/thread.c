@@ -105,6 +105,8 @@ static void *thread_worker(void *arg) {
     pthread_mutex_unlock(&fd->lock);
 #endif
 
+    CLAY_ATOMIC_DEC(&clay_gc_threads_running);   /* done with Clay objects */
+
     /* Clean up worker VM (but not the globals — those are shared) */
     /* Note: bc_compiler_cleanup would free chunks, but worker doesn't own any */
 
@@ -147,15 +149,18 @@ static ClayValue thread_spawn(ClayObject *self, int argc, ClayValue *argv) {
     future->as.plugin.data = fd;
     future->as.plugin.free_fn = future_data_free;
 
-    /* Spawn the worker thread */
+    /* Spawn the worker thread (no cycle collection while it runs) */
+    CLAY_ATOMIC_INC(&clay_gc_threads_running);
 #ifdef _WIN32
     fd->thread_handle = (HANDLE)_beginthreadex(NULL, 0, thread_worker, fd, 0, NULL);
     if (!fd->thread_handle) {
+        CLAY_ATOMIC_DEC(&clay_gc_threads_running);
         clay_raise(CLAY_VAL(clay_error_new("Failed to create thread", "RuntimeError")));
         return CLAY_NIL;
     }
 #else
     if (pthread_create(&fd->thread_id, NULL, thread_worker, fd) != 0) {
+        CLAY_ATOMIC_DEC(&clay_gc_threads_running);
         clay_raise(CLAY_VAL(clay_error_new("Failed to create thread", "RuntimeError")));
         return CLAY_NIL;
     }
@@ -326,7 +331,8 @@ ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
         offset = chunks[t].end;
     }
 
-    /* Launch worker threads */
+    /* Launch worker threads (no cycle collection while they run) */
+    CLAY_ATOMIC_INC(&clay_gc_threads_running);
     for (size_t t = 0; t < num_threads; t++) {
 #ifdef _WIN32
         handles[t] = (HANDLE)_beginthreadex(NULL, 0, pmap_chunk_worker, &chunks[t], 0, NULL);
@@ -346,6 +352,7 @@ ClayValue clay_parallel_map(ClayObject *arr, ClayObject *block) {
     for (size_t t = 0; t < num_threads; t++) pthread_join(threads[t], NULL);
     free(threads);
 #endif
+    CLAY_ATOMIC_DEC(&clay_gc_threads_running);
     free(chunks);
 
     /* Collect results */

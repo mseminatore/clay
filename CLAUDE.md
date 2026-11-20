@@ -115,6 +115,14 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
 - **Memory**: reference counting via `clay_retain()`/`clay_release()` (atomic when `CLAY_THREAD_SAFE`
   is defined). The `deps/hash` hash table never frees keys/values — callers own that memory. `ClayCell`
   is a heap-allocated box used for by-reference variable capture in C codegen.
+- **Cycle collector** (end of `memory.c`): synchronous trial deletion (Bacon & Rajan). `clay_release`
+  buffers objects/cells whose count drops without reaching zero; `clay_gc_collect` runs at the safe
+  point in `CLAY_STACK_CHECK()` (method/block entry) or on `System collect`. It never scans stacks or
+  globals, so it is only safe if **every holder of an object holds a count** — never keep an uncounted
+  pointer to an object across a call into Clay code. `gc_children` must follow exactly the references
+  `clay_dealloc` releases (a new kind of counted reference held by an object must be added to both,
+  and to `gc_clear`); references it doesn't follow just keep their targets alive. Test changes with an
+  ASan build and `CLAY_GC_STRESS=1` (collects at every safe point).
 - **Prototype chain**: `ClayObject.parent` links form the chain used by both slot reads and method
   lookup. Slot *writes* are always local to the receiving object (no chain walk).
 - **Error handling**: `clay_raise()`/`clay_try_push()`/`clay_try_pop()` implement try/catch via

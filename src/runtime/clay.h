@@ -94,8 +94,25 @@ void      clay_stack_overflow(void);    /* raises RuntimeError; does not return 
 /* (not the address of a local: AddressSanitizer puts locals on a fake stack) */
 #define CLAY_STACK_POINTER() ((char *)__builtin_frame_address(0))
 #endif
+/* Cycle collector (memory.c). Reference counting frees everything but
+ * objects in reference cycles; the collector finds those among objects whose
+ * count went down without reaching zero (trial deletion, Bacon & Rajan 2001)
+ * and frees them. It runs at a safe point, the start of a method or block
+ * (CLAY_STACK_CHECK), once enough candidates have built up, or when asked
+ * (System collect). Safe there because every holder of a reference holds a
+ * count: the collector never looks at stacks or globals, it only takes the
+ * counts that objects hold on each other away and sees what is left. */
+extern volatile int clay_gc_pending;
+void      clay_gc_safepoint(void);
+long      clay_gc_collect(void);        /* runs it now; the number of objects freed */
+void      clay_gc_init(void);           /* bootstrap: this thread runs the program */
+extern volatile long clay_gc_threads_running;   /* worker threads (no collection while > 0) */
+
+/* The start of every generated or VM method and block: the C stack guard and
+ * the collector's safe point */
 #define CLAY_STACK_CHECK() \
-    do { if (clay_stack_limit && CLAY_STACK_POINTER() < clay_stack_limit) clay_stack_overflow(); } while (0)
+    do { if (clay_stack_limit && CLAY_STACK_POINTER() < clay_stack_limit) clay_stack_overflow(); \
+         if (clay_gc_pending) clay_gc_safepoint(); } while (0)
 
 /* Argument helpers for native methods: return argv[i] converted, or raise —
  * ArgumentError if the argument is missing, TypeError if it has the wrong
@@ -160,7 +177,9 @@ struct ClayObject {
     HashTable  *slots;
     HashTable  *methods;
     int         refcount;
-    ClayType    type;
+    uint8_t     type;       /* a ClayType */
+    uint8_t     gc_color;   /* cycle collector state (memory.c) */
+    uint8_t     gc_flags;
 
     /* Type-specific data */
     union {
@@ -649,6 +668,8 @@ static inline void clay_trace_pop(void) {
 /* --- Cell (heap-allocated box for by-reference capture in C codegen) --- */
 typedef struct {
     int       refcount;
+    uint8_t   gc_color;     /* cycle collector state, as in ClayObject */
+    uint8_t   gc_flags;
     ClayValue value;
 } ClayCell;
 

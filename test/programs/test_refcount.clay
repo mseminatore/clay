@@ -99,6 +99,73 @@ check value("catch block raises", { caughtIn value({ try { raise("a" + "b") } ca
 check value("finally block raises", { caughtIn value({ try { "x" + "y" } finally { raise("c" + "d") } }) })
 check value("catch and finally raise", { caughtIn value({ try { raise("a") } catch { |e| raise("b") } finally { raise("c" + "d") } }) })
 
+// --- Reference cycles are freed by the cycle collector (System collect runs
+// it now; it also runs by itself) ---
+cycleGrowth = { |block|
+  block value
+  System collect
+  b = System liveObjects
+  n = 0
+  { n < 100 } whileTrue { block value; n = n + 1 }
+  System collect
+  System liveObjects - b
+}
+checkCycle = { |what, block|
+  g = cycleGrowth value(block)
+  (g > 0) ifTrue {
+    ("FAIL: " + what + " leaks " + g toString + " objects per 100 runs") println
+    failures = failures + 1
+  } ifFalse { ("ok: " + what) println }
+}
+Node = Object clone {
+  parent = nil
+  kids = nil
+  init() { kids = []; self }
+  add(c) { c parent = self; kids push(c); c }
+}
+Button = Object clone {
+  clicks = 0
+  onClick = nil
+  wire() { onClick = { clicks = clicks + 1 }; self }
+}
+Maths = Object clone {
+  fact(k) { f = nil; f = { |m| (m <= 1) ifTrue { 1 } ifFalse { m * (f value(m - 1)) } }; f value(k) }
+}
+checkCycle value("tree with parent pointers", { r = Node clone init; r add(Node clone init); r add(Node clone init) })
+checkCycle value("block in a slot that uses self", { Button clone wire })
+checkCycle value("recursive local block", { Maths fact(5) })
+checkCycle value("array holding itself", { a = []; a push(a) })
+checkCycle value("dict holding itself", { d = #{}; d set("me", d) })
+checkCycle value("cycle through a prototype", { p = Object clone; c = p clone; p kid = c })
+
+// what is still in use is kept: a cycle reachable from a variable survives
+// collection whole
+keep = Node clone init
+keep add(Node clone init) add(Node clone init)
+System collect
+((keep kids at(0)) kids size == 1 && (keep kids at(0)) parent == keep) ifFalse {
+  "FAIL: a cycle in use was collected" println
+  failures = failures + 1
+}
+
+// System collect says how many objects it freed
+lost = { a = Node clone init; a add(Node clone init) }
+lost value
+System collect
+lost value
+((System collect) > 0) ifFalse {
+  "FAIL: System collect freed nothing" println
+  failures = failures + 1
+}
+
+// it runs by itself: making many cycles doesn't grow memory without bound
+before = System liveObjects
+30000 times { |i| r = Node clone init; r add(Node clone init) }
+((System liveObjects - before) < 30000) ifFalse {
+  ("FAIL: cycles weren't collected automatically (" + (System liveObjects - before) toString + " live)") println
+  failures = failures + 1
+}
+
 // --- and the measurement does see a real leak ---
 kept = []
 (growth value({ kept push("x" + kept size toString) }) == 100) ifFalse {

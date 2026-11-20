@@ -17,7 +17,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Math | `abs(n)`, `sqrt(n)`, `pow(b,e)`, `min(a,b)`, `max(a,b)`, `clamp(n, lo, hi)`, `lerp(a, b, t)`, `sign(n)`, `floor(n)`, `ceil(n)`, `round(n)`, `sin(n)`, `cos(n)`, `tan(n)`, `atan2(y, x)`, `exp(n)`, `log(n)` (natural; `log(n, base)` in another base), `random()`, `pi`, `e` |
 | Console | `print(args...)`, `println(args...)`, `error(args...)` (to stderr), `isTerminal()` (output is a terminal, so colour codes are safe), `isInteractive()` (input is a terminal, so a prompt reaches someone), `readLine()`, `readLine(prompt)` (on a terminal: shows the prompt, with line editing and history), `readLine(prompt, color)` (the prompt in `"red"`, `"green"`, `"yellow"`, `"blue"`, `"magenta"`, `"cyan"`, `"white"` or `"black"`; put the colour here, not escape codes in the prompt, which would confuse line editing), `loadHistory(path)`, `saveHistory(path)`, `prompt(msg)`, `capture { ... }` (what the block prints, as a String; see [Capturing output](#capturing-output)), `beginCapture()`, `endCapture()` |
 | File | `read(path)`, `readLines(path)`, `write(path, content)`, `append(path, content)`, `exists(path)`, `delete(path)`, `rename(old, new)`, `size(path)`, `isDir(path)`, `isFile(path)`, `mkdir(path)`, `listDir(path)` (sorted), `copy(from, to)`, `modified(path)`, `cwd()`, `chdir(path)`, `tempDir()` — binary-safe; `delete` also removes empty directories. Recursive helpers are in `stdlib/fs` |
-| System | `exit(code)`, `run(command)` (shell command → exit status; use `Process` to capture output), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `version()` (the Clay version, e.g. `"0.1.0"`), `clock()` (elapsed milliseconds since the program started), `allocCount()`, `deallocCount()`, `liveObjects()` (allocated − freed), `memory()` (process resident memory in bytes) |
+| System | `exit(code)`, `run(command)` (shell command → exit status; use `Process` to capture output), `env(name)`, `args()`, `executable()`, `pluginGlobals()`, `platform()`, `version()` (the Clay version, e.g. `"0.1.0"`), `clock()` (elapsed milliseconds since the program started), `allocCount()`, `deallocCount()`, `liveObjects()` (allocated − freed), `collect()` (free unreachable reference cycles now; the number of objects freed), `memory()` (process resident memory in bytes) |
 | FFI | `load(path)`, `call(funcName, args...)`, `close()` |
 | Date | `now()`, `nowMillis()` (integer milliseconds since 1970), `fromTimestamp(ts)`, `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, `timestamp()`, `format(pattern)`, `toString()` |
 | Http | `get(url)`, `post(url, body)`, `serve(port, handler)`, `response(status, body)`, `jsonResponse(status, body)`, `parseForm(str)`, `status()`, `body()`, `method()`, `path()`, `query()`, `params()` |
@@ -47,7 +47,19 @@ System exit(0)                // exit process with code
 // Memory diagnostics
 System allocCount           // total objects allocated
 System deallocCount         // total objects freed
+System liveObjects          // allocated and not yet freed
+System collect              // free unreachable reference cycles now; the number freed
 ```
+
+Clay frees an object when the last reference to it goes (reference counting).
+Objects that refer to each other, such as a node and the children that point
+back at it with `parent`, or a block in an object's slot that uses the object,
+are freed by a cycle collector once nothing outside refers to them. It runs by
+itself as candidates build up, at the start of a method or block call;
+`System collect` runs it now, which is mostly useful before reading
+`System liveObjects`. Setting `CLAY_GC_STRESS=1` in the environment makes it
+run at every call, to flush out bugs in native code that holds objects without
+counting them (slow).
 
 ## Capturing output
 
