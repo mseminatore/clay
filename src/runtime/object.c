@@ -236,6 +236,10 @@ ClayObject *clay_clone(ClayObject *proto) {
         obj->as.vec3.x = proto->as.vec3.x;
         obj->as.vec3.y = proto->as.vec3.y;
         obj->as.vec3.z = proto->as.vec3.z;
+    } else if (proto && proto->type == CLAY_TYPE_COND) {
+        clay_retain_val(proto->as.cond.value);
+        obj->as.cond.value = proto->as.cond.value;
+        obj->as.cond.matched = proto->as.cond.matched;
     }
 
     /* Copy slots from prototype — DISABLED for copy-on-write optimization.

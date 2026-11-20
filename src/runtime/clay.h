@@ -169,7 +169,8 @@ typedef enum {
     CLAY_TYPE_DICT,
     CLAY_TYPE_FLOAT,
     CLAY_TYPE_PLUGIN,
-    CLAY_TYPE_VEC3
+    CLAY_TYPE_VEC3,
+    CLAY_TYPE_COND      /* what ifTrue/ifFalse return (bootstrap.c) */
 } ClayType;
 
 struct ClayObject {
@@ -220,6 +221,11 @@ struct ClayObject {
         struct {
             float x, y, z;
         } vec3;
+
+        struct {
+            ClayValue value;   /* the block's result (retained) */
+            int       matched; /* 1 = a block ran: a chained ifTrue/ifFalse gives value */
+        } cond;
     } as;
 };
 

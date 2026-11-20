@@ -42,6 +42,22 @@ r2 = 0; false ifTrue { r2 = 42 }; Test eq(r2, 0)
 r3 = 0; false ifFalse { r3 = 99 }; Test eq(r3, 99)
 r4 = 0; true ifFalse { r4 = 99 }; Test eq(r4, 0)
 
+// Chained: the second block runs only when the first didn't, and the chain's
+// value is the block that ran
+Test eq((1 < 2) ifTrue { "a" } ifFalse { "b" }, "a")
+Test eq((1 > 2) ifTrue { "a" } ifFalse { "b" }, "b")
+Test eq((1 > 2) ifFalse { "a" } ifTrue { "b" }, "a")
+Test eq((1 < 2) ifFalse { "a" } ifTrue { "b" }, "b")
+Test eq((1 < 2) ifTrue { nil } ifFalse { "b" }, nil)
+ran = 0
+(1 < 2) ifTrue { 1 } ifFalse { ran = 1 }
+Test eq(ran, 0)
+// a condition result keeps the block's value, and so does a clone of it
+held = (1 < 2) ifTrue { "x" + "y" }
+Test eq(held ifFalse { "no" }, "xy")
+Test eq(held clone ifFalse { "no" }, "xy")
+Test eq((1 > 2) ifTrue { "x" } clone ifFalse { "no" }, "no")
+
 // whileTrue
 i = 0; s = 0
 { i < 5 } whileTrue { s = s + i; i = i + 1 }

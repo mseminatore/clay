@@ -416,6 +416,8 @@ x = 5
 // Chaining ifTrue/ifFalse — the whole expression has a value
 sign = (x > 0) ifTrue { "positive" } ifFalse { "non-positive" }
 sign println           // positive
+// either order works
+((x > 0) ifFalse { "non-positive" } ifTrue { "positive" }) println   // positive
 ```
 
 Blocks capture variables from their enclosing scope (closures). Captured variables are shared by reference — mutations in one closure are visible to all closures that captured the same variable:

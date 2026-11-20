@@ -75,6 +75,8 @@ check value("return from nested each, captured local", { Early fromNested([1, 2,
 check value("break out of each", { Early breakOut([1, 2, 3]) })
 check value("continue in each", { Early skip([1, 2, 3]) })
 check value("raise and catch a new string", { Early caught(count) })
+check value("ifTrue/ifFalse chain", { ((count > 0) ifTrue { "a" + "b" } ifFalse { "c" }) toString })
+check value("lone ifTrue keeping its result", { ((count == 0) ifTrue { "a" + "b" }) clone })
 
 // --- Runtime methods that call blocks release what they are building (a
 // map's array, a reduce's accumulator, a Dict each's key) when a block leaves
@@ -137,6 +139,7 @@ checkCycle value("recursive local block", { Maths fact(5) })
 checkCycle value("array holding itself", { a = []; a push(a) })
 checkCycle value("dict holding itself", { d = #{}; d set("me", d) })
 checkCycle value("cycle through a prototype", { p = Object clone; c = p clone; p kid = c })
+checkCycle value("cycle through a condition result", { a = []; a push((1 < 2) ifTrue { a }) })
 
 // what is still in use is kept: a cycle reachable from a variable survives
 // collection whole

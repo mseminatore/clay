@@ -44,7 +44,8 @@ ClayObject *clay_retain(ClayObject *obj) {
 
 /* Give an object's memory back (to the pool for plain objects) */
 static void free_object_memory(ClayObject *obj) {
-    if ((obj->type == CLAY_TYPE_OBJECT || obj->type == CLAY_TYPE_VEC3) && obj->slots) {
+    if ((obj->type == CLAY_TYPE_OBJECT || obj->type == CLAY_TYPE_VEC3 ||
+         obj->type == CLAY_TYPE_COND) && obj->slots) {
         ht_clear(obj->slots);
         obj->type = CLAY_TYPE_OBJECT;
         obj->gc_color = GC_BLACK;
@@ -159,6 +160,12 @@ static void clay_dealloc(ClayObject *obj) {
             if (obj->as.plugin.data && obj->as.plugin.free_fn)
                 obj->as.plugin.free_fn(obj->as.plugin.data);
             break;
+        case CLAY_TYPE_COND: {
+            ClayValue v = obj->as.cond.value;
+            obj->as.cond.value = CLAY_NIL;
+            clay_release_val(v);
+            break;
+        }
         default:
             break;
     }
@@ -375,6 +382,9 @@ static void gc_children(GcNode n, GcVisit visit) {
                     if ((c = gc_value_node(val))) visit(c);
             }
             break;
+        case CLAY_TYPE_COND:
+            if ((c = gc_value_node(o->as.cond.value))) visit(c);
+            break;
         default:
             break;
     }
@@ -524,6 +534,12 @@ static void gc_clear(GcNode n) {
                 gc_stack.count = mark;
             }
             break;
+        case CLAY_TYPE_COND: {
+            ClayValue v = o->as.cond.value;
+            o->as.cond.value = CLAY_NIL;
+            clay_release_val(v);
+            break;
+        }
         default:
             break;
     }

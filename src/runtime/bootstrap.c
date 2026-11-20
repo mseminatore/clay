@@ -137,7 +137,7 @@ const char *clay_type_name(ClayObject *self) {
                 /* Tagged ints are wrapped with parent=clay_Number */
                 if (self->parent == clay_Number) name = "Number";
                 else if (self->parent == clay_Error || self->type == CLAY_TYPE_OBJECT ||
-                         self->type == CLAY_TYPE_PLUGIN) {
+                         self->type == CLAY_TYPE_PLUGIN || self->type == CLAY_TYPE_COND) {
                     /* Check if it's an Error by walking parent chain */
                     ClayObject *p = self->parent;
                     name = "Object";
@@ -303,72 +303,71 @@ static ClayValue object_neq(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 /*
- * ifTrue/ifFalse return a "condition result" object that supports chaining.
- * The result stores the value in a "_val" slot and the "_matched" flag.
- * ifFalse on a result where _matched==true returns _val unchanged.
- * ifFalse on a result where _matched==false evaluates the block.
+ * ifTrue/ifFalse return a "condition result" (a CLAY_TYPE_COND object) so they
+ * can be chained: `c ifTrue { a } ifFalse { b }`. A result whose block ran
+ * (matched) holds the block's value, which a chained ifTrue/ifFalse gives back
+ * without running its block; on an unmatched result they run their block and
+ * give its value, so `c ifFalse { a } ifTrue { b }` works like the usual order.
+ * The value is held in the object itself, not in slots, and every unmatched
+ * result is the same immortal object, so a test that fails allocates nothing.
  */
 
 /* The prototype of condition results: holds their ifTrue/ifFalse once
  * (created in clay_bootstrap) */
 static ClayObject *clay_CondResult = NULL;
+static ClayObject *clay_cond_unmatched = NULL;  /* immortal */
 
-static ClayObject *make_cond_result(ClayValue val, int matched) {
+/* A matched result holding `val` (borrowed: the result takes its own reference) */
+static ClayValue cond_matched(ClayValue val) {
     ClayObject *obj = clay_clone(clay_CondResult);
-    clay_set_slot(obj, "_val", val);
-    clay_set_slot(obj, "_matched", matched ? CLAY_TRUE : CLAY_FALSE);
-    return obj;
+    clay_retain_val(val);
+    obj->as.cond.value = val;
+    obj->as.cond.matched = 1;
+    return CLAY_VAL(obj);
 }
 
-static ClayValue cond_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
-    ClayValue matched = clay_get_slot(self, "_matched");
-    if (matched == CLAY_TRUE) {
-        ClayValue result = clay_get_slot(self, "_val");
-        clay_retain_val(result);
-        return result;
-    }
-    if (argc < 1) return CLAY_NIL;
+static int cond_is_matched(ClayObject *self) {
+    return self->type == CLAY_TYPE_COND && self->as.cond.matched;
+}
+
+/* A matched result's value, owned */
+static ClayValue cond_value(ClayObject *self) {
+    clay_retain_val(self->as.cond.value);
+    return self->as.cond.value;
+}
+
+/* Run the block argument; its result, owned */
+static ClayValue cond_run(int argc, ClayValue *argv) {
+    if (argc < 1 || !CLAY_IS_OBJ(argv[0])) return CLAY_NIL;
     return clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
 }
 
+static ClayValue cond_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
+    if (cond_is_matched(self)) return cond_value(self);
+    return cond_run(argc, argv);
+}
+
 static ClayValue cond_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
-    ClayValue matched = clay_get_slot(self, "_matched");
-    if (matched == CLAY_TRUE) {
-        ClayValue result = clay_get_slot(self, "_val");
-        clay_retain_val(result);
-        return result;
-    }
+    if (cond_is_matched(self)) return cond_value(self);
+    return cond_run(argc, argv);
+}
+
+/* ifTrue on true / ifFalse on false: run the block */
+static ClayValue bool_run_if(ClayObject *self, int argc, ClayValue *argv, ClayObject *when) {
     if (argc < 1) return CLAY_VAL(self);
-    ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
-    ClayObject *cr = make_cond_result(result, 1);
-    clay_release_val(result); /* make_cond_result took ownership via set_slot */
-    return CLAY_VAL(cr);
+    if (self != when) return CLAY_VAL(clay_cond_unmatched);
+    ClayValue result = cond_run(argc, argv);
+    ClayValue cr = cond_matched(result);
+    clay_release_val(result);
+    return cr;
 }
 
 static ClayValue bool_ifTrue(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_VAL(self);
-    if (self == &clay_true_obj) {
-        ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
-        ClayObject *cr = make_cond_result(result, 1);
-        clay_release_val(result); /* make_cond_result took ownership via set_slot */
-        return CLAY_VAL(cr);
-    }
-    /* false: return a condition result with _matched=false */
-    ClayObject *cr = make_cond_result(CLAY_NIL, 0);
-    return CLAY_VAL(cr);
+    return bool_run_if(self, argc, argv, &clay_true_obj);
 }
 
 static ClayValue bool_ifFalse(ClayObject *self, int argc, ClayValue *argv) {
-    if (argc < 1) return CLAY_VAL(self);
-    if (self == &clay_false_obj) {
-        ClayValue result = clay_send(CLAY_OBJ(argv[0]), "value", 0, NULL);
-        ClayObject *cr = make_cond_result(result, 1);
-        clay_release_val(result); /* make_cond_result took ownership via set_slot */
-        return CLAY_VAL(cr);
-    }
-    /* true: return a condition result with _matched=false */
-    ClayObject *cr = make_cond_result(CLAY_NIL, 0);
-    return CLAY_VAL(cr);
+    return bool_run_if(self, argc, argv, &clay_false_obj);
 }
 
 static ClayValue bool_toString(ClayObject *self, int argc, ClayValue *argv) {
@@ -827,6 +826,9 @@ void clay_bootstrap(void) {
     clay_CondResult->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_method(clay_CondResult, "ifTrue", cond_ifTrue);
     clay_set_method(clay_CondResult, "ifFalse", cond_ifFalse);
+    clay_CondResult->type = CLAY_TYPE_COND;
+    clay_cond_unmatched = clay_clone(clay_CondResult);
+    clay_cond_unmatched->refcount = CLAY_REFCOUNT_IMMORTAL;
     clay_set_method(clay_Boolean, "toString", bool_toString);
     clay_set_method(clay_Boolean, "not", bool_not);
 
