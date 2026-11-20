@@ -517,13 +517,24 @@ static const char *error_type_name(ClayValue error) {
     return CLAY_IS_TYPE(t, CLAY_TYPE_STRING) ? clay_string_data(CLAY_OBJ(t)) : NULL;
 }
 
+/* A signal a block's `return` raised (clay_raise_return) */
+static int is_return_signal(ClayValue error) {
+    return CLAY_IS_OBJ(error) && CLAY_OBJ(error)->parent == clay_ReturnSignal;
+}
+
 int clay_is_control_signal(ClayValue error) {
+    if (error == CLAY_VAL(clay_BreakSignal) || error == CLAY_VAL(clay_ContinueSignal) ||
+        is_return_signal(error)) return 1;
     const char *t = error_type_name(error);
     return t && (strcmp(t, "BreakSignal") == 0 || strcmp(t, "ContinueSignal") == 0 ||
                  strcmp(t, "ReturnSignal") == 0);
 }
 
 int clay_loop_signal(ClayValue error) {
+    /* the usual signals are the singletons; a clone of one counts too */
+    if (error == CLAY_VAL(clay_BreakSignal)) return CLAY_SIGNAL_BREAK;
+    if (error == CLAY_VAL(clay_ContinueSignal)) return CLAY_SIGNAL_CONTINUE;
+    if (is_return_signal(error)) return 0;
     const char *t = error_type_name(error);
     int sig = 0;
     if (t && strcmp(t, "BreakSignal") == 0) sig = CLAY_SIGNAL_BREAK;
@@ -552,9 +563,7 @@ void clay_raise_return(ClayValue value, ClayValue id) {
     }
     /* Only its method's frame sees the signal (catch handlers re-raise it):
      * no stack trace or location to record */
-    ClayObject *sig = clay_clone(clay_Error);
-    clay_set_slot_take(sig, "_message", CLAY_VAL(clay_string_new("non-local return")));
-    clay_set_slot_take(sig, "_type", CLAY_VAL(clay_string_new("ReturnSignal")));
+    ClayObject *sig = clay_clone(clay_ReturnSignal);
     clay_set_slot(sig, "_value", value);
     clay_release_val(value);          /* the signal now holds it */
     clay_set_slot(sig, "_id", id);
@@ -562,8 +571,7 @@ void clay_raise_return(ClayValue value, ClayValue id) {
 }
 
 int clay_return_matches(ClayValue error, ClayValue id, ClayValue *value_out) {
-    const char *t = error_type_name(error);
-    if (!t || strcmp(t, "ReturnSignal") != 0) return 0;
+    if (!is_return_signal(error)) return 0;
     if (clay_get_slot(CLAY_OBJ(error), "_id") != id) return 0;
     ClayValue v = clay_get_slot(CLAY_OBJ(error), "_value");
     clay_retain_val(v);      /* the caller owns the returned value */

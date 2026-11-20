@@ -686,6 +686,8 @@ typedef struct {
     HashTable  *methods_key;
     const char *selector;
     ClayMethod *method;
+    long        epoch;       /* clay_dispatch_epoch when filled, -1 if the selector
+                              * was shadowed then (see cached_lookup_method) */
 } InlineCacheEntry;
 
 static CLAY_THREAD_LOCAL InlineCacheEntry g_ic_table[IC_TABLE_SIZE];
@@ -695,6 +697,7 @@ typedef struct {
     size_t      callsite_ip;
     HashTable  *methods_key;
     const char *selector;
+    long        epoch;       /* as in InlineCacheEntry */
 } SlotICEntry;
 
 static CLAY_THREAD_LOCAL SlotICEntry g_slot_ic[IC_TABLE_SIZE];
@@ -974,7 +977,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         ic->callsite_ip == site_ip &&
         ic->methods_key == target_methods &&
         ic->selector == selector &&
-        !clay_selector_shadowed(selector)) {
+        ic->epoch == clay_dispatch_epoch) {
         /* Method IC hit — invoke directly, skip dispatch (but keep the call in
          * stack traces, as clay_send_val does) */
         clay_trace_push(clay_source_file, clay_source_line, selector);
@@ -999,12 +1002,12 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
 
     /* Slot-read IC check (separate table, only for 0-arg sends on objects) */
     if (!ic_handled && msg_argc == 0 && target_obj &&
-        !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver) &&
-        !clay_selector_shadowed(selector)) {
+        !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver)) {
         SlotICEntry *sic = &g_slot_ic[ic_idx];
         if (sic->callsite_ip == site_ip &&
             sic->methods_key == target_methods &&
-            sic->selector == selector) {
+            sic->selector == selector &&
+            sic->epoch == clay_dispatch_epoch) {
             ClayValue slot_val = clay_get_slot(target_obj, selector);
             if (!CLAY_IS_NIL(slot_val) && CLAY_IS_PTR(slot_val) &&
                 slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
@@ -1028,12 +1031,15 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
         result = clay_send_val(receiver, selector, msg_argc, args);
         /* Update method IC or slot IC */
         if (target_obj) {
+            long epoch = clay_dispatch_epoch;
+            if (clay_selector_shadowed(selector)) epoch = -1;
             ClayMethod *m = clay_cached_lookup(target_obj, selector);
             if (m) {
                 ic->callsite_ip = site_ip;
                 ic->methods_key = target_methods;
                 ic->selector = selector;
                 ic->method = m;
+                ic->epoch = epoch;
             } else if (msg_argc == 0 &&
                        !CLAY_IS_INT(receiver) && !CLAY_IS_TAGGED_FLOAT(receiver) &&
                        !CLAY_IS_NIL(receiver) && clay_has_slot(target_obj, selector)) {
@@ -1041,6 +1047,7 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
                 sic->callsite_ip = site_ip;
                 sic->methods_key = target_methods;
                 sic->selector = selector;
+                sic->epoch = epoch;
             }
         }
     }

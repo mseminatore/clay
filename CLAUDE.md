@@ -111,7 +111,10 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   `clay_send()` macro for object pointers). Tagged integers get a temporary `clay_Number` wrapper for
   dispatch. Method lookup walks the prototype chain (`ClayObject.parent`), with slots checked as a
   fallback (Io-style `doesNotUnderstand` semantics), and is accelerated by a global method cache
-  (`clay_cached_lookup`) plus inline caches in the BC compiler.
+  (`clay_cached_lookup`, which also caches "no method": slot reads sent as messages) plus inline
+  caches in the BC compiler. Every cache entry records `clay_dispatch_epoch`, which goes up when a
+  method is defined anywhere or a selector becomes shadowed by a slot; an entry from an older epoch
+  is never used, so a new kind of method cache must check it too.
 - **Memory**: reference counting via `clay_retain()`/`clay_release()` (atomic when `CLAY_THREAD_SAFE`
   is defined). The `deps/hash` hash table never frees keys/values — callers own that memory. `ClayCell`
   is a heap-allocated box used for by-reference variable capture in C codegen.

@@ -45,6 +45,7 @@ ClayObject *clay_Socket = NULL;
 ClayObject *clay_VM = NULL;
 ClayObject *clay_BreakSignal= NULL;
 ClayObject *clay_ContinueSignal = NULL;
+ClayObject *clay_ReturnSignal = NULL;
 
 /* External init functions from each type module */
 extern void clay_number_init_methods(ClayObject *proto);
@@ -868,6 +869,13 @@ void clay_bootstrap(void) {
     clay_set_slot_take(clay_ContinueSignal, "_message", CLAY_VAL(clay_string_new("continue")));
     clay_set_slot_take(clay_ContinueSignal, "_type", CLAY_VAL(clay_string_new("ContinueSignal")));
     clay_set_slot_take(clay_ContinueSignal, "_name", CLAY_VAL(clay_string_new("ContinueSignal")));
+
+    /* The prototype of the signals a block's `return` raises (each carries
+     * its own _value and _id; clay_raise_return) */
+    clay_ReturnSignal = clay_clone(clay_Error);
+    clay_ReturnSignal->refcount = CLAY_REFCOUNT_IMMORTAL;
+    clay_set_slot_take(clay_ReturnSignal, "_message", CLAY_VAL(clay_string_new("non-local return")));
+    clay_set_slot_take(clay_ReturnSignal, "_type", CLAY_VAL(clay_string_new("ReturnSignal")));
 
     /* Dict prototype */
     clay_Dict = clay_object_new();

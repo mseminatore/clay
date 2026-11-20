@@ -59,4 +59,32 @@ n = 0
 10 times { |i| (s type == "S type") ifTrue { n = n + 1 } }
 check value("cached sends", n, 10)
 
+// A call site that cached an inherited method sees an override added later
+// to a nearer prototype (one that already had methods)
+G = Object clone { hi() { "G" } }
+P = G clone { other() { 0 } }
+C = P clone
+greet = { |o| o hi }
+before = greet value(C)
+P setMethod("hi", { "P" })
+check value("cached call before an override", before, "G")
+check value("cached call after an override", greet value(C), "P")
+
+// A slot read sent as a message, cached, then the same name becomes a method
+Q = Object clone { v = 5 }
+readV = { |o| o v }
+first = readV value(Q)
+Q setMethod("v", { 7 })
+check value("cached slot read before a method", first, 5)
+check value("cached slot read after a method", readV value(Q), 7)
+
+// A name that becomes shadowed after its sends were cached
+U = Object clone { tag() { "method" } }
+u = U clone
+readTag = { |o| o tag }
+check value("cached method before a shadowing slot", readTag value(u), "method")
+W = U clone { tag = "slot" }
+check value("shadowing slot after caching", readTag value(W), "slot")
+check value("other clones keep the method", readTag value(u), "method")
+
 "PASS: slot shadowing" println

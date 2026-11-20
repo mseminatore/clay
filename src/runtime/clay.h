@@ -173,6 +173,10 @@ typedef enum {
     CLAY_TYPE_COND      /* what ifTrue/ifFalse return (bootstrap.c) */
 } ClayType;
 
+/* gc_flags bit: the object has a _ctx (fiber) or _sock (socket) slot whose
+ * resource clay_dealloc frees; other objects skip looking for them */
+#define CLAY_OBJ_RESOURCE 0x80
+
 struct ClayObject {
     ClayObject *parent;
     HashTable  *slots;
@@ -180,7 +184,7 @@ struct ClayObject {
     int         refcount;
     uint8_t     type;       /* a ClayType */
     uint8_t     gc_color;   /* cycle collector state (memory.c) */
-    uint8_t     gc_flags;
+    uint8_t     gc_flags;   /* the collector's flags, and CLAY_OBJ_RESOURCE */
 
     /* Type-specific data */
     union {
@@ -273,11 +277,18 @@ int         clay_selector_shadowed_slow(const char *selector);
 static inline int clay_selector_shadowed(const char *selector) {
     return clay_shadow_count != 0 && clay_selector_shadowed_slow(selector);
 }
+/* Goes up whenever a lookup's answer may change: a method is defined anywhere
+ * or a selector becomes shadowed. Method caches (dispatch.c, the VM's inline
+ * caches) record it and only use an entry while it is unchanged. */
+extern volatile long clay_dispatch_epoch;
 /* clay_set_slot for a value the caller owns: the slot takes that reference
  * (use for fresh objects, e.g. clay_set_slot_take(o, "k", CLAY_VAL(clay_string_new(s)))) */
 void        clay_set_slot_take(ClayObject *obj, const char *name, ClayValue value);
 ClayValue   clay_get_slot(ClayObject *obj, const char *name);
 int         clay_has_slot(ClayObject *obj, const char *name);
+/* Both at once: 1 and the value in *out if obj or a prototype has the slot,
+ * else 0 and nil */
+int         clay_find_slot(ClayObject *obj, const char *name, ClayValue *out);
 void        clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func);
 void        clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func, void *context);
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name);
@@ -403,6 +414,7 @@ void clay_thread_set_vm_init(void (*fn)(void));
 /* Loop control signal singletons(Error clones used by break/continue) */
 extern ClayObject *clay_BreakSignal;
 extern ClayObject *clay_ContinueSignal;
+extern ClayObject *clay_ReturnSignal;   /* internal: prototype of non-local return signals */
 
 /* Fiber context cleanup (called from memory.c when fiber objects are freed) */
 void clay_fiber_context_free(intptr_t ctx_ptr);

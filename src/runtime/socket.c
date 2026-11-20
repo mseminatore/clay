@@ -162,6 +162,7 @@ static void fail_errno(const char *who, int err) {
 static ClayValue wrap(sock_t fd, const char *kind, int family) {
     ClayObject *obj = clay_clone(clay_Socket);
     clay_set_slot(obj, "_sock", clay_int((intptr_t)fd));
+    obj->gc_flags |= CLAY_OBJ_RESOURCE;
     clay_set_slot(obj, "_family", clay_int(family));         /* AF_INET or AF_INET6, for sendTo */
     clay_set_slot(obj, "_timeout", clay_int(0));
     clay_set_slot_take(obj, "_kind", CLAY_VAL(clay_string_new(kind)));

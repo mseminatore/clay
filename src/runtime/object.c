@@ -76,6 +76,7 @@ static volatile unsigned char g_method_bloom[NAME_BLOOM_BITS / 8];
 #define SHADOW_MAX 128
 static const char *g_shadowed[SHADOW_MAX];
 volatile long clay_shadow_count = 0;
+volatile long clay_dispatch_epoch = 1;   /* 0 never matches: caches start zeroed */
 static volatile int g_shadow_overflow = 0;   /* too many: treat every selector as shadowed */
 
 static void name_hashes(const char *s, unsigned *h1, unsigned *h2) {
@@ -85,16 +86,18 @@ static void name_hashes(const char *s, unsigned *h1, unsigned *h2) {
     *h2 = (h >> 13) & (NAME_BLOOM_BITS - 1);
 }
 
-static int bloom_has(volatile unsigned char *b, const char *name) {
-    unsigned h1, h2;
-    name_hashes(name, &h1, &h2);
+static int bloom_has_h(volatile unsigned char *b, unsigned h1, unsigned h2) {
     return (b[h1 >> 3] & (1u << (h1 & 7))) && (b[h2 >> 3] & (1u << (h2 & 7)));
 }
 
-static void bloom_add(volatile unsigned char *b, const char *name) {
-    if (bloom_has(b, name)) return;
+static int bloom_has(volatile unsigned char *b, const char *name) {
     unsigned h1, h2;
     name_hashes(name, &h1, &h2);
+    return bloom_has_h(b, h1, h2);
+}
+
+static void bloom_add_h(volatile unsigned char *b, unsigned h1, unsigned h2) {
+    if (bloom_has_h(b, h1, h2)) return;
     pool_lock();
     b[h1 >> 3] |= (unsigned char)(1u << (h1 & 7));
     b[h2 >> 3] |= (unsigned char)(1u << (h2 & 7));
@@ -123,9 +126,11 @@ static void shadow_add(const char *name) {
             g_shadow_bloom[h1 >> 3] |= (unsigned char)(1u << (h1 & 7));
             g_shadow_bloom[h2 >> 3] |= (unsigned char)(1u << (h2 & 7));
             CLAY_ATOMIC_INC(&clay_shadow_count);
+            CLAY_ATOMIC_INC(&clay_dispatch_epoch);
         } else {
             g_shadow_overflow = 1;
             CLAY_ATOMIC_INC(&clay_shadow_count);   /* keep the fast check true */
+            CLAY_ATOMIC_INC(&clay_dispatch_epoch);
         }
     }
     pool_unlock();
@@ -133,18 +138,24 @@ static void shadow_add(const char *name) {
 
 /* A new slot `name` on obj: does it hide a method inherited by obj? */
 static void note_new_slot(ClayObject *obj, const char *name) {
-    bloom_add(g_slot_bloom, name);
-    if (!bloom_has(g_method_bloom, name)) return;
+    unsigned h1, h2;
+    name_hashes(name, &h1, &h2);
+    bloom_add_h(g_slot_bloom, h1, h2);
+    if (!bloom_has_h(g_method_bloom, h1, h2)) return;
+    if (clay_selector_shadowed(name)) return;            /* already known */
     if (obj->methods) {
         ht_value_t v;
         if (ht_lookup(obj->methods, name, &v)) return;   /* own method wins */
     }
-    if (obj->parent && clay_lookup_method(obj->parent, name)) shadow_add(name);
+    /* (cached: many objects get the same slots) */
+    if (obj->parent && clay_cached_lookup(obj->parent, name)) shadow_add(name);
 }
 
 /* A new method `name`: an existing slot of that name below it may now hide it */
 static void note_new_method(const char *name) {
-    bloom_add(g_method_bloom, name);
+    unsigned h1, h2;
+    name_hashes(name, &h1, &h2);
+    bloom_add_h(g_method_bloom, h1, h2);
     if (bloom_has(g_slot_bloom, name)) shadow_add(name);
 }
 
@@ -310,33 +321,28 @@ void clay_set_slot_take(ClayObject *obj, const char *name, ClayValue value) {
     clay_release_val(value);
 }
 
-ClayValue clay_get_slot(ClayObject *obj, const char *name) {
+int clay_find_slot(ClayObject *obj, const char *name, ClayValue *out) {
     /* Look up in this object first, then walk parent chain */
-    ClayObject *cur = obj;
-    while (cur) {
-        if (cur->slots) {
-            ht_value_t val;
-            if (ht_lookup(cur->slots, name, &val)) {
-                return (ClayValue)(uintptr_t)val;
-            }
+    for (ClayObject *cur = obj; cur; cur = cur->parent) {
+        ht_value_t val;
+        if (cur->slots && ht_lookup(cur->slots, name, &val)) {
+            *out = (ClayValue)(uintptr_t)val;
+            return 1;
         }
-        cur = cur->parent;
     }
-    return CLAY_NIL;
+    *out = CLAY_NIL;
+    return 0;
+}
+
+ClayValue clay_get_slot(ClayObject *obj, const char *name) {
+    ClayValue v;
+    clay_find_slot(obj, name, &v);
+    return v;
 }
 
 int clay_has_slot(ClayObject *obj, const char *name) {
-    ClayObject *cur = obj;
-    while (cur) {
-        if (cur->slots) {
-            ht_value_t val;
-            if (ht_lookup(cur->slots, name, &val)) {
-                return 1;
-            }
-        }
-        cur = cur->parent;
-    }
-    return 0;
+    ClayValue v;
+    return clay_find_slot(obj, name, &v);
 }
 
 void clay_set_method(ClayObject *obj, const char *name, ClayMethodFunc func) {
@@ -365,8 +371,8 @@ void clay_set_method_ctx(ClayObject *obj, const char *name, ClayMethodFunc func,
     ht_insert(obj->methods, key_copy, (ht_value_t)m);
     note_new_method(name);
 
-    /* Invalidate method cache — methods table changed */
-    clay_method_cache_clear();
+    /* Every cached lookup may be out of date now (in every thread) */
+    CLAY_ATOMIC_INC(&clay_dispatch_epoch);
 }
 
 ClayMethodFunc clay_lookup_method(ClayObject *obj, const char *name) {

@@ -62,7 +62,7 @@ static void clay_dealloc(ClayObject *obj) {
     CLAY_ATOMIC_INC(&clay_dealloc_count);
 
     /* Free fiber context before slots are released (ctx is stored in _ctx slot) */
-    if (obj->slots) {
+    if (obj->slots && (obj->gc_flags & CLAY_OBJ_RESOURCE)) {
         ht_value_t ctx_val = ht_find(obj->slots, (ht_key_t)"_ctx");
         if (ctx_val) {
             ClayValue cv = (ClayValue)(uintptr_t)ctx_val;
@@ -73,7 +73,7 @@ static void clay_dealloc(ClayObject *obj) {
     }
 
     /* Close a socket nobody closed (its descriptor is in the _sock slot, -1 once closed) */
-    if (obj->slots) {
+    if (obj->slots && (obj->gc_flags & CLAY_OBJ_RESOURCE)) {
         ht_value_t sock_val = ht_find(obj->slots, (ht_key_t)"_sock");
         if (sock_val) {
             ClayValue cv = (ClayValue)(uintptr_t)sock_val;

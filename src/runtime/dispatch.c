@@ -18,6 +18,9 @@ typedef struct {
     HashTable      *methods;   /* methods table pointer (cache key part 1) */
     const char     *selector;  /* selector string (cache key part 2) */
     ClayMethod     *method;    /* cached method struct */
+    long            epoch;     /* clay_dispatch_epoch when the entry was made (the
+                                * selector wasn't shadowed then); the entry is
+                                * used only while that is still the epoch */
 } MethodCacheEntry;
 
 static CLAY_THREAD_LOCAL MethodCacheEntry method_cache[METHOD_CACHE_SIZE];
@@ -65,10 +68,6 @@ static inline unsigned int cache_hash(uintptr_t key1, uintptr_t key2) {
    Two-level cache: first checks receiver's own methods table, then
    checks the defining prototype's table (shared across siblings). */
 static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
-    /* A selector some object has as a slot shadowing a method: the nearest
-     * definition wins, which the caches (keyed by methods tables) can't tell */
-    if (clay_selector_shadowed(selector)) return clay_lookup_nearest(obj, selector);
-
     /* For objects with own methods, key by their methods table pointer.
      * For objects without (lazy methods), key by parent's methods table.
      * This groups all instances of the same prototype together (better cache
@@ -86,26 +85,38 @@ static ClayMethod *cached_lookup_method(ClayObject *obj, const char *selector) {
     unsigned int idx = cache_hash(recv_key, (uintptr_t)selector);
     MethodCacheEntry *entry = &method_cache[idx];
 
-    if (recv_key && entry->methods == (HashTable *)recv_key && entry->selector == selector) {
+    /* An entry made in this epoch still holds: no method was defined and no
+     * selector became shadowed since */
+    long epoch = clay_dispatch_epoch;
+    if (recv_key && entry->methods == (HashTable *)recv_key && entry->selector == selector &&
+        entry->epoch == epoch) {
         return entry->method;
     }
+
+    /* A selector some object has as a slot shadowing a method: the nearest
+     * definition wins, which the caches (keyed by methods tables) can't tell */
+    if (clay_selector_shadowed(selector)) return clay_lookup_nearest(obj, selector);
 
     /* Full prototype chain walk */
     HashTable *defining = NULL;
     ClayMethod *m = lookup_method_full(obj, selector, &defining);
-    if (m && recv_key) {
-        /* Cache under receiver's key */
+    if (recv_key) {
+        /* Cache under receiver's key — also when nothing was found (a slot read
+         * sent as a message), so the next one doesn't walk the chain again;
+         * defining a method anywhere starts a new epoch */
         entry->methods  = (HashTable *)recv_key;
         entry->selector = selector;
         entry->method   = m;
+        entry->epoch = epoch;
 
         /* Also cache under defining prototype's key (shared by siblings) */
-        if (defining && defining != (HashTable *)recv_key) {
+        if (m && defining && defining != (HashTable *)recv_key) {
             unsigned int didx = cache_hash((uintptr_t)defining, (uintptr_t)selector);
             MethodCacheEntry *dentry = &method_cache[didx];
             dentry->methods  = defining;
             dentry->selector = selector;
             dentry->method   = m;
+            dentry->epoch = epoch;
         }
     }
     return m;
@@ -251,8 +262,8 @@ ClayValue clay_send_val(ClayValue receiver, const char *selector, int argc, Clay
      * If it's a Block, invoke it (Io-style: block slots act as methods).
      * Use getSlot("name") to retrieve a block without invoking it.
      * Otherwise return the slot value (only for zero-arg sends). */
-    if (clay_has_slot(obj, selector)) {
-        ClayValue slot_val = clay_get_slot(obj, selector);
+    ClayValue slot_val;
+    if (clay_find_slot(obj, selector, &slot_val)) {
         if (!CLAY_IS_NIL(slot_val) && CLAY_IS_PTR(slot_val) &&
             slot_val != CLAY_TRUE && slot_val != CLAY_FALSE) {
             ClayObject *slot_obj = CLAY_OBJ(slot_val);

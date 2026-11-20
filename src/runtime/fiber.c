@@ -299,6 +299,7 @@ static ClayValue fiber_new(ClayObject *self, int argc, ClayValue *argv) {
 #endif
 
     clay_set_slot(fiber, "_ctx", clay_int((intptr_t)ctx));
+    fiber->gc_flags |= CLAY_OBJ_RESOURCE;
     return CLAY_VAL(fiber);
 }
 
