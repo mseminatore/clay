@@ -852,11 +852,11 @@ set_target_properties(mathex PROPERTIES
     PREFIX ""
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
-# On Windows, MODULE produces .dll in RUNTIME_OUTPUT_DIRECTORY
-if(WIN32)
+# Next to clay: with a multi-config generator (Visual Studio, Xcode) that is
+# build/<config>/ (any configuration). On Windows, MODULE produces a .dll in
+# RUNTIME_OUTPUT_DIRECTORY.
+if(CLAY_MULTI_CONFIG)
     set_target_properties(mathex PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug/plugins
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release/plugins)
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/plugins
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIG>/plugins)
 endif()

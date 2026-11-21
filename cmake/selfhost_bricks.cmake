@@ -122,8 +122,12 @@ commit(bad one)
 # "clay": the Clay versions a brick needs
 file(WRITE "${WORK}/src/future/brick.json" "{ \"name\": \"future\", \"clay\": \">=99\" }\n")
 commit(future one)
+# current: a range this Clay satisfies, also when it is a prerelease (which
+# only a comparator naming that prerelease admits)
+execute_process(COMMAND "${CLAY}" --version OUTPUT_VARIABLE clay_version OUTPUT_STRIP_TRAILING_WHITESPACE)
+string(REGEX REPLACE "^clay " "" clay_version "${clay_version}")
 file(WRITE "${WORK}/src/current/brick.json"
-     "{ \"name\": \"current\", \"clay\": \">=0.3.3 <99\", \"deps\": { \"lib-b\": \"example.test/acme/lib-b\" } }\n")
+     "{ \"name\": \"current\", \"clay\": \">=${clay_version} <99\", \"deps\": { \"lib-b\": \"example.test/acme/lib-b\" } }\n")
 commit(current one)
 file(WRITE "${WORK}/src/oddrange/brick.json" "{ \"name\": \"oddrange\", \"clay\": \"^abc\" }\n")
 commit(oddrange one)

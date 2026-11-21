@@ -6,19 +6,23 @@ on:
   pull_request:
     branches: [main]
 
+# Tests run 4 at a time (the runners have 3-4 cores); tests that share
+# files take a RESOURCE_LOCK in CMakeLists.txt.
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # What users get (the default build type, with LTO); the asan job
+        # below covers a Debug build
         include:
           - os: ubuntu-latest
-            build_type: Debug
+            build_type: RelWithDebInfo
           - os: macos-latest
-            build_type: Debug
+            build_type: RelWithDebInfo
           - os: windows-latest
-            build_type: Debug
+            build_type: RelWithDebInfo
 
     runs-on: ${{ matrix.os }}
 
@@ -32,15 +36,15 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }}
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4
 
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -LE "bricks|native"
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -j 4 -LE "bricks|native"
 
       # Every test program compiled with `clay --compile` and run
       - name: Native backend tests
         if: ${{ !cancelled() }}          # report native results even if VM tests failed
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -L native -LE bricks
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure -j 4 -L native -LE bricks
 
   asan:
     runs-on: ubuntu-latest
@@ -54,12 +58,12 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
 
       - name: Build (ASAN)
-        run: cmake --build build
+        run: cmake --build build --parallel 4
 
       - name: Test (ASAN)
         env:
           ASAN_OPTIONS: detect_leaks=0
-        run: ctest --test-dir build --output-on-failure -LE bricks
+        run: ctest --test-dir build --output-on-failure -j 4 -LE bricks
 
   vm-generated:
     # src/vm/generated must match what vmgen (deps/vmgen) produces from src/vm/clay.yaml
