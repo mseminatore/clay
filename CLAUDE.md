@@ -52,6 +52,10 @@ make test-clay
 - Optional CMake flag: `-DCLAY_THREAD_SAFE=ON` enables atomic refcounting + TLS (needed for
   `Thread`/`parallelMap` examples like `examples/raytrace_parallel.clay --live`, which also needs SDL2).
 - OpenSSL is detected automatically for HTTPS support; without it, `Http` falls back to HTTP only.
+- Builds are optimized by default (`RelWithDebInfo` when no build type is given). Outside Debug, the
+  `clay` binary links LTO-built copies of the runtime libraries (`<lib>_lto` targets, made from the
+  originals' sources and settings); the plain libraries stay as they are for `clay --compile` and the
+  tests. `-DCLAY_LTO=OFF` turns it off.
 
 ## Running Clay programs
 

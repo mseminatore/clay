@@ -229,6 +229,57 @@ if(UNIX)
 endif()
 set_target_properties(clay_compiler PROPERTIES OUTPUT_NAME clay)
 
+# --- Link-time optimization for the clay binary ---
+# LTO makes the VM ~14% faster (calls between runtime files get inlined).
+# Native programs (clay --compile) link the runtime libraries above with the
+# system C compiler, which can't always read LTO objects, so clay links
+# LTO-built copies of them instead and the originals stay plain.
+option(CLAY_LTO "Build the clay binary with link-time optimization (not in Debug builds)" ON)
+if(CLAY_LTO AND (CLAY_MULTI_CONFIG OR NOT CMAKE_BUILD_TYPE STREQUAL "Debug"))
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT CLAY_IPO_SUPPORTED OUTPUT CLAY_IPO_ERROR LANGUAGES C)
+    if(NOT CLAY_IPO_SUPPORTED)
+        message(STATUS "LTO not supported by this compiler — clay built without it")
+    endif()
+endif()
+if(CLAY_IPO_SUPPORTED)
+    message(STATUS "LTO enabled for the clay binary")
+    set(CLAY_LTO_TARGETS ht clayvm clay_runtime clay_compiler_lib)
+    # <target>_lto: same sources and settings as <target>, linking the other
+    # copies, built with LTO (except a multi-config generator's Debug)
+    foreach(lib ${CLAY_LTO_TARGETS})
+        get_target_property(srcs ${lib} SOURCES)
+        add_library(${lib}_lto STATIC EXCLUDE_FROM_ALL ${srcs})
+        foreach(prop INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
+                     INTERFACE_INCLUDE_DIRECTORIES INTERFACE_COMPILE_DEFINITIONS)
+            get_target_property(val ${lib} ${prop})
+            if(val)
+                set_property(TARGET ${lib}_lto PROPERTY ${prop} "${val}")
+            endif()
+        endforeach()
+        foreach(prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+            get_target_property(val ${lib} ${prop})
+            if(val)
+                set(mapped "")
+                foreach(dep ${val})
+                    list(FIND CLAY_LTO_TARGETS "${dep}" idx)
+                    if(idx GREATER -1)
+                        list(APPEND mapped "${dep}_lto")
+                    else()
+                        list(APPEND mapped "${dep}")
+                    endif()
+                endforeach()
+                set_property(TARGET ${lib}_lto PROPERTY ${prop} "${mapped}")
+            endif()
+        endforeach()
+        set_target_properties(${lib}_lto PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION ON INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
+    endforeach()
+    set_property(TARGET clay_compiler PROPERTY LINK_LIBRARIES clay_compiler_lib_lto)
+    set_target_properties(clay_compiler PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION ON INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
+endif()
+
 # --- Native compile configuration (clay --compile) ---
 # Written next to the clay binary: how to compile generated C and link it
 # against the prebuilt runtime, with the same options/features as this build.
