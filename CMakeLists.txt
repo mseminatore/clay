@@ -571,6 +571,10 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/native_tests)
 # `clay --tokens`, the parser with `clay --ast`, the code generator with
 # `clay -c`, the bytecode compiler with `clay --bytecode` — in the VM and
 # compiled natively. Run from the source root so brick imports resolve.
+# clayc reads the clay-native.cfg of the configuration under test: found on its
+# own it would take the first of build/, build/Debug/, build/Release/, and a
+# native brick built by the other configuration's clay would look stale.
+set(CLAY_SELFHOST_ENV "CLAY_NATIVE_CFG=$<TARGET_FILE_DIR:clay_compiler>/clay-native.cfg")
 foreach(check lexer parser codegen bytecode)
     add_test(NAME clay_selfhost_${check}
              COMMAND ${CMAKE_COMMAND}
@@ -586,9 +590,11 @@ foreach(check lexer parser codegen bytecode)
                  -DNATIVE=${CMAKE_CURRENT_BINARY_DIR}/native_tests/clay_selfhost_${check}${CMAKE_EXECUTABLE_SUFFIX}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_compare.cmake)
     set_tests_properties(clay_selfhost_${check} PROPERTIES
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost")
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost"
+        ENVIRONMENT "${CLAY_SELFHOST_ENV}")
     set_tests_properties(clay_selfhost_${check}_native PROPERTIES
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native"
+        ENVIRONMENT "${CLAY_SELFHOST_ENV}")
 endforeach()
 # clayc runs every test program on the VM exactly like clay does
 add_test(NAME clay_selfhost_run
@@ -598,7 +604,8 @@ add_test(NAME clay_selfhost_run
              -DCLAYC=${CMAKE_CURRENT_BINARY_DIR}/native_tests/clayc_run${CMAKE_EXECUTABLE_SUFFIX}
              -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/selfhost_run.cmake)
 set_tests_properties(clay_selfhost_run PROPERTIES
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native")
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} LABELS "selfhost;native"
+    ENVIRONMENT "${CLAY_SELFHOST_ENV}")
 # clayc bricks (selfhost/clay-bricks) does what clay bricks does, against git
 # repositories made by the test (no network)
 add_test(NAME clay_selfhost_bricks
