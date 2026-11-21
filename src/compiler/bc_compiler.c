@@ -208,7 +208,9 @@ static int bc_add_local(BcCompiler *bc, const char *name) {
  * invocation instead (Io-style updateSlot). Each such local gets a hidden
  * companion flag local named "?x" (not a valid identifier), set at entry;
  * reads and writes of `x` branch on it. Nested blocks that capture `x` also
- * capture "?x" so they make the same choice. */
+ * capture "?x" so they make the same choice. The compiler's own hidden locals
+ * are named "?:name" ("?:ret", "?:loop", "?:k", ...), so no flag can be taken
+ * for one: a hidden "?last" was the flag of a variable named `last`. */
 
 #define BC_SLOT_FLAG_MAX 136
 
@@ -486,8 +488,8 @@ static void bc_scan_free_vars(AstNode *node, char **block_params, int param_coun
             break;
         case NODE_RETURN: {
             /* A block's `return` returns from its method: capture the id */
-            int rslot = bc_resolve_enclosing(bc, "?ret");
-            if (rslot >= 0) bc_capture_add(caps, "?ret", rslot);
+            int rslot = bc_resolve_enclosing(bc, "?:ret");
+            if (rslot >= 0) bc_capture_add(caps, "?:ret", rslot);
             if (node->as.return_stmt.expr)
                 bc_scan_free_vars(node->as.return_stmt.expr, block_params, param_count, caps, bc);
             break;
@@ -750,13 +752,13 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
      * local variables (not params, captures, builtins, or user globals).
      * This ensures prescan can identify which locals nested blocks capture,
      * enabling proper cell-boxing for closures that escape their scope. */
-    /* Non-local return: a method whose blocks `return` gets a hidden "?ret"
+    /* Non-local return: a method whose blocks `return` gets a hidden "?:ret"
      * local holding this activation's id (registered before the prescan so
      * nested blocks capture it) */
     int ret_slot = -1;
     if (is_method && ast_has_block_return_inlined(body)) {
         chunk->has_block_return = 1;
-        ret_slot = bc_add_local(bc, "?ret");
+        ret_slot = bc_add_local(bc, "?:ret");
     }
 
     int prereg_start = bc->local_count;
@@ -1190,7 +1192,7 @@ static void bc_emit_inline_while(BcCompiler *bc, AstNode *node, int want_value) 
     int res = -1;
     if (want_value) {
         bc_begin_scope(bc);
-        res = bc_add_local(bc, "?loop");
+        res = bc_add_local(bc, "?:loop");
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
             (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
         emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)res);
@@ -1245,13 +1247,13 @@ static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) 
     bc_begin_scope(bc);
     int res = -1, first = -1;
     if (want_value) {
-        res = bc_add_local(bc, "?loop");
+        res = bc_add_local(bc, "?:loop");
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
             (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
         bc_emit_set_pop(bc, res);
     }
-    int k = bc_add_local(bc, "?k");
-    int last = bc_add_local(bc, "?last");
+    int k = bc_add_local(bc, "?:k");
+    int last = bc_add_local(bc, "?:last");
     if (kind == AST_COUNT_TIMES) {
         bc_emit_expr(bc, recv);
         bc_set_loc(bc, node);
@@ -1271,7 +1273,7 @@ static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) 
         bc_emit_native(bc, bc->native_range_bound, 1);
         bc_emit_set_pop(bc, last);
         if (want_value) {
-            first = bc_add_local(bc, "?first");
+            first = bc_add_local(bc, "?:first");
             emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)k);
             bc_emit_set_pop(bc, first);
         }
@@ -1931,7 +1933,7 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
                 (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
         }
-        int ret_id = bc->chunk_is_method ? -1 : bc_resolve_local(bc, "?ret");
+        int ret_id = bc->chunk_is_method ? -1 : bc_resolve_local(bc, "?:ret");
         if (ret_id >= 0) {
             /* `return` in a block: return from the enclosing method */
             bc_emit_get_local_value(bc, ret_id);

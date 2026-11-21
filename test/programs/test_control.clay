@@ -376,4 +376,40 @@ Test no(1 == 2)
 Test ok(1 != 2)
 Test no(1 != 1)
 
+// The compiler's hidden locals (an inlined loop's counter and bounds, a
+// non-local return's id) are not mistaken for the slot flags of variables
+// named like them: last, k, first, loop, ret
+NamesLikeHidden = Object clone {
+    writes() {
+        last = 0
+        k = 0
+        first = 0
+        loop = 0
+        ret = 0
+        3 times { |i| last = i; k = i + 10 }
+        (5..7) each { |i| first = i; loop = i }
+        n = 0
+        { n < 2 } whileTrue { n = n + 1; ret = n }
+        [last, k, first, loop, ret]
+    }
+    reads() {
+        last = 4
+        k = 5
+        total = 0
+        2 times { |i| total = total + last + k }
+        total
+    }
+    early() {
+        ret = 1
+        [1, 2] each { |x| (x == 2) ifTrue { return ret + x } }
+        0
+    }
+}
+Test eq(NamesLikeHidden writes, [2, 12, 7, 7, 2])
+Test eq(NamesLikeHidden reads, 18)
+Test eq(NamesLikeHidden early, 3)
+// a slot of that name is still written through (implicit-slot fallback)
+HolderOfLast = Object clone { last = 0; fill() { 3 times { |i| last = i }; self } }
+Test eq((HolderOfLast clone fill) last, 2)
+
 Test done()

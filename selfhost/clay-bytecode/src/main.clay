@@ -471,8 +471,8 @@ BcGen = Object clone {
             return nil
         }
         (k == "Return") ifTrue {
-            rs = self resolveLocal("?ret")
-            (rs >= 0) ifTrue { caps add("?ret", rs) }
+            rs = self resolveLocal("?:ret")
+            (rs >= 0) ifTrue { caps add("?:ret", rs) }
             self scan(n expr, params, caps)
             return nil
         }
@@ -996,12 +996,12 @@ BcGen = Object clone {
         res = -1
         first = -1
         wantValue ifTrue {
-            res = self addLocal("?loop")
+            res = self addLocal("?:loop")
             self pushNil
             self setPop(res)
         }
-        k = self addLocal("?k")
-        last = self addLocal("?last")
+        k = self addLocal("?:k")
+        last = self addLocal("?:last")
         (kind == 1) ifTrue {
             self expr(r)
             self setLoc(n)
@@ -1021,7 +1021,7 @@ BcGen = Object clone {
             self native(N_RANGE_BOUND, 1)
             self setPop(last)
             wantValue ifTrue {
-                first = self addLocal("?first")
+                first = self addLocal("?:first")
                 self emitOpU16(GET_LOCAL, k)
                 self setPop(first)
             }
@@ -1065,7 +1065,7 @@ BcGen = Object clone {
         res = -1
         wantValue ifTrue {
             depth = depth + 1
-            res = self addLocal("?loop")
+            res = self addLocal("?:loop")
             self pushNil
             self emitOpU16(SET_LOCAL, res)
             self emitOp(POP)
@@ -1155,7 +1155,7 @@ BcGen = Object clone {
         retSlot = -1
         (isMethod && (self hasBlockReturn(body))) ifTrue {
             rec setAt(6, true)
-            retSlot = self addLocal("?ret")
+            retSlot = self addLocal("?:ret")
         }
 
         preStart = locs size
@@ -1553,7 +1553,7 @@ BcGen = Object clone {
         }
         (k == "Return") ifTrue {
             (n expr != nil) ifTrue { self expr(n expr) } ifFalse { self pushNil }
-            retId = isMethChunk ifTrue { -1 } ifFalse { self resolveLocal("?ret") }
+            retId = isMethChunk ifTrue { -1 } ifFalse { self resolveLocal("?:ret") }
             (retId >= 0) ifTrue {
                 // `return` in a block: return from the enclosing method
                 self getLocalValue(retId)
