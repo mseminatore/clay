@@ -927,6 +927,50 @@ static ClayValue vm_eval(const char *source) {
     return result;
 }
 
+/* Compile `source` like one REPL input: same compiler and VM as the inputs
+ * before it, constants kept. Returns bc_compile's result. */
+static int repl_compile(BcCompiler *bc, const char *source) {
+    Parser parser;
+    parser_init(&parser, source, "<test>");
+    AstNode *program = parser_parse(&parser);
+    if (!program || parser.had_error) {
+        if (program) ast_free(program);
+        return -1;
+    }
+    bc->len = 0;
+    bc->had_error = 0;
+    int rc = bc_compile(bc, program);
+    ast_free(program);
+    return rc;
+}
+
+static void test_vm_constants(void) {
+    SUITE("VM Constant Pool");
+
+    clayvm_vm_t vm;
+    clayvm_vm_init(&vm);
+    BcCompiler bc;
+    bc_compiler_init(&bc, &vm);
+
+    COMMENT("REPL inputs reuse nil, true, false, int and float constants...");
+    {
+        const char *input = "x = 1\ny = 2.5\nz = nil\nw = true\nv = false\nx + 1\n";
+        TEST(repl_compile(&bc, input) == 0);
+        int after_first = vm.constants.count;
+        for (int i = 0; i < 1000; i++) repl_compile(&bc, input);
+        TEST(vm.constants.count == after_first);
+    }
+
+    COMMENT("past 65536 constants an input is rejected, not wrapped...");
+    {
+        while (vm.constants.count < 65534)
+            clayvm_vm_add_constant(&vm, CLAYVM_INT64(1000000 + vm.constants.count));
+        TEST(repl_compile(&bc, "a = 70000001\n") == 0);   /* index 65534 */
+        TEST(repl_compile(&bc, "a = 70000001\n") == 0);   /* reused */
+        TEST(repl_compile(&bc, "a = 70000002\nb = 70000003\n") != 0);
+    }
+}
+
 static void test_vm_captures(void) {
     SUITE("VM Closures & Captures");
 
@@ -1830,6 +1874,7 @@ void test_main(int argc, char *argv[]) {
     test_slot_access();
     test_constructors();
     test_vm_captures();
+    test_vm_constants();
     test_compound_assignment();
     test_implicit_self();
     test_vm_shared_captures();

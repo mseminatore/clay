@@ -148,4 +148,20 @@ p2 = Object clone
 Test eq(bumped, 11)
 Test eq(p2 hasSlot("bumped"), false)
 
+// Objects with their own methods, dropped and made again: a new methods table
+// can get a freed one's address, and the method caches (keyed by those
+// addresses) must never hand back the dropped object's method
+sum = 0
+wrong = 0
+2000 times { |i|
+    o = Object clone { v = i; get() { v * 10 } }
+    (i % 2 == 0) ifTrue { o = Object clone { v = i; get() { v } } }
+    got = o get
+    want = (i % 2 == 0) ifTrue { i } ifFalse { i * 10 }
+    (got != want) ifTrue { wrong = wrong + 1 }
+    sum = sum + o v
+}
+Test eq(wrong, 0)
+Test eq(sum, 1999000)
+
 Test done()

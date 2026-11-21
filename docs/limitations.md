@@ -102,10 +102,10 @@ is no `cmake --install` yet. Build Clay from source and run it from there.
 
 ## REPL
 
-**A very long REPL session can run out of constants.** Every number and `nil`
-literal typed into the VM REPL adds a constant, and a session has 65,536
-constant slots; past that, values silently go wrong. Restart the REPL if a
-session runs for a very long time.
+**A program or REPL session has at most 65,536 distinct constants.** Each
+different number or string literal (and each name the code sends or assigns)
+takes one, however often it is used. Past that, compiling stops with `too many
+constants`; restart the REPL if a session gets there.
 
 ## Self-hosting
 

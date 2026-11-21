@@ -62,12 +62,49 @@ static void patch_jump(BcCompiler *bc, int patch_pos) {
     bc->code[patch_pos + 1] = (uint8_t)((offset >> 8) & 0xFF);
 }
 
+/* Add a constant and return its index. Operands that name a constant are
+ * u16, so a program (or a REPL session: one pool for every input) has at most
+ * BC_MAX_CONSTANTS of them; past that it can't be compiled. */
+#define BC_MAX_CONSTANTS 65536
+
+static int bc_const_checked(BcCompiler *bc, clayvm_value_t v) {
+    int idx = clayvm_vm_add_constant(bc->vm, v);
+    if (idx >= BC_MAX_CONSTANTS) {
+        if (!bc->had_error)
+            fprintf(stderr, "%s:%d: error: too many constants (max %d)\n",
+                    clay_source_file ? clay_source_file : "<input>",
+                    bc->current_line, BC_MAX_CONSTANTS);
+        bc->had_error = 1;
+    }
+    return idx;
+}
+
+/* nil, true, false, ints and floats are added once each (strings too, in
+ * add_constant_string): constants are never changed, so uses share them.
+ * selfhost/clay-bytecode addConstant does the same. */
+static int bc_add_const(BcCompiler *bc, clayvm_value_t v) {
+    if (v.type == CLAYVM_VAL_NIL || v.type == CLAYVM_VAL_BOOL ||
+        v.type == CLAYVM_VAL_INT64 || v.type == CLAYVM_VAL_DOUBLE) {
+        for (int i = 0; i < bc->vm->constants.count; i++) {
+            clayvm_value_t c = bc->vm->constants.values[i];
+            if (c.type != v.type) continue;
+            if (v.type == CLAYVM_VAL_NIL ||
+                (v.type == CLAYVM_VAL_BOOL && c.as.boolean == v.as.boolean) ||
+                (v.type == CLAYVM_VAL_INT64 && c.as.i64 == v.as.i64) ||
+                (v.type == CLAYVM_VAL_DOUBLE &&
+                 memcmp(&c.as.f64, &v.as.f64, sizeof(double)) == 0))
+                return i;
+        }
+    }
+    return bc_const_checked(bc, v);
+}
+
 static int add_constant_int(BcCompiler *bc, int64_t val) {
-    return clayvm_vm_add_constant(bc->vm, CLAYVM_INT64(val));
+    return bc_add_const(bc, CLAYVM_INT64(val));
 }
 
 static int add_constant_obj(BcCompiler *bc, void *obj) {
-    return clayvm_vm_add_constant(bc->vm, CLAYVM_OBJ(obj));
+    return bc_const_checked(bc, CLAYVM_OBJ(obj));
 }
 
 static int add_constant_string(BcCompiler *bc, const char *s) {
@@ -84,7 +121,7 @@ static int add_constant_string(BcCompiler *bc, const char *s) {
     }
     ClayObject *str = clay_string_new(s);
     clay_retain(str);
-    return clayvm_vm_add_constant(bc->vm, CLAYVM_OBJ(str));
+    return bc_const_checked(bc, CLAYVM_OBJ(str));
 }
 
 /* --- AST → Bytecode compilation --- */
@@ -848,7 +885,7 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     /* If body was empty, push nil as return value */
     if (body->count == 0) {
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
     }
 
     chunk->local_count = bc->max_local_count;
@@ -1002,7 +1039,7 @@ static void bc_emit_inline_body_p(BcCompiler *bc, NodeList *body, int want_value
     /* the block's variables start out nil each time it runs */
     for (int i = pre_start; i < pre_end; i++) {
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)i);
         emit_op(bc, CLAYVM_OP_POP);
     }
@@ -1035,7 +1072,7 @@ static void bc_emit_inline_body_p(BcCompiler *bc, NodeList *body, int want_value
     }
     if (want_value && !pushed)
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
     for (int i = 0; i < exit.count; i++) patch_jump(bc, exit.jumps[i]);
     free(exit.jumps);
     bc_end_scope(bc);
@@ -1105,7 +1142,7 @@ static void bc_emit_inline_if(BcCompiler *bc, AstNode *node, int want_value) {
     int to_skip = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
     if (is_cmp)
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, clay_to_vm(CLAY_TRUE)));
+            (uint16_t)bc_add_const(bc, clay_to_vm(CLAY_TRUE)));
     BcLoop *loop = (BcLoop *)bc->inline_loop;
     if (loop) loop->depth++;
     bc_emit_inline_body(bc, body, 1);
@@ -1115,7 +1152,7 @@ static void bc_emit_inline_if(BcCompiler *bc, AstNode *node, int want_value) {
     patch_jump(bc, to_skip);
     if (is_cmp)
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, clay_to_vm(CLAY_TRUE)));
+            (uint16_t)bc_add_const(bc, clay_to_vm(CLAY_TRUE)));
     bc_emit_native(bc, bc->native_if_skipped, 1);
     patch_jump(bc, to_end);
 }
@@ -1139,7 +1176,7 @@ static void bc_emit_loop_jump(BcCompiler *bc, BcLoop *loop, int is_break) {
     for (int i = 0; i < loop->depth; i++) emit_op(bc, CLAYVM_OP_POP);
     if (loop->nil_res >= 0) {
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)loop->nil_res);
         emit_op(bc, CLAYVM_OP_POP);
     }
@@ -1171,7 +1208,7 @@ static void bc_emit_inline_while(BcCompiler *bc, AstNode *node, int want_value) 
         bc_begin_scope(bc);
         res = bc_add_local(bc, "?:loop");
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)res);
         emit_op(bc, CLAYVM_OP_POP);
     }
@@ -1226,7 +1263,7 @@ static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) 
     if (want_value) {
         res = bc_add_local(bc, "?:loop");
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         bc_emit_set_pop(bc, res);
     }
     int k = bc_add_local(bc, "?:k");
@@ -1319,7 +1356,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         }
 
         case NODE_FLOAT_LIT: {
-            int idx = clayvm_vm_add_constant(bc->vm, CLAYVM_DOUBLE((double)node->as.float_lit.value));
+            int idx = bc_add_const(bc, CLAYVM_DOUBLE((double)node->as.float_lit.value));
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)idx);
             break;
         }
@@ -1484,7 +1521,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 int end_jump = emit_jump(bc, CLAYVM_OP_JUMP);
                 patch_jump(bc, false_jump);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                    (uint16_t)clayvm_vm_add_constant(bc->vm,
+                    (uint16_t)bc_add_const(bc,
                         clay_to_vm(CLAY_FALSE)));
                 patch_jump(bc, end_jump);
             } else if (strcmp(op, "||") == 0) {
@@ -1495,7 +1532,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 emit_byte(bc, 1);
                 int true_jump = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                    (uint16_t)clayvm_vm_add_constant(bc->vm,
+                    (uint16_t)bc_add_const(bc,
                         clay_to_vm(CLAY_TRUE)));
                 int end_jump = emit_jump(bc, CLAYVM_OP_JUMP);
                 patch_jump(bc, true_jump);
@@ -1600,7 +1637,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
             if (chunk_id < 0) {
                 bc_capture_free(&caps);
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                    (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+                    (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
                 break;
             }
 
@@ -1771,14 +1808,14 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 bc_emit_expr(bc, node->as.try_catch.catch_block);
             } else {
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                    (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+                    (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
             }
             /* Compile finally block (or push nil if absent) */
             if (node->as.try_catch.finally_block) {
                 bc_emit_expr(bc, node->as.try_catch.finally_block);
             } else {
                 emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                    (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+                    (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
             }
             /* the call takes the try's line (not the catch/finally block's
              * just compiled), for the try block's stack-trace frame */
@@ -1813,7 +1850,7 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
         default:
             /* Unsupported node — push nil */
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+                (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
             break;
     }
 }
@@ -1908,7 +1945,7 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
             bc_emit_expr(bc, node->as.return_stmt.expr);
         } else {
             emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-                (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+                (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         }
         int ret_id = bc->chunk_is_method ? -1 : bc_resolve_local(bc, "?:ret");
         if (ret_id >= 0) {
@@ -1945,7 +1982,7 @@ static void bc_emit_stmt(BcCompiler *bc, AstNode *node) {
     /* In a block passed to a message, continue ends this run: nil */
     if (node->type == NODE_CONTINUE && bc->chunk_loop_owner) {
         emit_op_u16(bc, CLAYVM_OP_PUSH_CONST,
-            (uint16_t)clayvm_vm_add_constant(bc->vm, CLAYVM_NIL_VAL));
+            (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         emit_op(bc, CLAYVM_OP_CALL_NATIVE);
         emit_u16(bc, (uint16_t)bc->native_stop_vm);
         emit_byte(bc, 0);

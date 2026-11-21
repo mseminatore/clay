@@ -19,8 +19,6 @@ enum { GC_BLACK = 0, GC_GRAY, GC_WHITE, GC_PURPLE };
 static void gc_possible_root(uintptr_t node, uint8_t *color, uint8_t *flags);
 static int  gc_unbuffer_recent(uintptr_t node);
 
-void (*clay_ic_invalidate_hook)(void *methods_ptr) = NULL;
-
 /* Memory diagnostics counters */
 volatile long clay_alloc_count = 0;
 volatile long clay_dealloc_count = 0;
@@ -103,8 +101,10 @@ static void clay_dealloc(ClayObject *obj) {
 
     /* Free method keys and method structs */
     if (obj->methods) {
-        clay_method_cache_invalidate(obj->methods);
-        if (clay_ic_invalidate_hook) clay_ic_invalidate_hook(obj->methods);
+        /* Method caches are keyed by methods tables: a new epoch keeps an
+         * entry for this one from matching a table later made at its address
+         * (cheaper than scanning every cache; such frees are rare) */
+        CLAY_ATOMIC_INC(&clay_dispatch_epoch);
         size_t pos = 0;
         ht_key_t key;
         ht_value_t val;

@@ -119,6 +119,7 @@ BcGen = Object clone {
     MAX_CODE = 65536
     MAX_LOCALS = 256
     MAX_CAPTURES = 64
+    MAX_CONSTANTS = 65536  // constant operands are u16 (BC_MAX_CONSTANTS)
     MAX_PARAMS = 16
 
     // Names every compiler treats as builtins (is_builtin_global), plus
@@ -140,6 +141,7 @@ BcGen = Object clone {
     cpool = nil            // constants (Clay values: Int, Float, String, nil, true, false)
     ckinds = nil           // "int", "float", "string" or "" for each constant
     strIdx = nil           // string constant -> its first index
+    scalarIdx = nil        // nil/true/false/int/float constant -> its index
     chunkList = nil        // compiled chunks (BcChunk-like arrays, see chunkRecord)
     methodList = nil       // method slots: [chunkId, paramCount, name]
     globalsKnown = nil     // top-level variable name -> the files that assign it
@@ -178,6 +180,7 @@ BcGen = Object clone {
         g cpool = []
         g ckinds = []
         g strIdx = #{}
+        g scalarIdx = #{}
         g chunkList = []
         g methodList = []
         g globalsKnown = #{}
@@ -246,10 +249,24 @@ BcGen = Object clone {
 
     // --- constants ---
 
+    // nil, true, false, ints and floats are added once each, like strings
+    // (bc_add_const); operands are u16, so at most MAX_CONSTANTS in all
     addConstant(v, kind) {
+        key = (kind == "string") ifTrue { nil } ifFalse { kind + ":" + v toString }
+        (key != nil) ifTrue {
+            i = scalarIdx get(key)
+            (i != nil) ifTrue { return i }
+        }
         cpool push(v)
         ckinds push(kind)
-        constBase + cpool size - 1
+        i = constBase + cpool size - 1
+        (i >= MAX_CONSTANTS && failed == false) ifTrue {
+            Console print(srcFile + ":" + curLine toString + ": error: too many constants (max " +
+                          MAX_CONSTANTS toString + ")\n")
+            failed = true
+        }
+        (key != nil) ifTrue { scalarIdx set(key, i) }
+        i
     }
 
     constInt(v) { self addConstant(v, "int") }

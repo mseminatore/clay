@@ -714,16 +714,6 @@ typedef struct {
 
 static CLAY_THREAD_LOCAL SlotICEntry g_slot_ic[IC_TABLE_SIZE];
 
-/* Invalidate IC entries referencing a freed methods hash table */
-static void bc_ic_invalidate(void *methods_ptr) {
-    HashTable *target = (HashTable *)methods_ptr;
-    for (int i = 0; i < IC_TABLE_SIZE; i++) {
-        if (g_ic_table[i].methods_key == target)
-            g_ic_table[i].methods_key = NULL;
-        if (g_slot_ic[i].methods_key == target)
-            g_slot_ic[i].methods_key = NULL;
-    }
-}
 
 /* native_send(receiver, selector_str, arg1, arg2, ...) */
 static int native_send_fn(clayvm_vm_t *vm, int argc) {
@@ -1906,7 +1896,6 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
 
     /* Register native functions */
     vm->arith_fallback = arith_fallback_fn;
-    clay_ic_invalidate_hook = bc_ic_invalidate;
     clay_fiber_hooks = &bc_fiber_hooks;
     clay_try_hooks = &bc_try_hooks;
     vm->retain_fn = vm_retain_cb;
@@ -2162,6 +2151,11 @@ static ClayValue vm_run(ClayObject *self, int argc, ClayValue *argv) {
     if (code_len > BC_MAX_CODE) {
         free(code);
         clay_raise(CLAY_VAL(clay_error_new("VM run: top-level code too long", "ArgumentError")));
+    }
+    /* constant operands are u16 (bc_compiler.c BC_MAX_CONSTANTS) */
+    if ((size_t)vm->constants.count + clay_array_size(consts) > 65536) {
+        free(code);
+        clay_raise(CLAY_VAL(clay_error_new("VM run: too many constants", "ArgumentError")));
     }
     int *lines = vm_arg_lines(clay_array_at(unit, 7), code_len);
     ClayValue file = clay_array_at(unit, 8);

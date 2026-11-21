@@ -325,13 +325,6 @@ const char *clay_intern(const char *name);
 
 /* --- Method cache --- */
 void clay_method_cache_clear(void);
-void clay_method_cache_invalidate(void *methods_ptr);
-
-/* --- Inline cache invalidation hook ---
- * Set by the bytecode VM (bc_compiler.c) so its per-callsite inline caches drop
- * entries for a methods table that is being freed. NULL when no VM is linked
- * in, e.g. in natively compiled programs. */
-extern void (*clay_ic_invalidate_hook)(void *methods_ptr);
 
 /* --- Memory management --- */
 ClayObject *clay_retain(ClayObject *obj);
