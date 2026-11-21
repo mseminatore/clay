@@ -113,6 +113,12 @@ foreach(f ${files})
                     RESULT_VARIABLE rc_c OUTPUT_VARIABLE want ERROR_VARIABLE want)
     execute_process(COMMAND ${clay_side} "${f}"
                     RESULT_VARIABLE rc_clay OUTPUT_VARIABLE got ERROR_VARIABLE got)
+    # A native brick (test/native_brick) is built by whichever side imports
+    # it first — with tests running in parallel, either one — and that side
+    # says so; the notice is not part of what is compared
+    foreach(var want got)
+        string(REGEX REPLACE "clay: building native brick '[^'\n]*'\\.\\.\\.\n" "" ${var} "${${var}}")
+    endforeach()
     if(NOT rc_c EQUAL rc_clay OR NOT want STREQUAL got)
         file(RELATIVE_PATH rel "${ROOT}" "${f}")
         list(APPEND failed "${rel}")
