@@ -73,8 +73,9 @@ This produces `build/clay` (the compiler/VM) and `build/test_runner` (runtime un
 under `build/Debug/` with `.exe` suffixes on Windows / multi-config generators.
 Add `build/` to your `PATH`, or call it as `./build/clay`.
 
-For the fastest native programs, configure a Release build:
-`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`.
+The build is optimized with debug info (`RelWithDebInfo`) unless you choose another type, such
+as `-DCMAKE_BUILD_TYPE=Release` or `-DCMAKE_BUILD_TYPE=Debug` for debugging Clay itself. With
+Visual Studio, pick it when building: `cmake --build build --config Release`.
 
 To install Clay outside the source tree, run `cmake --install build --prefix ~/.local` (any
 prefix works). This puts `clay` in `bin/` and the bundled bricks in `lib/clay/`, where `clay` finds

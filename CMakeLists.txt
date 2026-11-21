@@ -6,6 +6,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_C_STANDARD 99)
 
+# Optimized by default (with debug info): an unset build type means no -O at
+# all, and the VM runs 3-4x slower. Multi-config generators (Visual Studio,
+# Xcode) pick the configuration at build time instead.
+get_property(CLAY_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT CLAY_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+        "Build type: Debug, Release, RelWithDebInfo or MinSizeRel" FORCE)
+endif()
+
 # Thread-safety option (off by default — zero overhead when disabled)
 option(CLAY_THREAD_SAFE "Enable thread-safe refcounting and TLS for multi-threaded use" OFF)
 
