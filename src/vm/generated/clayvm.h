@@ -55,7 +55,9 @@ typedef enum {
     CLAYVM_OP_TRY_END = 25,
     CLAYVM_OP_CATCH = 26,
     CLAYVM_OP_THROW = 27,
-    CLAYVM_OP_COUNT = 28
+    CLAYVM_OP_GET_LOCAL_FLAGGED = 28,
+    CLAYVM_OP_SET_LOCAL_FLAGGED = 29,
+    CLAYVM_OP_COUNT = 30
 } clayvm_opcode_t;
 
 static const char *const clayvm_opcode_names[] = {
@@ -87,6 +89,8 @@ static const char *const clayvm_opcode_names[] = {
     "TRY_END",
     "CATCH",
     "THROW",
+    "GET_LOCAL_FLAGGED",
+    "SET_LOCAL_FLAGGED",
 };
 
 static const int clayvm_operand_counts[] = {
@@ -118,6 +122,8 @@ static const int clayvm_operand_counts[] = {
     0,  /* TRY_END */
     0,  /* CATCH */
     0,  /* THROW */
+    3,  /* GET_LOCAL_FLAGGED */
+    3,  /* SET_LOCAL_FLAGGED */
 };
 
 /* Total instruction size in bytes (1 opcode byte + operands) */
@@ -150,6 +156,8 @@ static const int clayvm_instruction_sizes[] = {
     1,  /* TRY_END */
     1,  /* CATCH */
     1,  /* THROW */
+    7,  /* GET_LOCAL_FLAGGED */
+    7,  /* SET_LOCAL_FLAGGED */
 };
 
 
@@ -316,6 +324,8 @@ struct clayvm_vm {
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
     void (*retain_fn)(clayvm_value_t); /* Retain callback for OBJECT values (refcount++) */
     void (*release_fn)(clayvm_value_t); /* Release callback for OBJECT values (refcount--) */
+    void (*flagged_get)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t); /* GET_LOCAL_FLAGGED slow path (base, slot, flag, name constant) */
+    void (*flagged_set)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t); /* SET_LOCAL_FLAGGED slow path (base, slot, flag, name constant) */
     void (*cleanup)(struct clayvm_vm *vm);
 };
 
@@ -1095,6 +1105,42 @@ int handle_THROW(clayvm_vm_t *vm) {
     return 0;
 }
 
+int handle_GET_LOCAL_FLAGGED(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    uint16_t flag = READ_UINT16();
+    uint16_t name = READ_UINT16();
+    uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+    clayvm_value_t _flag = vm->stack[_base + flag];
+    clayvm_value_t _val = vm->stack[_base + slot];
+    if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+        (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
+    } else {
+        vm->flagged_get(vm, _base, slot, flag, name);
+    }
+    return 0;
+}
+
+int handle_SET_LOCAL_FLAGGED(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    uint16_t flag = READ_UINT16();
+    uint16_t name = READ_UINT16();
+    uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+    clayvm_value_t _flag = vm->stack[_base + flag];
+    clayvm_value_t _old = vm->stack[_base + slot];
+    if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+        (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+        clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
+        vm->stack[_base + slot] = _new;
+        if (vm->release_fn) vm->release_fn(_old);
+    } else {
+        vm->flagged_set(vm, _base, slot, flag, name);
+    }
+    return 0;
+}
+
 clayvm_handler_t clayvm_dispatch_table[] = {
     handle_PUSH_CONST,
     handle_POP,
@@ -1124,6 +1170,8 @@ clayvm_handler_t clayvm_dispatch_table[] = {
     handle_TRY_END,
     handle_CATCH,
     handle_THROW,
+    handle_GET_LOCAL_FLAGGED,
+    handle_SET_LOCAL_FLAGGED,
 };
 
 int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
@@ -1170,6 +1218,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         &&op_TRY_END,
         &&op_CATCH,
         &&op_THROW,
+        &&op_GET_LOCAL_FLAGGED,
+        &&op_SET_LOCAL_FLAGGED,
     };
 
 #define DISPATCH() goto *dispatch_table[vm->code[vm->ip++]]
@@ -1627,6 +1677,48 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         DISPATCH();
     }
 
+    op_GET_LOCAL_FLAGGED: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _val = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            if (vm->retain_fn) vm->retain_fn(_val);
+            clayvm_vm_push(vm, _val);
+        } else {
+            vm->flagged_get(vm, _base, slot, flag, name);
+        }
+        DISPATCH();
+    }
+
+    op_SET_LOCAL_FLAGGED: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _old = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            clayvm_value_t _new = vm->stack[vm->sp - 1];
+            if (vm->retain_fn) vm->retain_fn(_new);
+            vm->stack[_base + slot] = _new;
+            if (vm->release_fn) vm->release_fn(_old);
+        } else {
+            vm->flagged_set(vm, _base, slot, flag, name);
+        }
+        DISPATCH();
+    }
+
 #undef DISPATCH
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -1997,6 +2089,40 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         }
         break;
     }
+    case CLAYVM_OP_GET_LOCAL_FLAGGED: {
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _val = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            if (vm->retain_fn) vm->retain_fn(_val);
+            clayvm_vm_push(vm, _val);
+        } else {
+            vm->flagged_get(vm, _base, slot, flag, name);
+        }
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL_FLAGGED: {
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _old = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            clayvm_value_t _new = vm->stack[vm->sp - 1];
+            if (vm->retain_fn) vm->retain_fn(_new);
+            vm->stack[_base + slot] = _new;
+            if (vm->release_fn) vm->release_fn(_old);
+        } else {
+            vm->flagged_set(vm, _base, slot, flag, name);
+        }
+        break;
+    }
     default: {
         char msg[64];
         snprintf(msg, sizeof(msg), "unknown opcode %d at ip %zu",
@@ -2143,6 +2269,16 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CATCH);
     } else if (strcmp(mnemonic, "THROW") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_THROW);
+    } else if (strcmp(mnemonic, "GET_LOCAL_FLAGGED") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_LOCAL_FLAGGED);
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "SET_LOCAL_FLAGGED") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL_FLAGGED);
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else {
         fprintf(stderr, "assembler: unknown mnemonic '%s'\n", mnemonic);
         as->error = 1;
@@ -2296,6 +2432,22 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
     case CLAYVM_OP_THROW:
         printf("\n");
         break;
+    case CLAYVM_OP_GET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        printf("%u %u %u\n", _op0, _op1, _op2);
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        printf("%u %u %u\n", _op0, _op1, _op2);
+        break;
+    }
     default:
         printf("\n");
         break;
@@ -2468,6 +2620,24 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
         break;
+    case CLAYVM_OP_GET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u %u\n", _op0, _op1, _op2);
+        if (n > 0) written += n;
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u %u\n", _op0, _op1, _op2);
+        if (n > 0) written += n;
+        break;
+    }
     default:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
@@ -2853,6 +3023,30 @@ int clayvm_verify(const uint8_t *code, size_t code_len,
             break;
         }
         case CLAYVM_OP_THROW: {
+            break;
+        }
+        case CLAYVM_OP_GET_LOCAL_FLAGGED: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            uint16_t flag = (uint16_t)(code[instr_start + 3] |
+                          (code[instr_start + 4] << 8));
+            uint16_t name = (uint16_t)(code[instr_start + 5] |
+                          (code[instr_start + 6] << 8));
+            (void)slot;
+            (void)flag;
+            (void)name;
+            break;
+        }
+        case CLAYVM_OP_SET_LOCAL_FLAGGED: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            uint16_t flag = (uint16_t)(code[instr_start + 3] |
+                          (code[instr_start + 4] << 8));
+            uint16_t name = (uint16_t)(code[instr_start + 5] |
+                          (code[instr_start + 6] << 8));
+            (void)slot;
+            (void)flag;
+            (void)name;
             break;
         }
         default:

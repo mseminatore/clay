@@ -194,7 +194,10 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   `blockSubRaises`, `ownedCtl` in both ports.
 - **Implicit-slot fallback**: a bare `x = v` in a method writes self's slot `x` if it exists at call
   time; both compilers implement this with a hidden per-local flag (`?x` in bc_compiler, `__isslot_x` in
-  codegen) set at method/block entry — keep the two in sync.
+  codegen) set at method/block entry — keep the two in sync. In the VM each read/write of such a local
+  is one `GET_LOCAL_FLAGGED`/`SET_LOCAL_FLAGGED` (slot, flag, name constant); the flag-set and
+  captured-cell cases run in `vm_bridge.c` (`vm_flagged_get`/`vm_flagged_set`, the VM's
+  `flagged_get`/`flagged_set` hooks).
 - **Source locations**: runtime errors, tracebacks and the debugger use `clay_source_line` *and*
   `clay_source_file`, set from each AST node's `file` (imports are spliced into one program). The
   VM keeps a per-offset `file_map` for top-level code (which mixes files) and one `BcChunk.file`

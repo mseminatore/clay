@@ -369,6 +369,43 @@ vm:
       description: "Throw top of stack as exception"
       action: "pop ex; throw ex"
 
+    # Implicit-slot fallback (bc_compiler.c bc_emit_flagged_read/_write): a
+    # method's local `x` made by a bare assignment has a hidden flag local
+    # "?x", set at entry when self already has a slot `x`; then `x` means
+    # that slot. The common case (flag clear, neither local a captured cell)
+    # runs here; the rest in vm_bridge.c (flagged_get / flagged_set).
+    - name: GET_LOCAL_FLAGGED
+      operands: [{ name: slot, type: uint16 }, { name: flag, type: uint16 }, { name: name, type: uint16 }]
+      description: "Push local slot, or self's slot named by constant name when local flag is set."
+      action_c: |
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _val = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            if (vm->retain_fn) vm->retain_fn(_val);
+            clayvm_vm_push(vm, _val);
+        } else {
+            vm->flagged_get(vm, _base, slot, flag, name);
+        }
+
+    - name: SET_LOCAL_FLAGGED
+      operands: [{ name: slot, type: uint16 }, { name: flag, type: uint16 }, { name: name, type: uint16 }]
+      description: "Store top of stack (not popped) into local slot, or into self's slot named by constant name when local flag is set."
+      action_c: |
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _old = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            clayvm_value_t _new = vm->stack[vm->sp - 1];
+            if (vm->retain_fn) vm->retain_fn(_new);
+            vm->stack[_base + slot] = _new;
+            if (vm->release_fn) vm->release_fn(_old);
+        } else {
+            vm->flagged_set(vm, _base, slot, flag, name);
+        }
+
   constants:
     - int64
     - double
@@ -388,3 +425,5 @@ vm:
     - { name: arith_fallback, type: "void (*)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int)", comment: "Fallback for non-numeric binary ops" }
     - { name: retain_fn, type: "void (*)(clayvm_value_t)", comment: "Retain callback for OBJECT values (refcount++)" }
     - { name: release_fn, type: "void (*)(clayvm_value_t)", comment: "Release callback for OBJECT values (refcount--)" }
+    - { name: flagged_get, type: "void (*)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t)", comment: "GET_LOCAL_FLAGGED slow path (base, slot, flag, name constant)" }
+    - { name: flagged_set, type: "void (*)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t)", comment: "SET_LOCAL_FLAGGED slow path (base, slot, flag, name constant)" }

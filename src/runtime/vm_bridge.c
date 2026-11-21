@@ -1692,6 +1692,56 @@ static int native_set_self_slot_fn(clayvm_vm_t *vm, int argc) {
     return 0;
 }
 
+/* GET_LOCAL_FLAGGED / SET_LOCAL_FLAGGED, when the flag is set or either
+ * local is a captured cell. The flag set: the local is self's slot `name`
+ * (a string constant in the pool). */
+static int native_load_self_fn(clayvm_vm_t *vm, int argc);
+static int native_cell_set_rev_fn(clayvm_vm_t *vm, int argc);
+
+static int vm_flag_is_set(clayvm_vm_t *vm, uint32_t base, uint16_t flag) {
+    clayvm_value_t f = vm->stack[base + flag];
+    if (f.type == CLAYVM_VAL_CELL) f = clay_to_vm(((ClayCell *)f.as.obj)->value);
+    return !(f.type == CLAYVM_VAL_NIL || f.as.i64 == 0);
+}
+
+static void vm_flagged_get(clayvm_vm_t *vm, uint32_t base, uint16_t slot,
+                           uint16_t flag, uint16_t name) {
+    if (vm_flag_is_set(vm, base, flag)) {
+        native_load_self_fn(vm, 0);
+        clayvm_value_t nm = vm->constants.values[name];
+        vm_retain_val(nm);
+        clayvm_vm_push(vm, nm);
+        native_send_fn(vm, 2);
+        return;
+    }
+    clayvm_value_t v = vm->stack[base + slot];
+    vm_retain_val(v);
+    clayvm_vm_push(vm, v);
+    if (v.type == CLAYVM_VAL_CELL) native_cell_get_fn(vm, 1);
+}
+
+static void vm_flagged_set(clayvm_vm_t *vm, uint32_t base, uint16_t slot,
+                           uint16_t flag, uint16_t name) {
+    if (vm_flag_is_set(vm, base, flag)) {
+        clayvm_value_t nm = vm->constants.values[name];
+        vm_retain_val(nm);
+        clayvm_vm_push(vm, nm);
+        native_set_self_slot_fn(vm, 2);
+        return;
+    }
+    clayvm_value_t old = vm->stack[base + slot];
+    if (old.type == CLAYVM_VAL_CELL) {
+        vm_retain_val(old);
+        clayvm_vm_push(vm, old);
+        native_cell_set_rev_fn(vm, 2);
+        return;
+    }
+    clayvm_value_t nv = vm->stack[vm->sp - 1];
+    vm_retain_val(nv);
+    vm->stack[base + slot] = nv;
+    vm_release_val(old);
+}
+
 /* cell_set_rev(value, cell) — cell_set with the operands swapped */
 static int native_cell_set_rev_fn(clayvm_vm_t *vm, int argc) {
     clayvm_value_t cell_vm = clayvm_vm_pop(vm);
@@ -1861,6 +1911,8 @@ void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     clay_try_hooks = &bc_try_hooks;
     vm->retain_fn = vm_retain_cb;
     vm->release_fn = vm_release_cb;
+    vm->flagged_get = vm_flagged_get;
+    vm->flagged_set = vm_flagged_set;
     bc->native_send = clayvm_native_register(&vm->natives, "send", native_send_fn, -1);
     bc->native_super_send = clayvm_native_register(&vm->natives, "super_send", native_super_send_fn, -1);
     bc->native_clone = clayvm_native_register(&vm->natives, "clone", native_clone_fn, 1);

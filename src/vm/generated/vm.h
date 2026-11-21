@@ -110,6 +110,8 @@ struct clayvm_vm {
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
     void (*retain_fn)(clayvm_value_t); /* Retain callback for OBJECT values (refcount++) */
     void (*release_fn)(clayvm_value_t); /* Release callback for OBJECT values (refcount--) */
+    void (*flagged_get)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t); /* GET_LOCAL_FLAGGED slow path (base, slot, flag, name constant) */
+    void (*flagged_set)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t); /* SET_LOCAL_FLAGGED slow path (base, slot, flag, name constant) */
     void (*cleanup)(struct clayvm_vm *vm);
 };
 

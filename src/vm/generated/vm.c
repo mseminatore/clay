@@ -480,6 +480,42 @@ int handle_THROW(clayvm_vm_t *vm) {
     return 0;
 }
 
+int handle_GET_LOCAL_FLAGGED(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    uint16_t flag = READ_UINT16();
+    uint16_t name = READ_UINT16();
+    uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+    clayvm_value_t _flag = vm->stack[_base + flag];
+    clayvm_value_t _val = vm->stack[_base + slot];
+    if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+        (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+        if (vm->retain_fn) vm->retain_fn(_val);
+        clayvm_vm_push(vm, _val);
+    } else {
+        vm->flagged_get(vm, _base, slot, flag, name);
+    }
+    return 0;
+}
+
+int handle_SET_LOCAL_FLAGGED(clayvm_vm_t *vm) {
+    uint16_t slot = READ_UINT16();
+    uint16_t flag = READ_UINT16();
+    uint16_t name = READ_UINT16();
+    uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+    clayvm_value_t _flag = vm->stack[_base + flag];
+    clayvm_value_t _old = vm->stack[_base + slot];
+    if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+        (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+        clayvm_value_t _new = vm->stack[vm->sp - 1];
+        if (vm->retain_fn) vm->retain_fn(_new);
+        vm->stack[_base + slot] = _new;
+        if (vm->release_fn) vm->release_fn(_old);
+    } else {
+        vm->flagged_set(vm, _base, slot, flag, name);
+    }
+    return 0;
+}
+
 clayvm_handler_t clayvm_dispatch_table[] = {
     handle_PUSH_CONST,
     handle_POP,
@@ -509,6 +545,8 @@ clayvm_handler_t clayvm_dispatch_table[] = {
     handle_TRY_END,
     handle_CATCH,
     handle_THROW,
+    handle_GET_LOCAL_FLAGGED,
+    handle_SET_LOCAL_FLAGGED,
 };
 
 int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
@@ -555,6 +593,8 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         &&op_TRY_END,
         &&op_CATCH,
         &&op_THROW,
+        &&op_GET_LOCAL_FLAGGED,
+        &&op_SET_LOCAL_FLAGGED,
     };
 
 #define DISPATCH() goto *dispatch_table[vm->code[vm->ip++]]
@@ -1012,6 +1052,48 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
         DISPATCH();
     }
 
+    op_GET_LOCAL_FLAGGED: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _val = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            if (vm->retain_fn) vm->retain_fn(_val);
+            clayvm_vm_push(vm, _val);
+        } else {
+            vm->flagged_get(vm, _base, slot, flag, name);
+        }
+        DISPATCH();
+    }
+
+    op_SET_LOCAL_FLAGGED: {
+        if (vm->trace_enabled) {
+            clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
+        }
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _old = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            clayvm_value_t _new = vm->stack[vm->sp - 1];
+            if (vm->retain_fn) vm->retain_fn(_new);
+            vm->stack[_base + slot] = _new;
+            if (vm->release_fn) vm->release_fn(_old);
+        } else {
+            vm->flagged_set(vm, _base, slot, flag, name);
+        }
+        DISPATCH();
+    }
+
 #undef DISPATCH
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -1379,6 +1461,40 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
         } else {
             clayvm_vm_error(vm, CLAYVM_ERR_UNHANDLED_EXCEPTION, "unhandled exception");
             return -1;
+        }
+        break;
+    }
+    case CLAYVM_OP_GET_LOCAL_FLAGGED: {
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _val = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _val.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            if (vm->retain_fn) vm->retain_fn(_val);
+            clayvm_vm_push(vm, _val);
+        } else {
+            vm->flagged_get(vm, _base, slot, flag, name);
+        }
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL_FLAGGED: {
+        uint16_t slot = READ_UINT16();
+        uint16_t flag = READ_UINT16();
+        uint16_t name = READ_UINT16();
+        uint32_t _base = (uint32_t)vm->frames[vm->frame_count - 1].base_sp;
+        clayvm_value_t _flag = vm->stack[_base + flag];
+        clayvm_value_t _old = vm->stack[_base + slot];
+        if (_flag.type != CLAYVM_VAL_CELL && _old.type != CLAYVM_VAL_CELL &&
+            (_flag.type == CLAYVM_VAL_NIL || _flag.as.i64 == 0)) {
+            clayvm_value_t _new = vm->stack[vm->sp - 1];
+            if (vm->retain_fn) vm->retain_fn(_new);
+            vm->stack[_base + slot] = _new;
+            if (vm->release_fn) vm->release_fn(_old);
+        } else {
+            vm->flagged_set(vm, _base, slot, flag, name);
         }
         break;
     }

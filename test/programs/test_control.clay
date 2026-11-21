@@ -411,5 +411,21 @@ Test eq(NamesLikeHidden early, 3)
 // a slot of that name is still written through (implicit-slot fallback)
 HolderOfLast = Object clone { last = 0; fill() { 3 times { |i| last = i }; self } }
 Test eq((HolderOfLast clone fill) last, 2)
+// slots made at run time (not declared in the clone body): a bare name means
+// the slot when self has it at call time, also in a block that captures it
+RtSlot = Object clone {
+    make() { o = self clone; o hits = 0; o }
+    bump() { hits = hits + 1; hits }
+    bumpEach(xs) { xs each { |v| hits = hits + v }; hits }
+    sumEach(xs) { s = 0; xs each { |v| s = s + v }; s }
+    twice(k) { s = k; s = s * 2; s }
+}
+rs = RtSlot make
+Test eq(rs bump, 1)
+Test eq(rs bumpEach([2, 3]), 6)
+Test eq(rs hits, 6)
+Test eq(rs sumEach([1, 2, 3]), 6)
+Test eq(rs twice(4), 8)
+Test eq(rs hits, 6)
 
 Test done()

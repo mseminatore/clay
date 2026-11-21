@@ -38,7 +38,9 @@ typedef enum {
     CLAYVM_OP_TRY_END = 25,
     CLAYVM_OP_CATCH = 26,
     CLAYVM_OP_THROW = 27,
-    CLAYVM_OP_COUNT = 28
+    CLAYVM_OP_GET_LOCAL_FLAGGED = 28,
+    CLAYVM_OP_SET_LOCAL_FLAGGED = 29,
+    CLAYVM_OP_COUNT = 30
 } clayvm_opcode_t;
 
 static const char *const clayvm_opcode_names[] = {
@@ -70,6 +72,8 @@ static const char *const clayvm_opcode_names[] = {
     "TRY_END",
     "CATCH",
     "THROW",
+    "GET_LOCAL_FLAGGED",
+    "SET_LOCAL_FLAGGED",
 };
 
 static const int clayvm_operand_counts[] = {
@@ -101,6 +105,8 @@ static const int clayvm_operand_counts[] = {
     0,  /* TRY_END */
     0,  /* CATCH */
     0,  /* THROW */
+    3,  /* GET_LOCAL_FLAGGED */
+    3,  /* SET_LOCAL_FLAGGED */
 };
 
 /* Total instruction size in bytes (1 opcode byte + operands) */
@@ -133,6 +139,8 @@ static const int clayvm_instruction_sizes[] = {
     1,  /* TRY_END */
     1,  /* CATCH */
     1,  /* THROW */
+    7,  /* GET_LOCAL_FLAGGED */
+    7,  /* SET_LOCAL_FLAGGED */
 };
 
 #endif /* CLAYVM_OPCODES_H */

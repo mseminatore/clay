@@ -119,6 +119,16 @@ int clayvm_asm_assemble_line(clayvm_assembler_t *as, const char *line) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_CATCH);
     } else if (strcmp(mnemonic, "THROW") == 0) {
         clayvm_asm_emit_byte(as, CLAYVM_OP_THROW);
+    } else if (strcmp(mnemonic, "GET_LOCAL_FLAGGED") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_GET_LOCAL_FLAGGED);
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+    } else if (strcmp(mnemonic, "SET_LOCAL_FLAGGED") == 0) {
+        clayvm_asm_emit_byte(as, CLAYVM_OP_SET_LOCAL_FLAGGED);
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
+        { unsigned int val = 0; sscanf(line, " %u", &val); while (*line && isspace((unsigned char)*line)) line++; while (*line && !isspace((unsigned char)*line)) line++; clayvm_asm_emit_u16(as, (uint16_t)val); }
     } else {
         fprintf(stderr, "assembler: unknown mnemonic '%s'\n", mnemonic);
         as->error = 1;

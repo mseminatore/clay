@@ -239,43 +239,20 @@ static void bc_emit_get_local_value(BcCompiler *bc, int slot) {
     }
 }
 
-/* Read `name`: flag ? (self name) : local */
+/* Read `name`: flag ? (self name) : local, either local possibly a captured
+ * cell (GET_LOCAL_FLAGGED; the uncommon cases run in vm_bridge.c) */
 static void bc_emit_flagged_read(BcCompiler *bc, const char *name, int slot, int flag) {
-    bc_emit_get_local_value(bc, flag);
-    int to_local = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
-    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-    emit_u16(bc, (uint16_t)bc->native_load_self);
-    emit_byte(bc, 0);
-    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_string(bc, name));
-    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-    emit_u16(bc, (uint16_t)bc->native_send);
-    emit_byte(bc, 2);
-    int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
-    patch_jump(bc, to_local);
-    bc_emit_get_local_value(bc, slot);
-    patch_jump(bc, to_end);
+    emit_op_u16(bc, CLAYVM_OP_GET_LOCAL_FLAGGED, (uint16_t)slot);
+    emit_u16(bc, (uint16_t)flag);
+    emit_u16(bc, (uint16_t)add_constant_string(bc, name));
 }
 
 /* Write the value on top of the stack to `name` (value stays on the stack):
- * flag ? self.name = v : local = v */
+ * flag ? self.name = v : local = v (SET_LOCAL_FLAGGED) */
 static void bc_emit_flagged_write(BcCompiler *bc, const char *name, int slot, int flag) {
-    bc_emit_get_local_value(bc, flag);
-    int to_local = emit_jump(bc, CLAYVM_OP_JUMP_IF_FALSE);
-    emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_string(bc, name));
-    emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-    emit_u16(bc, (uint16_t)bc->native_set_self_slot);
-    emit_byte(bc, 2);
-    int to_end = emit_jump(bc, CLAYVM_OP_JUMP);
-    patch_jump(bc, to_local);
-    if (bc_local_is_captured(bc, slot)) {
-        emit_op_u16(bc, CLAYVM_OP_GET_LOCAL, (uint16_t)slot);
-        emit_op(bc, CLAYVM_OP_CALL_NATIVE);
-        emit_u16(bc, (uint16_t)bc->native_cell_set_rev);
-        emit_byte(bc, 2);
-    } else {
-        emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
-    }
-    patch_jump(bc, to_end);
+    emit_op_u16(bc, CLAYVM_OP_SET_LOCAL_FLAGGED, (uint16_t)slot);
+    emit_u16(bc, (uint16_t)flag);
+    emit_u16(bc, (uint16_t)add_constant_string(bc, name));
 }
 
 static void bc_begin_scope(BcCompiler *bc) {

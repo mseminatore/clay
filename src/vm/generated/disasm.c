@@ -131,6 +131,22 @@ int clayvm_disasm_instruction(const uint8_t *code, size_t code_len, size_t offse
     case CLAYVM_OP_THROW:
         printf("\n");
         break;
+    case CLAYVM_OP_GET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        printf("%u %u %u\n", _op0, _op1, _op2);
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        printf("%u %u %u\n", _op0, _op1, _op2);
+        break;
+    }
     default:
         printf("\n");
         break;
@@ -303,6 +319,24 @@ int clayvm_disasm_instruction_buf(const uint8_t *code, size_t code_len,
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;
         break;
+    case CLAYVM_OP_GET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u %u\n", _op0, _op1, _op2);
+        if (n > 0) written += n;
+        break;
+    }
+    case CLAYVM_OP_SET_LOCAL_FLAGGED:
+    {
+        uint16_t _op0 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op1 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        uint16_t _op2 = (uint16_t)(code[offset] | (code[offset + 1] << 8)); offset += 2;
+        n = snprintf(buf + written, buf_size - (size_t)written, "%u %u %u\n", _op0, _op1, _op2);
+        if (n > 0) written += n;
+        break;
+    }
     default:
         n = snprintf(buf + written, buf_size - (size_t)written, "\n");
         if (n > 0) written += n;

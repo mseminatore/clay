@@ -182,6 +182,30 @@ int clayvm_verify(const uint8_t *code, size_t code_len,
         case CLAYVM_OP_THROW: {
             break;
         }
+        case CLAYVM_OP_GET_LOCAL_FLAGGED: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            uint16_t flag = (uint16_t)(code[instr_start + 3] |
+                          (code[instr_start + 4] << 8));
+            uint16_t name = (uint16_t)(code[instr_start + 5] |
+                          (code[instr_start + 6] << 8));
+            (void)slot;
+            (void)flag;
+            (void)name;
+            break;
+        }
+        case CLAYVM_OP_SET_LOCAL_FLAGGED: {
+            uint16_t slot = (uint16_t)(code[instr_start + 1] |
+                          (code[instr_start + 2] << 8));
+            uint16_t flag = (uint16_t)(code[instr_start + 3] |
+                          (code[instr_start + 4] << 8));
+            uint16_t name = (uint16_t)(code[instr_start + 5] |
+                          (code[instr_start + 6] << 8));
+            (void)slot;
+            (void)flag;
+            (void)name;
+            break;
+        }
         default:
             break;
         }

@@ -75,6 +75,8 @@ BcGen = Object clone {
     HALT = 21
     GET_LOCAL = 22
     SET_LOCAL = 23
+    GET_LOCAL_FLAGGED = 28
+    SET_LOCAL_FLAGGED = 29
     arithOps = #{ "+": 3, "-": 4, "*": 5, "/": 6, "%": 7 }
     compareOps = #{ "==": 9, "!=": 10, "<": 11, ">": 12, "<=": 13, ">=": 14 }
 
@@ -97,8 +99,6 @@ BcGen = Object clone {
     N_TO_BOOL = 16
     N_IS_NIL = 17
     N_SELF_HAS_SLOT = 18
-    N_SET_SELF_SLOT = 19
-    N_CELL_SET_REV = 20
     N_METHOD_RETURN_ID = 21
     N_RAISE_RETURN = 22
     N_STOP_VM = 23
@@ -354,34 +354,19 @@ BcGen = Object clone {
         (self isCaptured(s)) ifTrue { self native(N_CELL_GET, 1) }
     }
 
-    // flag ? (self n) : local
+    // flag ? (self n) : local, either local possibly a captured cell
+    // (GET_LOCAL_FLAGGED; bc_emit_flagged_read)
     flaggedRead(n, s, flag) {
-        self getLocalValue(flag)
-        toLocal = self emitJump(JUMP_IF_FALSE)
-        self native(N_LOAD_SELF, 0)
-        self pushString(n)
-        self native(N_SEND, 2)
-        toEnd = self emitJump(JUMP)
-        self patchJump(toLocal)
-        self getLocalValue(s)
-        self patchJump(toEnd)
+        self emitOpU16(GET_LOCAL_FLAGGED, s)
+        self emitU16(flag)
+        self emitU16(self constString(n))
     }
 
     // value on the stack -> flag ? self.n = v : local = v (value stays)
     flaggedWrite(n, s, flag) {
-        self getLocalValue(flag)
-        toLocal = self emitJump(JUMP_IF_FALSE)
-        self pushString(n)
-        self native(N_SET_SELF_SLOT, 2)
-        toEnd = self emitJump(JUMP)
-        self patchJump(toLocal)
-        (self isCaptured(s)) ifTrue {
-            self emitOpU16(GET_LOCAL, s)
-            self native(N_CELL_SET_REV, 2)
-        } ifFalse {
-            self emitOpU16(SET_LOCAL, s)
-        }
-        self patchJump(toEnd)
+        self emitOpU16(SET_LOCAL_FLAGGED, s)
+        self emitU16(flag)
+        self emitU16(self constString(n))
     }
 
     // --- capture analysis ---
