@@ -121,7 +121,11 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   freed (so a table later made at its address can't match); an entry from an older epoch
   is never used, so a new kind of method cache must check it too.
 - **Memory**: reference counting via `clay_retain()`/`clay_release()` (atomic when `CLAY_THREAD_SAFE`
-  is defined). The `deps/hash` hash table never frees keys/values — callers own that memory. `ClayCell`
+  is defined). The `deps/hash` hash table never frees keys/values — callers own that memory. Clay
+  builds it with its own settings (`src/runtime/clay_hash_config.h`: no stats, 4 embedded entries,
+  load factor 3/4), which change the `HashTable` layout: `clay.h` includes that header before `hash.h`,
+  every build compiles `src/runtime/clay_hash.c` (hash.c with the settings) instead of `hash.c`, and
+  `clay_bootstrap` exits if the library's layout differs. `ClayCell`
   is a heap-allocated box used for by-reference variable capture in C codegen.
 - **Cycle collector** (end of `memory.c`): synchronous trial deletion (Bacon & Rajan). `clay_release`
   buffers objects/cells whose count drops without reaching zero; `clay_gc_collect` runs at the safe

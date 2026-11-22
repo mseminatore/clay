@@ -333,7 +333,7 @@ static const char *const clay_native_sources[] = {
     "src/runtime/fiber_arm64.S",
 #endif
 #endif
-    "deps/hash/hash.c",
+    "src/runtime/clay_hash.c",   /* deps/hash/hash.c with clay_hash_config.h */
     "deps/sqlite/sqlite3.c",
     NULL
 };

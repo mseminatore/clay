@@ -784,7 +784,22 @@ static ClayValue system_clock(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int((intptr_t)(monotonic_ms() - clock_start));
 }
 
+/* hash.c was compiled with the settings this file sees (clay_hash_config.h):
+ * with another HashTable layout, a new table wouldn't start out in its own
+ * embedded entries, or not with HT_DEFAULT_TABLE_SIZE of them */
+static void clay_check_hash_layout(void) {
+    HashTable *ht = ht_create();
+    int ok = ht && ht->table == ht->small_table && ht->size == HT_DEFAULT_TABLE_SIZE;
+    if (ht) ht_free(ht);
+    if (!ok) {
+        fprintf(stderr, "clay: the hash library was built with other settings than "
+                        "clay_hash_config.h (build src/runtime/clay_hash.c, not deps/hash/hash.c)\n");
+        exit(1);
+    }
+}
+
 void clay_bootstrap(void) {
+    clay_check_hash_layout();
     clay_stack_init();       /* the main thread's C stack, for CLAY_STACK_CHECK */
     clay_gc_init();          /* this thread runs the program: it collects cycles */
 #ifdef _WIN32

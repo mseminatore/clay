@@ -60,8 +60,9 @@ if(UNIX)
     endif()
 endif()
 
-# Build hash library directly (avoid its CMakeLists which has subdirectory conflicts)
-add_library(ht STATIC deps/hash/hash.c)
+# Build hash library directly (avoid its CMakeLists which has subdirectory conflicts),
+# through clay_hash.c: hash.c with Clay's settings (src/runtime/clay_hash_config.h)
+add_library(ht STATIC src/runtime/clay_hash.c)
 target_include_directories(ht PUBLIC deps/hash)
 # The runtime frees slot keys/values itself and then frees non-empty tables on
 # purpose, so hash's debug-build "freed with N entries" warning (on by default

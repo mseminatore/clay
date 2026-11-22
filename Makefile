@@ -59,8 +59,9 @@ else ifeq ($(UNAME_M),arm64)
 endif
 FIBER_ASM_OBJS = $(FIBER_ASM:.S=.o)
 
-HASH_SRC = deps/hash/hash.c
-HASH_OBJ = deps/hash/hash.o
+# deps/hash/hash.c with Clay's settings (src/runtime/clay_hash_config.h)
+HASH_SRC = src/runtime/clay_hash.c
+HASH_OBJ = src/runtime/clay_hash.o
 
 CROSSLINE_SRC = deps/crossline/crossline.c
 CROSSLINE_OBJ = deps/crossline/crossline.o
@@ -111,7 +112,9 @@ build: all
 
 # Runtime static library
 # (the VM bridge needs libclayvm.a after it; Console readLine uses crossline)
+# (archives are made afresh: ar would keep members no longer listed, e.g. an old hash.o)
 libclay.a: $(RUNTIME_OBJS) $(HASH_OBJ) $(SQLITE_OBJ) $(CROSSLINE_OBJ) $(FIBER_OBJS) $(FIBER_ASM_OBJS)
+	rm -f $@
 	$(AR) rcs $@ $^
 
 $(HASH_OBJ): $(HASH_SRC)
@@ -132,6 +135,7 @@ $(SQLITE_OBJ): $(SQLITE_SRC)
 
 # VM static library
 libclayvm.a: $(VM_OBJS)
+	rm -f $@
 	$(AR) rcs $@ $^
 
 # Compiler binary

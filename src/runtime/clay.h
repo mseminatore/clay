@@ -10,6 +10,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "clay_hash_config.h"   /* before hash.h: it sets the HashTable layout */
 #include "hash.h"
 
 #ifdef _MSC_VER
