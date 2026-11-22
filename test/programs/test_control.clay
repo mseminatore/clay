@@ -428,4 +428,31 @@ Test eq(rs sumEach([1, 2, 3]), 6)
 Test eq(rs twice(4), 8)
 Test eq(rs hits, 6)
 
+// Conditions: the jump itself tests Clay truthiness (nil, false, 0 and 0.0
+// are false), with no conversion before it; values that merge from branches
+// (&&, ||, an if inside the condition) must still be tested whole
+Truth = Object clone {
+    t(c) { (c && true) ifTrue { "t" } ifFalse { "f" } }
+    w(c) { r = "f"; { c } whileTrue { r = "t"; c = false }; r }
+    sent(c) { r = "f"; cond = { c }; cond whileTrue { r = "t"; c = false }; r }
+    lt(a, b) { (a < b) ifTrue { "t" } ifFalse { "f" } }
+    stored(a, b) { x = a < b; x }
+    andOr(a, b, c) { (a && b || c) ifTrue { "t" } ifFalse { "f" } }
+    ifInCond(c, a, b) { ((c ifTrue { a } ifFalse { b }) && true) ifTrue { "t" } ifFalse { "f" } }
+    cmpInAnd(a, b) { ((a > 0) && (b < 10)) ifTrue { "t" } ifFalse { "f" } }
+    countWhile(n) { i = 0; k = 0; { (i < n) && (i != 7) } whileTrue { i = i + 1; k = k + 1 }; k }
+}
+values = [nil, false, 0, 0.0, true, 1, -1, 0.5, "", [], Object]
+Test eq(values map { |v| Truth t(v) }, ["f", "f", "f", "f", "t", "t", "t", "t", "t", "t", "t"])
+Test eq(values map { |v| Truth w(v) }, values map { |v| Truth sent(v) })
+Test eq(values map { |v| Truth w(v) }, values map { |v| Truth t(v) })
+Test eq([Truth lt(1, 2), Truth lt(2, 1), Truth lt(1.5, 2.5), Truth lt(2.5, 1.5)], ["t", "f", "t", "f"])
+Test eq([Truth stored(1, 2), Truth stored(2, 1)], [true, false])
+Test eq([Truth andOr(true, false, false), Truth andOr(true, 1, false), Truth andOr(nil, true, 0),
+         Truth andOr(nil, true, 2)], ["f", "t", "f", "t"])
+Test eq([Truth ifInCond(true, 0, 1), Truth ifInCond(false, 0, 1), Truth ifInCond(true, nil, 1),
+         Truth ifInCond(false, 3, false)], ["f", "t", "f", "f"])
+Test eq([Truth cmpInAnd(1, 5), Truth cmpInAnd(0, 5), Truth cmpInAnd(1, 50)], ["t", "f", "f"])
+Test eq([Truth countWhile(3), Truth countWhile(20)], [3, 7])
+
 Test done()

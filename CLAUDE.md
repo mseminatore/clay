@@ -162,6 +162,11 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   writes a global only when `x` is assigned at the top level of the block's own file; otherwise `x` is
   the block's local. `bc_is_file_global` (bc_compiler), `emit_shadow_decls` (codegen) and their
   selfhost ports (`isFileGlobal`, `shadowDecls`) implement it — keep them in sync.
+- **Conditional jumps**: the VM's `JUMP_IF_FALSE` tests Clay truthiness itself (`nil`, `false`, `0`,
+  `+0.0`, as `CLAY_IS_TRUTHY`), so both compilers drop a `to_bool` / `is_truthy` call emitted just before
+  one (`bc_drop_truth_tests`, called from `emit_jump`; selfhost `dropTests`), unless a jump lands after
+  its start: `patch_jump` records the last jump target, `emit_op` where the last instructions start,
+  and both are saved around each chunk. Keep the two in sync.
 - **Inlined ifTrue/ifFalse**: in a method or block body, `c ifTrue { ... }` / `c ifFalse { ... }` with a
   parameterless block literal (`ast_is_inline_if`) runs the block's statements in place
   (`bc_emit_inline_if`; selfhost `inlineIf`), and two in a row are one test. The block's own variables

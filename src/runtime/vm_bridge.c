@@ -690,11 +690,11 @@ static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
 }
 
 /* --- Per-callsite inline cache --- */
-#define IC_TABLE_SIZE 4096
+#define IC_TABLE_SIZE 4096   /* 2^12: the index is the top 12 bits of a hash */
 #define IC_TABLE_MASK (IC_TABLE_SIZE - 1)
 
 typedef struct {
-    size_t      callsite_ip;
+    size_t      callsite_ip;  /* the send's address in its chunk's code */
     HashTable  *methods_key;
     const char *selector;
     ClayMethod *method;
@@ -969,8 +969,10 @@ static int native_send_fn(clayvm_vm_t *vm, int argc) {
     vm->sp = send_top;
 
     /* Per-callsite inline cache check */
-    size_t site_ip = vm->ip;
-    unsigned int ic_idx = (unsigned int)(site_ip >> 2) & IC_TABLE_MASK;
+    /* Keyed by the call site's address: an offset alone repeats in every
+     * chunk, and sites at the same offset kept evicting each other */
+    size_t site_ip = (size_t)(uintptr_t)(vm->code + vm->ip);
+    unsigned int ic_idx = (unsigned int)(((uint64_t)site_ip * 0x9E3779B97F4A7C15ull) >> 52) & IC_TABLE_MASK;
     InlineCacheEntry *ic = &g_ic_table[ic_idx];
     ClayValue result;
     int ic_handled = 0;

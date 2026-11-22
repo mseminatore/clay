@@ -108,6 +108,13 @@ typedef struct {
 
     int had_error;
 
+    /* For dropping a to_bool / is_truthy that a JUMP_IF_FALSE makes
+     * redundant (emit_jump): where the last instructions of the code being
+     * emitted start (newest first, -1 = none), and the last offset a jump
+     * lands on (nothing at or before it may be removed) */
+    int op_start[3];
+    int last_target;
+
     /* Source line map: line_map[offset] = source line number */
     int line_map[BC_MAX_CODE];
     int current_line;

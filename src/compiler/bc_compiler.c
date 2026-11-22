@@ -39,7 +39,33 @@ static void emit_u16(BcCompiler *bc, uint16_t v) {
 }
 
 static void emit_op(BcCompiler *bc, uint8_t op) {
+    bc->op_start[2] = bc->op_start[1];
+    bc->op_start[1] = bc->op_start[0];
+    bc->op_start[0] = (int)bc->len;
     emit_byte(bc, op);
+}
+
+/* Start a new piece of code (top level or a chunk): nothing to look back on */
+static void bc_reset_ops(BcCompiler *bc) {
+    bc->op_start[0] = bc->op_start[1] = bc->op_start[2] = -1;
+    bc->last_target = 0;
+}
+
+/* JUMP_IF_FALSE tests Clay truthiness itself (nil, false, 0, +0.0), so a
+ * to_bool or is_truthy call just before it adds nothing: drop them, unless a
+ * jump lands after their start (its code would then skip part of the test).
+ * selfhost/clay-bytecode dropTests does the same. */
+static void bc_drop_truth_tests(BcCompiler *bc) {
+    while (bc->op_start[0] >= 0 && bc->op_start[0] == (int)bc->len - 4 &&
+           bc->op_start[0] >= bc->last_target &&
+           bc->code[bc->len - 4] == CLAYVM_OP_CALL_NATIVE && bc->code[bc->len - 1] == 1) {
+        int fn = bc->code[bc->len - 3] | (bc->code[bc->len - 2] << 8);
+        if (fn != bc->native_is_truthy && fn != bc->native_to_bool) break;
+        bc->len -= 4;
+        bc->op_start[0] = bc->op_start[1];
+        bc->op_start[1] = bc->op_start[2];
+        bc->op_start[2] = -1;
+    }
 }
 
 static void emit_op_u16(BcCompiler *bc, uint8_t op, uint16_t arg) {
@@ -49,6 +75,7 @@ static void emit_op_u16(BcCompiler *bc, uint8_t op, uint16_t arg) {
 
 /* Emit a jump instruction with a placeholder offset, return patch position */
 static int emit_jump(BcCompiler *bc, uint8_t jump_op) {
+    if (jump_op == CLAYVM_OP_JUMP_IF_FALSE) bc_drop_truth_tests(bc);
     emit_op(bc, jump_op);
     int patch_pos = (int)bc->len;
     emit_u16(bc, 0); /* placeholder */
@@ -57,6 +84,7 @@ static int emit_jump(BcCompiler *bc, uint8_t jump_op) {
 
 /* Patch a previously emitted jump to target the current position */
 static void patch_jump(BcCompiler *bc, int patch_pos) {
+    bc->last_target = (int)bc->len;
     int offset = (int)bc->len - (patch_pos + 2);
     bc->code[patch_pos]     = (uint8_t)(offset & 0xFF);
     bc->code[patch_pos + 1] = (uint8_t)((offset >> 8) & 0xFF);
@@ -701,6 +729,9 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
     int *outer_line_map = NULL;
     uint16_t *outer_file_map = NULL;
     size_t saved_len = bc->len;
+    int saved_op_start[3] = { bc->op_start[0], bc->op_start[1], bc->op_start[2] };
+    int saved_last_target = bc->last_target;
+    bc_reset_ops(bc);
     if (saved_len > 0) {
         outer_buf = (uint8_t *)malloc(saved_len);
         memcpy(outer_buf, bc->code, saved_len);
@@ -901,6 +932,8 @@ static int bc_compile_chunk(BcCompiler *bc, NodeList *body, NodeList *params,
 
     /* Restore outer code buffer, line map, and local state */
     bc->len = saved_len;
+    memcpy(bc->op_start, saved_op_start, sizeof(saved_op_start));
+    bc->last_target = saved_last_target;
     if (outer_buf) {
         memcpy(bc->code, outer_buf, saved_len);
         free(outer_buf);
@@ -2038,6 +2071,7 @@ int bc_compile(BcCompiler *bc, AstNode *program) {
 
     bc->len = 0;
     bc->had_error = 0;
+    bc_reset_ops(bc);
 
     /* Every top-level variable is a global from the start, so methods see
      * the ones assigned later in the file too (order doesn't matter) */

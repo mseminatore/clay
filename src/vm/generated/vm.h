@@ -108,8 +108,8 @@ struct clayvm_vm {
     clayvm_native_table_t natives;
     void * globals; /* HashTable* for REPL variable persistence */
     void (*arith_fallback)(clayvm_vm_t *, clayvm_value_t, clayvm_value_t, int); /* Fallback for non-numeric binary ops */
-    void (*retain_fn)(clayvm_value_t); /* Retain callback for OBJECT values (refcount++) */
-    void (*release_fn)(clayvm_value_t); /* Release callback for OBJECT values (refcount--) */
+    void (*retain_fn)(clayvm_value_t); /* Retain callback (refcount++); instructions call it only for types from OBJECT on (objects, cells), the ones holding a reference */
+    void (*release_fn)(clayvm_value_t); /* Release callback (refcount--); called like retain_fn */
     void (*flagged_get)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t); /* GET_LOCAL_FLAGGED slow path (base, slot, flag, name constant) */
     void (*flagged_set)(clayvm_vm_t *, uint32_t, uint16_t, uint16_t, uint16_t); /* SET_LOCAL_FLAGGED slow path (base, slot, flag, name constant) */
     void (*cleanup)(struct clayvm_vm *vm);

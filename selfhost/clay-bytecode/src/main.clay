@@ -155,6 +155,10 @@ BcGen = Object clone {
     // --- state of the code being compiled ---
     failed = false
     buf = nil              // bytes of the current chunk (or top-level code)
+    op0 = -1               // where its last three instructions start, newest
+    op1 = -1               // first (-1: none) — see dropTests
+    op2 = -1
+    lastTarget = 0         // the last offset a jump lands on
     bufLines = nil         // source line of each byte
     curLine = 0
     bufFiles = nil         // source file of each byte (bc_compiler.c file_map)
@@ -220,7 +224,41 @@ BcGen = Object clone {
         self emitByte((v / 256) % 256)
     }
 
-    emitOp(op) { self emitByte(op) }
+    emitOp(op) {
+        op2 = op1
+        op1 = op0
+        op0 = buf size
+        self emitByte(op)
+    }
+
+    // a new piece of code (top level or a chunk): nothing to look back on
+    resetOps() {
+        op0 = -1
+        op1 = -1
+        op2 = -1
+        lastTarget = 0
+    }
+
+    // JUMP_IF_FALSE tests Clay truthiness itself, so a to_bool or is_truthy
+    // just before it adds nothing: drop them, unless a jump lands after their
+    // start (bc_drop_truth_tests)
+    dropTests() {
+        n = buf size
+        { op0 >= 0 && op0 == n - 4 && op0 >= lastTarget &&
+          (buf at(n - 4)) == CALL_NATIVE && (buf at(n - 1)) == 1 } whileTrue {
+            fn = (buf at(n - 3)) + (buf at(n - 2)) * 256
+            (fn != N_IS_TRUTHY && fn != N_TO_BOOL) ifTrue { return nil }
+            4 times { |k|
+                buf pop
+                bufLines pop
+                bufFiles pop
+            }
+            op0 = op1
+            op1 = op2
+            op2 = -1
+            n = buf size
+        }
+    }
 
     emitOpU16(op, arg) {
         self emitOp(op)
@@ -235,6 +273,7 @@ BcGen = Object clone {
 
     // a jump with a placeholder offset; returns where to patch it
     emitJump(op) {
+        (op == JUMP_IF_FALSE) ifTrue { self dropTests }
         self emitOp(op)
         at = buf size
         self emitU16(0)
@@ -242,6 +281,7 @@ BcGen = Object clone {
     }
 
     patchJump(at) {
+        lastTarget = buf size
         off = buf size - (at + 2)
         (at < buf size) ifTrue { buf setAt(at, off % 256) }
         (at + 1 < buf size) ifTrue { buf setAt(at + 1, (off / 256) % 256) }
@@ -1110,6 +1150,8 @@ BcGen = Object clone {
         params each { |p| pnames push(p name) }
 
         outerBuf = buf
+        outerOps = [op0, op1, op2, lastTarget]
+        self resetOps
         outerLines = bufLines
         outerLine = curLine
         outerFiles = bufFiles
@@ -1249,6 +1291,10 @@ BcGen = Object clone {
         rec setAt(1, bufLines)
 
         buf = outerBuf
+        op0 = outerOps at(0)
+        op1 = outerOps at(1)
+        op2 = outerOps at(2)
+        lastTarget = outerOps at(3)
         bufLines = outerLines
         curLine = outerLine
         bufFiles = outerFiles
@@ -1640,6 +1686,7 @@ BcGen = Object clone {
     compile(program) {
         failed = false
         buf = []
+        self resetOps
         bufLines = []
         bufFiles = []
         stmts = program items
