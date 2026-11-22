@@ -136,7 +136,9 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   and to `gc_clear`); references it doesn't follow just keep their targets alive. Test changes with an
   ASan build and `CLAY_GC_STRESS=1` (collects at every safe point).
 - **Prototype chain**: `ClayObject.parent` links form the chain used by both slot reads and method
-  lookup. Slot *writes* are always local to the receiving object (no chain walk).
+  lookup. Slot *writes* are always local to the receiving object (no chain walk). An object's `slots` table is
+  created by its first slot write (`clay_set_slot`) and freed when it goes back to the object pool, so
+  `obj->slots` (like `obj->methods`) may be NULL: check before passing it to an `ht_*` call.
 - **Error handling**: `clay_raise()`/`clay_try_push()`/`clay_try_pop()` implement try/catch via
   `setjmp`/`longjmp` over a linked list of frames on the C stack (no fixed nesting limit). An error
   nothing catches is reported by `clay_error_traceback` (error.c: each line a place in the code and the

@@ -891,10 +891,13 @@ static int vm_eval_count = 0;
 
 static ClayValue vm_eval(const char *source) {
     vm_eval_count++;
-    
-    clayvm_vm_t vm;
+
+    /* static: the runtime keeps pointers to the last VM and compiler (g_vm,
+     * g_bc, used by later tests' try frames and sends), so they must outlive
+     * this call */
+    static clayvm_vm_t vm;
     clayvm_vm_init(&vm);
-    BcCompiler bc;
+    static BcCompiler bc;
     bc_compiler_init(&bc, &vm);
 
     Parser parser;
@@ -921,8 +924,8 @@ static ClayValue vm_eval(const char *source) {
 
     ast_free(program);
 
-    /* Note: vm resources not freed here — g_vm global pointer is used
-     * by the bc_compiler trampoline and must remain valid. */
+    /* Note: vm resources not freed here — the g_vm / g_bc globals point at
+     * them and must remain valid. */
 
     return result;
 }
@@ -947,9 +950,9 @@ static int repl_compile(BcCompiler *bc, const char *source) {
 static void test_vm_constants(void) {
     SUITE("VM Constant Pool");
 
-    clayvm_vm_t vm;
+    static clayvm_vm_t vm;      /* static: g_vm / g_bc keep pointing here */
     clayvm_vm_init(&vm);
-    BcCompiler bc;
+    static BcCompiler bc;
     bc_compiler_init(&bc, &vm);
 
     COMMENT("REPL inputs reuse nil, true, false, int and float constants...");

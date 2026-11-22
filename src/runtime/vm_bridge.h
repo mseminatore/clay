@@ -47,7 +47,10 @@ typedef struct {
 
 /* Bytecode compilation context */
 typedef struct {
-    uint8_t code[BC_MAX_CODE];
+    /* The top-level code being compiled, BC_MAX_CODE bytes (heap: a
+     * BcCompiler is often on the stack, and only what is written of these
+     * costs memory) */
+    uint8_t *code;
     size_t  len;
 
     clayvm_vm_t *vm;  /* VM to add constants to */
@@ -115,8 +118,9 @@ typedef struct {
     int op_start[3];
     int last_target;
 
-    /* Source line map: line_map[offset] = source line number */
-    int line_map[BC_MAX_CODE];
+    /* Source line map: line_map[offset] = source line number (BC_MAX_CODE
+     * entries, allocated with code) */
+    int *line_map;
     int current_line;
     /* Source file map for the top-level code, which mixes the files imports
      * splice in: file_map[offset] = 1 + an index into files, 0 = unknown

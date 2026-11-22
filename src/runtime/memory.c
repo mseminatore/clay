@@ -43,8 +43,11 @@ ClayObject *clay_retain(ClayObject *obj) {
 /* Give an object's memory back (to the pool for plain objects) */
 static void free_object_memory(ClayObject *obj) {
     if ((obj->type == CLAY_TYPE_OBJECT || obj->type == CLAY_TYPE_VEC3 ||
-         obj->type == CLAY_TYPE_COND) && obj->slots) {
-        ht_clear(obj->slots);
+         obj->type == CLAY_TYPE_COND)) {
+        /* a pooled object comes back as anything (a string, say): it gets a
+         * slots table again only if it gets a slot (hash's own free list
+         * makes that cheap) */
+        if (obj->slots) { ht_free(obj->slots); obj->slots = NULL; }
         obj->type = CLAY_TYPE_OBJECT;
         obj->gc_color = GC_BLACK;
         obj->gc_flags = 0;

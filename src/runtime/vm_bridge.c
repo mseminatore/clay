@@ -1879,6 +1879,13 @@ const char *bc_file_at(BcCompiler *bc, size_t ip) {
 void bc_compiler_init(BcCompiler *bc, clayvm_vm_t *vm) {
     memset(bc, 0, sizeof(*bc));
     bc->vm = vm;
+    /* not zeroed: a page of these costs memory only once code is written to it */
+    bc->code = (uint8_t *)malloc(BC_MAX_CODE);
+    bc->line_map = (int *)malloc(BC_MAX_CODE * sizeof(int));
+    if (!bc->code || !bc->line_map) {
+        fprintf(stderr, "clay: out of memory\n");
+        exit(1);
+    }
 
     /* Allocate dynamic chunks array */
     bc->chunk_capacity = BC_INITIAL_CHUNKS;

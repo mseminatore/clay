@@ -171,11 +171,10 @@ ClayMethod *clay_lookup_nearest(ClayObject *obj, const char *name) {
 }
 
 /* Return an object to the pool (called from clay_dealloc after cleanup).
- * The object's slots hash table is already cleared; methods is NULL. */
+ * Its slots and methods tables are already freed. */
 void clay_object_pool_return(ClayObject *obj) {
     pool_lock();
-    if (object_pool_count < OBJECT_POOL_MAX && obj->slots) {
-        /* Keep the slots hash table for reuse */
+    if (object_pool_count < OBJECT_POOL_MAX) {
         obj->parent = NULL;
         obj->methods = NULL;
         obj->refcount = 0;
@@ -197,7 +196,7 @@ ClayObject *clay_object_new(void) {
     if (object_pool_count > 0) {
         obj = object_pool[--object_pool_count];
         pool_unlock();
-        /* slots hash table is already allocated and cleared */
+        /* no slots table: clay_set_slot makes one when needed */
     } else {
         pool_unlock();
         obj = (ClayObject *)calloc(1, sizeof(ClayObject));
@@ -205,7 +204,9 @@ ClayObject *clay_object_new(void) {
             fprintf(stderr, "clay: out of memory\n");
             exit(1);
         }
-        obj->slots = clay_ht_create();
+        /* slots stays NULL until the first one is set (clay_set_slot): most
+         * objects (strings, arrays, blocks, ...) never get one, and a table
+         * costs more memory than the object */
     }
 
     obj->parent   = NULL;
@@ -290,6 +291,7 @@ void clay_set_slot(ClayObject *obj, const char *name, ClayValue value) {
         clay_raise(CLAY_VAL(clay_error_new(msg, "TypeError")));
         return;
     }
+    if (!obj->slots) obj->slots = clay_ht_create();
     /* Check if key already exists — update in-place to avoid remove+insert+strdup */
     ht_value_t old;
     if (ht_lookup(obj->slots, (ht_key_t)name, &old)) {
