@@ -392,6 +392,12 @@ static ClayValue number_negated(ClayObject *self, int argc, ClayValue *argv) {
     return clay_int(-self_int_value(self));
 }
 
+ClayValue clay_negate(ClayValue v) {
+    if (CLAY_IS_INT(v)) return clay_int(-clay_to_int(v));     /* raises past 62 bits */
+    if (CLAY_IS_TAGGED_FLOAT(v)) return clay_float_tag(-clay_float_untag(v));
+    return clay_send_owned(v, "negated", 0, NULL);
+}
+
 static ClayValue number_times(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_NIL;
     intptr_t n = self_int_value(self);

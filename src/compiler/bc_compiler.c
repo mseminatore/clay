@@ -1513,6 +1513,13 @@ static void bc_emit_expr(BcCompiler *bc, AstNode *node) {
                 bc_emit_inline_count(bc, node, 1);
                 break;
             }
+            /* -x: NEGATE does numbers and sends negated to anything else */
+            if (!node->as.send.is_super && node->as.send.args.count == 0 &&
+                strcmp(node->as.send.message, "negated") == 0) {
+                bc_emit_expr(bc, node->as.send.receiver);
+                emit_op(bc, CLAYVM_OP_NEGATE);
+                break;
+            }
             /* Push receiver */
             bc_emit_expr(bc, node->as.send.receiver);
             /* Push selector as string constant */

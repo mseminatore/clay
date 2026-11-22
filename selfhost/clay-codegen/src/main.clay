@@ -925,12 +925,15 @@ CodeGen = Object clone {
                           superProto + "), \"" + n name + "\", " + argc toString + ", (ClayValue[])" + list + ");")
             }
         } ifFalse {
-            (argc == 0) ifTrue {
+            (argc == 0 && n name == "negated") ifTrue {
+                // -x: numbers directly, anything else is sent negated
+                self line("ClayValue " + t + " = clay_negate(" + recv + ");")
+            } ifFalse { (argc == 0) ifTrue {
                 self line("ClayValue " + t + " = clay_send_owned(" + recv + ", \"" + n name + "\", 0, NULL);")
             } ifFalse {
                 self line("ClayValue " + t + " = clay_send_owned" + brk + "(" + recv + ", \"" + n name + "\", " +
                           argc toString + ", (ClayValue[])" + list + ");")
-            }
+            } }
         }
         self pushOwnedTemp(t)
         t

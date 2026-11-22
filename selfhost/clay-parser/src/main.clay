@@ -469,31 +469,15 @@ Parser = Object clone {
     primary() {
         hadError ifTrue { return nil }
 
+        // a negative number literal (unary leaves a minus right before a
+        // number to the literal)
         (self match("-")) ifTrue {
-            l = prev line
             operand = self primary
             (operand == nil) ifTrue { return nil }
             (operand kind == "Int" || operand kind == "Float") ifTrue {
                 operand value = operand value negated
-                return operand
             }
-            zero = Node make("Int", l)
-            zero value = 0
-            return self binary(l, "-", zero, operand)
-        }
-
-        (self match("!")) ifTrue {
-            l = prev line
-            operand = self primary
-            (operand == nil) ifTrue { return nil }
-            return self send(l, operand, "not", [])
-        }
-
-        (self match("~")) ifTrue {
-            l = prev line
-            operand = self primary
-            (operand == nil) ifTrue { return nil }
-            return self send(l, operand, "bitNot", [])
+            return operand
         }
 
         (self match("CHAR")) ifTrue {
@@ -909,8 +893,27 @@ Parser = Object clone {
         "+": 11, "-": 11, "*": 12, "/": 12, "%": 12
     }
 
+    // -x, !x, ~x: sends of negated, not, bitNot, applying to the whole message
+    // expression after them; a minus right before a number literal is part
+    // of the number (parser.c parse_unary)
+    unary() {
+        msg = nil
+        (cur kind == "-") ifTrue {
+            next = (self tokenAt(idx)) kind
+            (next != "INT" && next != "FLOAT" && next != "CHAR") ifTrue { msg = "negated" }
+        }
+        (cur kind == "!") ifTrue { msg = "not" }
+        (cur kind == "~") ifTrue { msg = "bitNot" }
+        (msg == nil) ifTrue { return self postfix }
+        self advance
+        l = prev line
+        operand = self unary
+        (operand == nil) ifTrue { return nil }
+        self send(l, operand, msg, [])
+    }
+
     binaryExpr(minPrec) {
-        left = self postfix
+        left = self unary
         (left == nil) ifTrue { return nil }
         { prec = precedences get(cur kind); prec != nil && prec >= minPrec } whileTrue {
             opPrec = precedences get(cur kind)

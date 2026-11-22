@@ -7,7 +7,8 @@
  *   assignment  = IDENT "=" expression
  *   expression  = binary
  *   binary      = unary { BINOP unary }
- *   unary       = postfix
+ *   unary       = ( "-" | "!" | "~" ) unary | postfix   (sends negated / not / bitNot;
+ *                 a "-" right before a number literal is part of the number)
  *   postfix     = primary { message_send }
  *   message_send = IDENT [ "(" arglist ")" ]
  *   primary     = INT | STRING | IDENT | SELF | "(" expression ")"
@@ -339,40 +340,14 @@ static void desugar_destructure(AstNode *stmt, NodeList *list) {
 static AstNode *parse_primary(Parser *p) {
     if (p->had_error) return NULL;
 
-    /* Unary minus */
+    /* A negative number literal: parse_unary leaves a minus right before a
+     * number to the literal */
     if (match(p, TOK_MINUS)) {
-        int line = p->previous.line;
         AstNode *operand = parse_primary(p);
         if (!operand) return NULL;
-        /* Optimize: fold negative integer/float literals */
-        if (operand->type == NODE_INT_LIT) {
-            operand->as.int_lit.value = -operand->as.int_lit.value;
-            return operand;
-        }
-        if (operand->type == NODE_FLOAT_LIT) {
-            operand->as.float_lit.value = -operand->as.float_lit.value;
-            return operand;
-        }
-        /* General case: 0 - operand */
-        AstNode *zero = ast_new(NODE_INT_LIT, line);
-        zero->as.int_lit.value = 0;
-        AstNode *bin = ast_new(NODE_BINARY, line);
-        bin->as.binary.left = zero;
-        bin->as.binary.op = strdup("-");
-        bin->as.binary.right = operand;
-        return bin;
-    }
-
-    /* Unary not: !expr becomes a NODE_BINARY with op "!" */
-    if (match(p, TOK_BANG)) {
-        int line = p->previous.line;
-        AstNode *operand = parse_primary(p);
-        if (!operand) return NULL;
-        AstNode *node = ast_new(NODE_SEND, line);
-        node->as.send.receiver = operand;
-        node->as.send.message = strdup("not");
-        nodelist_init(&node->as.send.args);
-        return node;
+        if (operand->type == NODE_INT_LIT) operand->as.int_lit.value = -operand->as.int_lit.value;
+        else if (operand->type == NODE_FLOAT_LIT) operand->as.float_lit.value = -operand->as.float_lit.value;
+        return operand;
     }
 
     /* Integer literal */
@@ -408,18 +383,6 @@ static AstNode *parse_primary(Parser *p) {
     if (match(p, TOK_STRING)) {
         AstNode *node = ast_new(NODE_STRING_LIT, p->previous.line);
         node->as.string_lit.value = process_escapes(p->previous.start, p->previous.length);
-        return node;
-    }
-
-    /* Unary bitwise not: ~expr is a send of bitNot */
-    if (match(p, TOK_TILDE)) {
-        int line = p->previous.line;
-        AstNode *operand = parse_primary(p);
-        if (!operand) return NULL;
-        AstNode *node = ast_new(NODE_SEND, line);
-        node->as.send.receiver = operand;
-        node->as.send.message = strdup("bitNot");
-        nodelist_init(&node->as.send.args);
         return node;
     }
 
@@ -1020,8 +983,37 @@ static int precedence(TokenType type) {
     }
 }
 
+/* The unary operators are sends: -x of negated, !x of not, ~x of bitNot.
+ * Like the binary ones they bind looser than messages, so each applies to the
+ * whole message expression after it: -p length is -(p length), !s isEmpty is
+ * !(s isEmpty). A minus right before a number literal is part of the number:
+ * -5 abs is (-5) abs, which is 5. */
+static AstNode *parse_unary(Parser *p) {
+    const char *msg = NULL;
+    if (check(p, TOK_MINUS)) {
+        Lexer look = p->lexer;
+        Token next = lexer_next(&look);
+        if (next.type != TOK_INT && next.type != TOK_FLOAT && next.type != TOK_CHAR)
+            msg = "negated";
+    } else if (check(p, TOK_BANG)) {
+        msg = "not";
+    } else if (check(p, TOK_TILDE)) {
+        msg = "bitNot";
+    }
+    if (!msg) return parse_postfix(p);
+    parser_advance(p);
+    int line = p->previous.line;
+    AstNode *operand = parse_unary(p);   /* - -x, -~x, ... */
+    if (!operand) return NULL;
+    AstNode *node = ast_new(NODE_SEND, line);
+    node->as.send.receiver = operand;
+    node->as.send.message = strdup(msg);
+    nodelist_init(&node->as.send.args);
+    return node;
+}
+
 static AstNode *parse_binary(Parser *p, int min_prec) {
-    AstNode *left = parse_postfix(p);
+    AstNode *left = parse_unary(p);
     if (!left) return NULL;
 
     while (is_binary_op(p->current.type) && precedence(p->current.type) >= min_prec) {

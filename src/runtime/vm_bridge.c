@@ -659,7 +659,8 @@ static const char *opcode_to_selector(int opcode) {
     }
 }
 
-/* Fallback for binary ops on non-numeric types (e.g., string + string).
+/* Fallback for binary ops on non-numeric types (e.g., string + string), and
+ * NEGATE on a non-number.
  * Converts VM values to Clay values, dispatches via clay_send_val. */
 static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
                                clayvm_value_t b, int opcode) {
@@ -671,8 +672,10 @@ static void arith_fallback_fn(clayvm_vm_t *vm, clayvm_value_t a,
     }
     ClayValue receiver = vm_to_clay(a);
     ClayValue arg = vm_to_clay(b);
-    const char *sel = opcode_to_selector(opcode);
-    ClayValue result = clay_send_val(receiver, sel, 1, &arg);
+    /* NEGATE (-x) sends negated, with no argument */
+    ClayValue result = opcode == CLAYVM_OP_NEGATE
+        ? clay_send_val(receiver, "negated", 0, NULL)
+        : clay_send_val(receiver, opcode_to_selector(opcode), 1, &arg);
 
     /* Alias check: if result is same as an operand, retain before releasing */
     int aliased = 0;

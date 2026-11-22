@@ -69,7 +69,8 @@ x = 5
 ```
 
 The same goes for loops: `{ i < 3 } whileTrue { ... }` puts the condition in a
-block, which is what `whileTrue` is sent to.
+block, which is what `whileTrue` is sent to. The unary operators follow the rule too:
+`-p length` is `-(p length)` and `!list includes(x)` is `!(list includes(x))`.
 
 ## Operator overloading
 
@@ -95,7 +96,39 @@ Vec setMethod("*", { |scalar| Vec new(self x * scalar, self y * scalar) })
 Vec new(2, 3) * 5   // Vec(10, 15)
 ```
 
-Overloadable operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&`, `|`, `^`, `<<`, `>>`. For built-in numbers, the fast integer/float path is used automatically; the custom method is only called for non-numeric types.
+Overloadable operators: the binary `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&`,
+`|`, `^`, `<<`, `>>` (each a method with one parameter, named like the operator), and the unary
+`-x` (sends `negated`), `!x` (sends `not`) and `~x` (sends `bitNot`), methods without parameters.
+For built-in numbers, the fast integer/float path is used automatically; the custom method is only
+called for non-numeric types.
+
+- **Compound assignments use the operator.** `v += w` is `v = v + w`, so defining `+` covers `+=`
+  too, and likewise `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=` and `>>=`.
+- **`!=` follows `==`.** A type that defines `==` gets the matching `!=` (true when `==` is not);
+  define `!=` yourself only to do something else. `x != nil` is always an identity check, so it
+  works even when your `==` expects an object like itself.
+- `&&`, `||` and `??` are not messages: they decide whether to evaluate their right side, so they
+  can't be overloaded.
+
+```clay
+Money = Object clone {
+  cents = 0
+  init(c) { cents = c }
+  +(other) { Money new(cents + other cents) }
+  *(n) { Money new(cents * n) }
+  negated() { Money new(0 - cents) }
+  ==(other) { (other hasSlot("cents")) && cents == other cents }
+  toString() { "${cents}c" }
+}
+
+m = Money new(150)
+m += Money new(50)     // uses +
+m *= 2                 // uses *
+m println              // 400c
+(-m) println           // -400c: sends negated
+(m != Money new(400)) println   // false: != uses ==
+(m != nil) println     // true
+```
 
 ## Prototypes and cloning
 
@@ -652,6 +685,19 @@ y = -(a + b)
 y println          // -5
 ```
 
+`-x` sends `negated` to `x` (numbers do it directly), so other types can define it; see
+[Operator overloading](#operator-overloading).
+
+Like the binary operators, `-`, `!` and `~` bind looser than messages: each applies to the whole
+message expression after it. A minus right before a number literal is part of the number.
+
+```clay
+x = -4
+(-x abs) println       // -4: -(x abs)
+(-5 abs) println       // 5: (-5) abs
+(-x abs + 1) println   // -3: unary operators still bind tighter than binary ones
+```
+
 ## String interpolation
 
 Use `${}` inside strings to embed expressions:
@@ -683,7 +729,7 @@ b = false
 
 `&` (and), `|` (or), `^` (xor), `<<` (shift left), `>>` (shift right) and unary `~` (not) work on
 integers, each with a compound form (`&=`, `|=`, `^=`, `<<=`, `>>=`). They are messages like the
-other operators, so custom types can overload the binary ones; `~x` sends `bitNot`.
+other operators, so custom types can overload them; `~x` sends `bitNot`.
 
 ```clay
 (6 & 3) println          // 2

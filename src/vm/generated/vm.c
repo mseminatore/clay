@@ -254,7 +254,18 @@ int handle_MOD(clayvm_vm_t *vm) {
 
 int handle_NEGATE(clayvm_vm_t *vm) {
     clayvm_value_t a = clayvm_vm_pop(vm);
-    clayvm_vm_push(vm, CLAYVM_INT64((-(a.as.i64))));
+    /* Clay ints are 62-bit: -(-2^61) is out of range, so it goes to the
+     * runtime fallback, which raises OverflowError */
+    if (a.type == CLAYVM_VAL_INT64 && a.as.i64 != -(INT64_C(1) << 61)) {
+        clayvm_vm_push(vm, CLAYVM_INT64(-a.as.i64));
+    } else if (a.type == CLAYVM_VAL_DOUBLE) {
+        clayvm_vm_push(vm, CLAYVM_DOUBLE(-a.as.f64));
+    } else if (vm->arith_fallback) {
+        vm->arith_fallback(vm, a, CLAYVM_NIL_VAL, CLAYVM_OP_NEGATE);
+    } else {
+        clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEGATE");
+        return -1;
+    }
     return 0;
 }
 
@@ -779,7 +790,18 @@ int clayvm_vm_run(clayvm_vm_t *vm, const uint8_t *code, size_t code_len) {
             clayvm_disasm_instruction(vm->code, vm->code_len, vm->ip - 1);
         }
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((-(a.as.i64))));
+        /* Clay ints are 62-bit: -(-2^61) is out of range, so it goes to the
+         * runtime fallback, which raises OverflowError */
+        if (a.type == CLAYVM_VAL_INT64 && a.as.i64 != -(INT64_C(1) << 61)) {
+            clayvm_vm_push(vm, CLAYVM_INT64(-a.as.i64));
+        } else if (a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(-a.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, CLAYVM_NIL_VAL, CLAYVM_OP_NEGATE);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEGATE");
+            return -1;
+        }
         DISPATCH();
     }
 
@@ -1272,7 +1294,18 @@ int clayvm_vm_step(clayvm_vm_t *vm) {
     }
     case CLAYVM_OP_NEGATE: {
         clayvm_value_t a = clayvm_vm_pop(vm);
-        clayvm_vm_push(vm, CLAYVM_INT64((-(a.as.i64))));
+        /* Clay ints are 62-bit: -(-2^61) is out of range, so it goes to the
+         * runtime fallback, which raises OverflowError */
+        if (a.type == CLAYVM_VAL_INT64 && a.as.i64 != -(INT64_C(1) << 61)) {
+            clayvm_vm_push(vm, CLAYVM_INT64(-a.as.i64));
+        } else if (a.type == CLAYVM_VAL_DOUBLE) {
+            clayvm_vm_push(vm, CLAYVM_DOUBLE(-a.as.f64));
+        } else if (vm->arith_fallback) {
+            vm->arith_fallback(vm, a, CLAYVM_NIL_VAL, CLAYVM_OP_NEGATE);
+        } else {
+            clayvm_vm_error(vm, CLAYVM_ERR_TYPE_MISMATCH, "type mismatch in NEGATE");
+            return -1;
+        }
         break;
     }
     case CLAYVM_OP_EQ: {

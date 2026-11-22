@@ -68,6 +68,7 @@ BcGen = Object clone {
     PUSH_CONST = 0
     POP = 1
     DUP = 2
+    NEGATE = 8
     NOT = 15
     JUMP = 16
     JUMP_IF_FALSE = 17
@@ -1358,6 +1359,11 @@ BcGen = Object clone {
             (chunkDepth > 0 && (self isInlineIf(n))) ifTrue { return self inlineIf(n, true) }
             (chunkDepth > 0 && (self isInlineWhile(n))) ifTrue { return self inlineWhile(n, true) }
             (chunkDepth > 0 && (self countKind(n)) > 0) ifTrue { return self inlineCount(n, true) }
+            // -x: NEGATE does numbers and sends negated to anything else
+            (n isSuper == false && n items size == 0 && n name == "negated") ifTrue {
+                self expr(n recv)
+                return self emitOp(NEGATE)
+            }
             self expr(n recv)
             self pushString(n name)
             return self sendArgs(n, n name)

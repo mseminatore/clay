@@ -298,8 +298,19 @@ static ClayValue object_eq(ClayObject *self, int argc, ClayValue *argv) {
     return CLAY_BOOL(CLAY_VAL(self) == argv[0]);
 }
 
+/* A type that defines == gets the matching != (not of its ==); otherwise
+ * it is identity. x != nil is always identity, so it also works when ==
+ * expects an object like the receiver. */
 static ClayValue object_neq(ClayObject *self, int argc, ClayValue *argv) {
     if (argc < 1) return CLAY_TRUE;
+    if (CLAY_IS_NIL(argv[0])) return CLAY_TRUE;
+    ClayMethod *eq = clay_cached_lookup(self, "==");
+    if (eq && eq->func != object_eq) {
+        ClayValue r = clay_send_owned(CLAY_VAL(self), "==", 1, argv);
+        int same = CLAY_IS_TRUTHY(r);
+        clay_release_val(r);
+        return CLAY_BOOL(!same);
+    }
     return CLAY_BOOL(CLAY_VAL(self) != argv[0]);
 }
 

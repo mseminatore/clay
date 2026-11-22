@@ -1,0 +1,13 @@
+// unary -, ! and ~ are sends (negated, not, bitNot) that apply to the whole
+// message expression after them; a minus right before a number is the literal
+a = -5 abs
+b = -x abs
+c = - -x
+d = x - -y
+e = -~a
+f = !p isEmpty
+g = ~n bitAnd(3)
+h = [-1, -2.5, -'a', -x]
+i = -p length + 1
+j = -(x + y) abs
+k = obj method(-x, -y size)

@@ -88,6 +88,51 @@ t2 = Temp new(30)
 (t1 <= t2) ifTrue { "PASS: <=" println } ifFalse { TestFails fail("FAIL: <=") }
 (t2 >= t1) ifTrue { "PASS: >=" println } ifFalse { TestFails fail("FAIL: >=") }
 
+// Unary minus sends negated (numbers do it directly)
+Amt = Object clone {
+    n = 0
+    init(v) { n = v }
+    negated() { Amt new(0 - n) }
+    +(o) { Amt new(n + o n) }
+    *(k) { Amt new(n * k) }
+    ==(o) { (o hasSlot("n")) && n == o n }
+}
+NegIn = Object clone { neg(v) { -v } }
+check = { |ok, what| ok ifTrue { ("PASS: " + what) println } ifFalse { TestFails fail("FAIL: " + what) } }
+check value(((-Amt new(5)) n) == -5, "-x sends negated")
+check value(((NegIn neg(Amt new(2))) n) == -2, "-x sends negated in a method")
+check value(((-(Amt new(1) + Amt new(2))) n) == -3, "-(expr) sends negated")
+k = 7
+f = 2.5
+check value((-k == 0 - 7) && (-f == 0 - 2.5) && (NegIn neg(k) == -7), "-x on numbers")
+minInt = -2305843009213693951 - 1
+check value((try { -minInt; false } catch { |e| e type == "OverflowError" }), "-x overflow raises")
+check value((try { NegIn neg(minInt); false } catch { |e| e type == "OverflowError" }), "-x overflow raises in a method")
+check value((try { -"s"; false } catch { |e| e type == "MethodNotFound" }), "-x without negated")
+
+// Unary operators bind looser than messages (but a minus before a number
+// literal is part of it)
+Yes = Object clone { t() { true } }
+check value((-5 abs) == 5, "-5 abs is (-5) abs")
+check value((-k abs) == -7, "-k abs is -(k abs)")
+check value((!Yes t) == false, "!x m is !(x m)")
+check value(((-Amt new(5)) n) == -5 && (-Amt new(5) n) == -5, "-X new(5) negates the new one")
+check value((- -k) == 7 && (3 - -k) == 10, "nested and after binary minus")
+
+// Compound assignment uses the operator method
+a = Amt new(3)
+a += Amt new(4)
+a *= 2
+check value(a n == 14, "+= and *= use + and *")
+
+// != follows a user-defined == (and x != nil stays identity)
+check value((Amt new(1) != Amt new(1)) == false, "!= is the opposite of ==")
+check value(Amt new(1) != Amt new(2), "!= true when == is false")
+check value(Amt new(1) != nil, "!= nil")
+Plain = Object clone
+pl = Plain clone
+check value((pl != pl) == false && (pl != Plain clone), "!= without == is identity")
+
 (TestFails count > 0) ifTrue {
     ((TestFails count) toString + " failed") println
     System exit(1)

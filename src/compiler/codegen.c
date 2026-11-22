@@ -1231,6 +1231,9 @@ static char *emit_send(CodeGen *cg, AstNode *node) {
             }
             fprintf(cg->out, "});\n");
         }
+    } else if (argc == 0 && strcmp(node->as.send.message, "negated") == 0) {
+        /* -x: numbers directly, anything else is sent negated */
+        fprintf(cg->out, "ClayValue %s = clay_negate(%s);\n", t, recv);
     } else if (argc == 0) {
         fprintf(cg->out, "ClayValue %s = clay_send_owned(%s, \"%s\", 0, NULL);\n",
                 t, recv, node->as.send.message);

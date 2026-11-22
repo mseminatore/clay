@@ -363,6 +363,9 @@ ClayValue   clay_send_super(ClayValue receiver, ClayObject *defining_obj,
  * it is borrowed. These retain such aliased results, so the caller always owns
  * exactly one reference to the returned value. */
 ClayValue   clay_send_owned(ClayValue receiver, const char *selector, int argc, ClayValue *argv);
+/* -x (an owned result): numbers directly, anything else is sent negated
+ * (generated C; the VM's NEGATE does the same) */
+ClayValue   clay_negate(ClayValue v);
 ClayValue   clay_self_get(ClayValue self, const char *name);  /* bare `name` in a method, owned */
 ClayValue   clay_send_super_owned(ClayValue receiver, ClayObject *defining_obj,
                                   const char *selector, int argc, ClayValue *argv);

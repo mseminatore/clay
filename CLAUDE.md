@@ -222,6 +222,11 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   `fileMarks`, `emitLine`) must match — `--bytecode` prints the files, so parity checks cover it.
   Files under the bundled `lib/` are *shown* relative to it (`clay_display_file`; the lib dir comes
   from `resolve_lib_dir`, a compiled program's `clay_set_lib_dir` call, or clayc's `VM setLibDir`).
+- **Unary operators**: `-x`, `!x`, `~x` parse (`parse_unary`; selfhost `unary`) to sends of `negated`,
+  `not`, `bitNot` that bind looser than messages (`-p length` is `-(p length)`); a `-` right before a
+  number literal folds into it. Both compilers turn a `negated` send with no arguments into a fast path
+  (VM `NEGATE`, whose fallback sends `negated`; codegen `clay_negate`). Object's default `!=` uses an
+  overridden `==` (`object_neq`).
 - **Call syntax `foo(args)`**: parsed as `Send(Ident foo, "value", args)` with `is_call` set
   (`Call(foo)` in `--ast`). A compiler sends `self foo(args)` instead when `foo` would resolve to self
   like a bare name (`bc_name_is_self_slot` / `call_targets_self`; selfhost `selfSlotName` /
