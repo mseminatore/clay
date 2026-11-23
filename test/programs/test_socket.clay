@@ -200,20 +200,24 @@ mc = Socket udp(0)
 check value("multicastTTL and multicastLoop return the socket", (mc multicastTTL(1) multicastLoop(true)) == mc)
 mc close
 
-// loopback delivery needs a multicast-capable interface; skip quietly where the system has none
+// Delivery needs a multicast route (some CI runners have none: the join works, the send
+// fails with "No route to host"). Skip the delivery check there; a datagram that was sent
+// but never arrives is still a failure.
 group = "239.255.42.99"
 rx = Socket udp(0, "0.0.0.0", true)
-joined = (raises value({ rx joinGroup(group) })) == "no error"
-joined ifTrue {
-    rx setTimeout(1000)
+sent = false
+((raises value({ rx joinGroup(group) })) == "no error") ifTrue {
     tx = Socket udp()
     tx multicastTTL(1) multicastLoop(true)
-    tx sendTo(group, rx localPort, "hello group")
+    sent = (raises value({ tx sendTo(group, rx localPort, "hello group") })) == "no error"
+    tx close
+}
+sent ifTrue {
+    rx setTimeout(1000)
     got = nil
     (raises value({ got = rx receiveFrom(100) })) == "no error"
     check value("multicast reaches a member", got != nil && (got at(0)) == "hello group")
     rx leaveGroup(group)
-    tx close
 } ifFalse {
     Console print("multicast: no multicast route here, delivery check skipped\n")
 }
