@@ -36,6 +36,8 @@ jobs:
           - name: macos-arm64
             os: macos-15              # the archive needs this macOS version or newer
                                       # (Homebrew's static OpenSSL targets the runner's)
+          - name: macos-x86_64
+            os: macos-15-intel        # same macOS version as the arm64 build
           - name: windows-x86_64
             os: windows-2022
     runs-on: ${{ matrix.os }}
