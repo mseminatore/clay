@@ -191,6 +191,41 @@ check value("sendTo a host name", (Socket udp() sendTo("localhost", named localP
 check value("...and it arrives", ((named receiveFrom(100)) at(0)) == "hi")
 named close
 
+// --- multicast ---
+check value("joinGroup wants a multicast address", (raises value({ Socket udp(0) joinGroup("127.0.0.1") })) == "ArgumentError")
+check value("joinGroup wants a numeric address", (raises value({ Socket udp(0) joinGroup("localhost") })) == "ArgumentError")
+check value("joinGroup wants a string", (raises value({ Socket udp(0) joinGroup(5) })) == "TypeError")
+check value("multicastTTL range", (raises value({ Socket udp(0) multicastTTL(300) })) == "ArgumentError")
+mc = Socket udp(0)
+check value("multicastTTL and multicastLoop return the socket", (mc multicastTTL(1) multicastLoop(true)) == mc)
+mc close
+
+// loopback delivery needs a multicast-capable interface; skip quietly where the system has none
+group = "239.255.42.99"
+rx = Socket udp(0, "0.0.0.0", true)
+joined = (raises value({ rx joinGroup(group) })) == "no error"
+joined ifTrue {
+    rx setTimeout(1000)
+    tx = Socket udp()
+    tx multicastTTL(1) multicastLoop(true)
+    tx sendTo(group, rx localPort, "hello group")
+    got = nil
+    (raises value({ got = rx receiveFrom(100) })) == "no error"
+    check value("multicast reaches a member", got != nil && (got at(0)) == "hello group")
+    rx leaveGroup(group)
+    tx close
+} ifFalse {
+    Console print("multicast: no multicast route here, delivery check skipped\n")
+}
+rx close
+
+// two sockets may share a port when asked
+r1 = Socket udp(0, "0.0.0.0", true)
+r2 = Socket udp(r1 localPort, "0.0.0.0", true)
+check value("udp reuse shares a port", r2 localPort == r1 localPort)
+r1 close
+r2 close
+
 // --- names ---
 check value("resolve a numeric address", (Socket resolve("127.0.0.1")) == ["127.0.0.1"])
 check value("resolve gives strings", (Socket resolve("localhost")) size > 0)

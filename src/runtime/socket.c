@@ -3,7 +3,8 @@
  *
  *   Socket connect(host, port [, timeoutMs])     TCP client
  *   Socket listen(port [, host [, backlog]])     TCP server (host defaults to 127.0.0.1)
- *   Socket udp([port [, host]])                  UDP socket (bound if a port is given)
+ *   Socket udp([port [, host [, reuse]]])        UDP socket (bound if a port is given; reuse: let
+ *                                                other sockets bind the same port, for multicast)
  *   Socket resolve(host)                         Array of the host's addresses
  *   Socket select(readers [, timeoutMs])         the readers that can be read now (0: just look)
  *   Socket select(readers, writers [, timeoutMs])   [readable, writable]; a list may be nil
@@ -16,6 +17,8 @@
  *   s accept([timeoutMs]) a listening socket's next connection; with a timeout, nil if
  *                         none came in time (0 just looks)
  *   s sendTo(host, port, data) / s receiveFrom([max])    UDP
+ *   s joinGroup(addr) / s leaveGroup(addr)   UDP multicast membership (default interface)
+ *   s multicastTTL(n), s multicastLoop(flag) multicast hop limit / receive own packets
  *   s setTimeout(ms)      limit for read/write/receiveFrom (0: wait forever); returns s
  *   s noDelay(flag), s shutdownWrite, s close, s isOpen
  *   s localPort, s localAddress, s remotePort, s remoteAddress
@@ -27,6 +30,13 @@
  * A socket object keeps its descriptor in the integer slot _sock (-1 once it is
  * closed); memory.c closes it if the object is freed while still open.
  */
+/* -D_POSIX_C_SOURCE hides the multicast options (IP_ADD_MEMBERSHIP, struct ip_mreq ...)
+ * on macOS and glibc; ask for them back before any system header */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#elif defined(__linux__) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE
+#endif
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -358,6 +368,7 @@ static ClayValue socket_udp(ClayObject *self, int argc, ClayValue *argv) {
     int port = bind_it ? port_arg(argc, argv, 0, "Socket udp", 1) : 0;
     const char *host = "127.0.0.1";
     if (argc > 1 && !CLAY_IS_NIL(argv[1])) host = clay_arg_string(argc, argv, 1, "Socket udp");
+    int reuse = argc > 2 && argv[2] != CLAY_FALSE && !CLAY_IS_NIL(argv[2]);
 
     char portbuf[16];
     snprintf(portbuf, sizeof(portbuf), "%d", port);
@@ -377,6 +388,13 @@ static ClayValue socket_udp(ClayObject *self, int argc, ClayValue *argv) {
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
         sock_t s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s == SOCK_BAD) { last_err = sock_errno(); continue; }
+        if (bind_it && reuse) {
+            int one = 1;
+            setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
+#if defined(SO_REUSEPORT) && !defined(_WIN32)
+            setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (const char *)&one, sizeof(one));
+#endif
+        }
         if (!bind_it || bind(s, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) { fd = s; family = ai->ai_family; break; }
         last_err = sock_errno();
         sock_close(s);
@@ -789,6 +807,113 @@ static ClayValue socket_receiveFrom(ClayObject *self, int argc, ClayValue *argv)
     return CLAY_VAL(result);
 }
 
+/* --- multicast --- */
+
+/* the group address `text` as a socket address of this socket's family; raises unless it
+ * is a numeric multicast address of that family. Returns 1 on success. */
+static int group_addr(ClayObject *self, const char *who, const char *text, struct sockaddr_storage *out) {
+    int family = family_of(self);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = family;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_NUMERICHOST;
+    if (getaddrinfo(text, NULL, &hints, &res) != 0 || !res) {
+        fail("ArgumentError", "%s: '%s' is not a numeric %s address", who, text,
+             family == AF_INET6 ? "IPv6" : "IPv4");
+        return 0;
+    }
+    int ok = 0;
+    memset(out, 0, sizeof(*out));
+    if (res->ai_family == AF_INET) {
+        struct sockaddr_in *a = (struct sockaddr_in *)res->ai_addr;
+        ok = IN_MULTICAST(ntohl(a->sin_addr.s_addr));
+        memcpy(out, a, sizeof(*a));
+    } else if (res->ai_family == AF_INET6) {
+        struct sockaddr_in6 *a = (struct sockaddr_in6 *)res->ai_addr;
+        ok = IN6_IS_ADDR_MULTICAST(&a->sin6_addr);
+        memcpy(out, a, sizeof(*a));
+    }
+    freeaddrinfo(res);
+    if (!ok) fail("ArgumentError", "%s: '%s' is not a multicast address", who, text);
+    return ok;
+}
+
+static ClayValue membership(ClayObject *self, int argc, ClayValue *argv, const char *who, int join) {
+    sock_t fd = fd_of(self, who, 1);
+    if (fd == SOCK_BAD) return CLAY_NIL;
+    const char *text = clay_arg_string(argc, argv, 0, who);
+    struct sockaddr_storage ga;
+    if (!group_addr(self, who, text, &ga)) return CLAY_NIL;
+    int rc;
+    if (ga.ss_family == AF_INET) {
+        struct ip_mreq m;
+        memset(&m, 0, sizeof(m));
+        m.imr_multiaddr = ((struct sockaddr_in *)&ga)->sin_addr;
+        m.imr_interface.s_addr = htonl(INADDR_ANY);
+        rc = setsockopt(fd, IPPROTO_IP, join ? IP_ADD_MEMBERSHIP : IP_DROP_MEMBERSHIP,
+                        (const char *)&m, sizeof(m));
+    } else {
+        struct ipv6_mreq m;
+        memset(&m, 0, sizeof(m));
+        m.ipv6mr_multiaddr = ((struct sockaddr_in6 *)&ga)->sin6_addr;
+        m.ipv6mr_interface = 0;
+        rc = setsockopt(fd, IPPROTO_IPV6, join ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP,
+                        (const char *)&m, sizeof(m));
+    }
+    if (rc != 0) { fail_errno(who, sock_errno()); return CLAY_NIL; }
+    return CLAY_VAL(self);
+}
+
+static ClayValue socket_joinGroup(ClayObject *self, int argc, ClayValue *argv) {
+    return membership(self, argc, argv, "Socket joinGroup", 1);
+}
+
+static ClayValue socket_leaveGroup(ClayObject *self, int argc, ClayValue *argv) {
+    return membership(self, argc, argv, "Socket leaveGroup", 0);
+}
+
+static ClayValue socket_multicastTTL(ClayObject *self, int argc, ClayValue *argv) {
+    sock_t fd = fd_of(self, "Socket multicastTTL", 1);
+    if (fd == SOCK_BAD) return CLAY_NIL;
+    intptr_t n = clay_arg_integer(argc, argv, 0, "Socket multicastTTL");
+    if (n < 0 || n > 255) { fail("ArgumentError", "Socket multicastTTL: the hop limit must be 0 to 255"); return CLAY_NIL; }
+    int rc;
+    if (family_of(self) == AF_INET6) {
+        int v = (int)n;
+        rc = setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char *)&v, sizeof(v));
+    } else {
+#ifdef _WIN32
+        int v = (int)n;
+#else
+        unsigned char v = (unsigned char)n;      /* BSD and macOS want a byte; Linux takes one */
+#endif
+        rc = setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, (const char *)&v, sizeof(v));
+    }
+    if (rc != 0) { fail_errno("Socket multicastTTL", sock_errno()); return CLAY_NIL; }
+    return CLAY_VAL(self);
+}
+
+static ClayValue socket_multicastLoop(ClayObject *self, int argc, ClayValue *argv) {
+    sock_t fd = fd_of(self, "Socket multicastLoop", 1);
+    if (fd == SOCK_BAD) return CLAY_NIL;
+    int on = argc < 1 || (argv[0] != CLAY_FALSE && !CLAY_IS_NIL(argv[0]));
+    int rc;
+    if (family_of(self) == AF_INET6) {
+        unsigned int v = (unsigned int)on;
+        rc = setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char *)&v, sizeof(v));
+    } else {
+#ifdef _WIN32
+        int v = on;
+#else
+        unsigned char v = (unsigned char)on;
+#endif
+        rc = setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, (const char *)&v, sizeof(v));
+    }
+    if (rc != 0) { fail_errno("Socket multicastLoop", sock_errno()); return CLAY_NIL; }
+    return CLAY_VAL(self);
+}
+
 /* --- the rest --- */
 
 static ClayValue socket_close(ClayObject *self, int argc, ClayValue *argv) {
@@ -899,6 +1024,10 @@ void clay_socket_init(ClayObject *proto) {
     clay_set_method(proto, "accept", socket_accept);
     clay_set_method(proto, "sendTo", socket_sendTo);
     clay_set_method(proto, "receiveFrom", socket_receiveFrom);
+    clay_set_method(proto, "joinGroup", socket_joinGroup);
+    clay_set_method(proto, "leaveGroup", socket_leaveGroup);
+    clay_set_method(proto, "multicastTTL", socket_multicastTTL);
+    clay_set_method(proto, "multicastLoop", socket_multicastLoop);
     clay_set_method(proto, "close", socket_close);
     clay_set_method(proto, "isOpen", socket_isOpen);
     clay_set_method(proto, "setTimeout", socket_setTimeout);

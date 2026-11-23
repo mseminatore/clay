@@ -29,7 +29,7 @@ larger ones in detail. Arrays, strings, numbers and Dicts are introduced in the
 | Range | `each(block)`, `map(block)`, `filter(block)`, `contains(val)`, `toArray()`, `size()`, `step(n)`, `reverse()`, `start()`, `end()`, `toString()` |
 | Vec3 | `new(x,y,z)`, `x`, `y`, `z`, `+`, `-`, `*`, `/`, `dot(v)`, `cross(v)`, `length`, `lengthSquared`, `normalize`, `mul(v)`, `reflect(n)`, `nearZero`, `negated`, `==`, `!=`, `toString()` |
 | Thread | `spawn(block)`, `await()`, `done()`, `available` |
-| Socket | `connect(host, port)`, `listen(port)`, `udp()`, `resolve(host)`, `select(sockets)`; on a socket: `read(max)`, `readExactly(n)`, `write(data)`, `tryRead()`, `tryWrite(data)`, `accept()`, `sendTo(host, port, data)`, `receiveFrom()`, `setTimeout(ms)`, `close()`, `localPort`, `remoteAddress` — see [Sockets](#sockets) |
+| Socket | `connect(host, port)`, `listen(port)`, `udp()`, `resolve(host)`, `select(sockets)`; on a socket: `read(max)`, `readExactly(n)`, `write(data)`, `tryRead()`, `tryWrite(data)`, `accept()`, `sendTo(host, port, data)`, `receiveFrom()`, `joinGroup(addr)`, `setTimeout(ms)`, `close()`, `localPort`, `remoteAddress` — see [Sockets](#sockets) |
 | VM | `run(unit)`, `run(unit, args)`, `hasGlobal(name)`, `counts()`, `setLibDir(dir)` (errors show files under `dir` relative to it) — run bytecode from the [Clay compiler in Clay](native-and-plugins.md#a-clay-compiler-in-clay) (native programs only) |
 | Graphics | `window(w,h,title)`, `close`, `clear`, `color(r,g,b)`, `setPixel(x,y,r,g,b)`, `drawLine(x1,y1,x2,y2)`, `drawRect(x,y,w,h)`, `fillRect(x,y,w,h)`, `drawCircle(x,y,r)`, `fillCircle(x,y,r)`, `drawText(x,y,text)`, `fontSize(n)`, `loadPPM(path)`, `drawImage(img,x,y)`, `drawImageEx(img,x,y,scale)`, `createSprite(img,x,y,w,h)`, `drawSprite(s,x,y)`, `createBuffer(w,h)`, `bufferPixel(buf,x,y,r,g,b)`, `drawBuffer(buf,x,y)`, `pollEvent`, `waitEvent`, `isKeyDown(key)`, `mouseX`, `mouseY`, `mouseDown`, `ticks`, `delay(ms)`, `fps`, `refresh`, `resize(w,h)`, `fullscreen`, `windowed`, `width`, `height` |
 
@@ -424,6 +424,15 @@ srv = Socket listen(8080)                // loopback only; Socket listen(8080, "
   is what you want, and that a firewall and your own checks stand in front of it.
   `Socket udp(port)` makes a UDP socket, bound if you give a port. `Socket resolve("host")` is an
   Array of its addresses.
+- **Multicast (UDP).** To receive a group's datagrams, bind a UDP socket to the wildcard address with
+  `reuse` on, then join: `rx = Socket udp(5000, "0.0.0.0", true)` and `rx joinGroup("239.255.0.1")`
+  (`Socket udp(5000, "::", true)` and an `ff..` group for IPv6). `reuse` lets several programs on
+  one computer listen on the same port; it is off by default so nobody else can share your port by
+  accident. Binding to the default `127.0.0.1` receives no multicast. `leaveGroup(addr)` undoes it.
+  To send, `sendTo` the group address from any UDP socket; `multicastTTL(n)` sets how many routers
+  the datagram may cross (default 1: the local network) and `multicastLoop(false)` stops this
+  computer's own listeners from getting what you send. Group addresses must be numeric, and
+  they use the system's default network interface.
 - `read(max)` waits for data, then returns up to `max` bytes (at least one; default 4096), or `nil` once
   the peer has closed. `readExactly(n)` returns exactly `n` or raises. `write(data)` sends all of it and
   returns the byte count; it waits only if the peer isn't reading and the operating system's send
