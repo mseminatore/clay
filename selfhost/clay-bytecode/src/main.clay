@@ -912,6 +912,51 @@ BcGen = Object clone {
         kind
     }
 
+    // do the statements assign the variable nm, in blocks made there too (not in
+    // a method body, which has its own)? (ast_assigns_name)
+    assignsList(list, nm) {
+        (list == nil) ifTrue { return false }
+        (list find { |n| self assigns(n, nm) }) != nil
+    }
+
+    assigns(n, nm) {
+        (n == nil) ifTrue { return false }
+        k = n kind
+        (k == "Assign") ifTrue { return n name == nm || (self assigns(n value, nm)) }
+        (k == "Destructure") ifTrue {
+            ((n items find { |t| t name == nm }) != nil) ifTrue { return true }
+            return self assigns(n value, nm)
+        }
+        (k == "Block") ifTrue { return self assignsList(n body, nm) }
+        (k == "Send") ifTrue { return (self assigns(n recv, nm)) || (self assignsList(n items, nm)) }
+        (k == "Binary") ifTrue { return (self assigns(n left, nm)) || (self assigns(n right, nm)) }
+        (k == "Return") ifTrue { return self assigns(n expr, nm) }
+        (k == "Array") ifTrue { return self assignsList(n items, nm) }
+        (k == "DictLit") ifTrue { return self assignsList(n vals, nm) }
+        (k == "TryCatch") ifTrue {
+            return (self assigns(n tryBlock, nm)) || (self assigns(n catchBlock, nm)) ||
+                   (self assigns(n finallyBlock, nm))
+        }
+        (k == "Raise") ifTrue { return self assigns(n expr, nm) }
+        (k == "SlotAssign") ifTrue { return (self assigns(n recv, nm)) || (self assigns(n value, nm)) }
+        (k == "Clone") ifTrue {
+            (self assigns(n recv, nm)) ifTrue { return true }
+            return (n items find { |m| m kind == "SlotDef" && (self assigns(m value, nm)) }) != nil
+        }
+        false
+    }
+
+    // can the counting loop count in its parameter (local k, named for it)? Not
+    // when a block made in the body captures it. The prescan says; every local's
+    // capture mark is put back after it (bc_count_in_param)
+    countInParam(body, k) {
+        marks = locs map { |l| l captured }
+        self prescanList(body)
+        captured = (locs at(k)) captured
+        marks size times { |i| (locs at(i)) captured = marks at(i) }
+        captured == false
+    }
+
     // its parameter's name, or nil
     countParam(n) {
         b = n items at(0)
@@ -1043,7 +1088,15 @@ BcGen = Object clone {
             self pushNil
             self setPop(res)
         }
-        k = self addLocal("?:k")
+        pname = self countParam(n)
+        k = self addLocal((pname != nil && (self assignsList(body, pname)) == false) ifTrue { pname } ifFalse { "?:k" })
+        (k >= 0 && pname != nil && (locs at(k)) lname == pname) ifTrue {
+            (self countInParam(body, k)) ifTrue {
+                pname = nil                 // the body reads the counter
+            } ifFalse {
+                (locs at(k)) lname = "?:k"
+            }
+        }
         last = self addLocal("?:last")
         (kind == 1) ifTrue {
             self expr(r)
@@ -1076,7 +1129,7 @@ BcGen = Object clone {
         loop = [buf size, 0, [], true, [], timesValue ifTrue { res } ifFalse { -1 }]
         outerLoop = inlineLoop
         inlineLoop = loop
-        self inlineBodyP(body, timesValue, self countParam(n), k)
+        self inlineBodyP(body, timesValue, pname, k)
         inlineLoop = outerLoop
         timesValue ifTrue { self setPop(res) }
         (loop at(4)) each { |j| self patchJump(j) }

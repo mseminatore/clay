@@ -573,7 +573,7 @@ Tree walk([1, [2, [3, 4]], 5], { |x|
 ```
 
 The exception is a `whileTrue` or `whileFalse` loop: a `break` there gives the
-value of the body's last complete run (see [While loops](#while-loops)).
+value of the body's last complete run (see [Loops](#loops)).
 
 As in most languages, a `break` or `continue` belongs to the loop it is
 written in. It can go in a loop's body or in a block literal passed to a
@@ -768,7 +768,38 @@ c = 3
 
 `??` has lower precedence than all other binary operators.
 
-## While loops
+## Loops
+
+Clay has no loop statements: loops are messages, like everything else. Pick the
+one that says what the loop does:
+
+| To | Write |
+|----|-------|
+| run something `n` times, counting from 0 | `n times { \|i\| ... }` |
+| count from `a` to `b` (both included) | `(a..b) each { \|i\| ... }` |
+| go through a collection | `items each { \|x\| ... }` (or `map`, `filter`, `reduce`) |
+| loop until a condition changes | `{ cond } whileTrue { ... }` or `whileFalse` |
+
+`n times` is the definite loop: when the number of runs is known before the
+loop starts, use it (or a range's `each`) rather than a `whileTrue` with a
+counter. There is no counter to set up or forget to step, the count is fixed
+when the loop starts, and the loop variable belongs to the loop. It is never
+slower: the compilers count in place (see below), so on the VM it costs the
+same as a `whileTrue` with a counter, and compiled with `--compile` a loop with
+a small body runs about twice as fast.
+
+```clay
+5 times { |i| i println }                 // 0 1 2 3 4
+
+// the same, the long way
+i = 0
+{ i < 5 } whileTrue { i println; i = i + 1 }
+```
+
+`whileTrue` is for loops whose end depends on what happens in them, such as
+reading until there is no more input or iterating until a value converges.
+
+### whileTrue and whileFalse
 
 Blocks support `whileTrue` and `whileFalse` for looping:
 
@@ -789,7 +820,9 @@ its `break` and `continue` are plain jumps. It behaves exactly like the
 message. A loop with a `break` or `continue` inside another block, such as a
 `try` block, is sent as a message instead.
 
-For counting, `n times { |i| ... }` runs its block with `i` from 0 to `n - 1`, and
+### Counting loops
+
+`n times { |i| ... }` runs its block with `i` from 0 to `n - 1`, and
 `(a..b) each { |i| ... }` with `i` from `a` to `b`:
 
 ```clay
@@ -799,8 +832,9 @@ total = 0
 total println   // 12
 ```
 
-These are compiled in place too, inside methods and blocks, so they cost no
-more than a `whileTrue`. They still behave like the messages. `times` gives the
+These are compiled in place too, inside methods and blocks: the loop counts
+in a local of its own, and when the body only reads `i` (doesn't assign it or
+keep it in a block), `i` is that counter. They still behave like the messages. `times` gives the
 body's last value, and `each` gives the range. A range's bounds must be integers.
 A float count for `times` is truncated (`3.7 times` runs 3 times). Because the
 block runs in place rather than being sent, `times` with a block literal needs a

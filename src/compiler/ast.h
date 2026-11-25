@@ -180,6 +180,9 @@ int ast_is_inline_while(AstNode *n);
 #define AST_COUNT_RANGE 2
 int ast_inline_count_kind(AstNode *n);
 const char *ast_count_param(AstNode *n);
+/* Do the statements assign the variable name anywhere, in blocks made there
+ * too (not in a method body, which has its own)? */
+int ast_assigns_name(NodeList *l, const char *name);
 
 /* break and continue in a block literal passed to a message (not ifTrue,
  * ifFalse or the body of a whileTrue/whileFalse: ast_block_is_loop_arg)

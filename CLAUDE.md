@@ -192,7 +192,10 @@ Adapter Protocol server for the VS Code extension in `editors/vscode/clay-lang/`
   `bc_emit_inline_count` / `emit_inline_count` (selfhost `inlineCount`), bounds from `clay_times_count` /
   `clay_range_bound` (VM natives `times_count` / `range_bound`), tested before the first run and after each.
   Values match the messages (times: last body value, nil after break/continue; each: the range, nil after
-  break). The bc compiler gives the parameter a scope (and `bc_slot_flag_local` ignores an outer `?x` flag);
+  break). The bc compiler counts in the parameter itself (the counter local is named for it) when the body
+  never assigns it (`ast_assigns_name`) and no block made there captures it (`bc_count_in_param`, which runs
+  the prescan and puts every capture mark back; selfhost `assigns`/`countInParam`); otherwise a hidden
+  `?:k` counts and the parameter gets a scope of its own, set each run (and `bc_slot_flag_local` ignores an outer `?x` flag);
   codegen has no inner scopes, so its prewalk renames the parameter in the body (`rename_var`, `__p<n>_i`).
 - **break / continue**: lexical, as in Ruby. `check.c` `check_loop_control` (selfhost `GlobalCheck _loop`)
   rejects one outside a loop body or a block literal passed to a message (ifTrue/ifFalse and try blocks and

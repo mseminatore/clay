@@ -487,6 +487,56 @@ const char *ast_count_param(AstNode *n) {
     return b->as.block.params.count == 1 ? b->as.block.params.items[0]->as.ident.name : NULL;
 }
 
+/* Does n assign the variable name, itself or in a block made in it? An
+ * inlined counting loop whose parameter is never assigned counts in it
+ * (bc_emit_inline_count). A clone's method bodies have their own variables. */
+static int assigns_name(AstNode *n, const char *name) {
+    if (!n) return 0;
+    switch (n->type) {
+        case NODE_ASSIGN:
+            return strcmp(n->as.assign.name, name) == 0 || assigns_name(n->as.assign.value, name);
+        case NODE_DESTRUCTURE:
+            for (int i = 0; i < n->as.destructure.targets.count; i++)
+                if (strcmp(n->as.destructure.targets.items[i]->as.ident.name, name) == 0) return 1;
+            return assigns_name(n->as.destructure.value, name);
+        case NODE_BLOCK:
+            return ast_assigns_name(&n->as.block.body, name);
+        case NODE_SEND:
+            return assigns_name(n->as.send.receiver, name) || ast_assigns_name(&n->as.send.args, name);
+        case NODE_BINARY:
+            return assigns_name(n->as.binary.left, name) || assigns_name(n->as.binary.right, name);
+        case NODE_RETURN:
+            return assigns_name(n->as.return_stmt.expr, name);
+        case NODE_ARRAY_LIT:
+            return ast_assigns_name(&n->as.array_lit.elements, name);
+        case NODE_DICT_LIT:
+            return ast_assigns_name(&n->as.dict_lit.values, name);
+        case NODE_TRY_CATCH:
+            return assigns_name(n->as.try_catch.try_block, name) ||
+                   assigns_name(n->as.try_catch.catch_block, name) ||
+                   assigns_name(n->as.try_catch.finally_block, name);
+        case NODE_RAISE:
+            return assigns_name(n->as.raise.expr, name);
+        case NODE_SLOT_ASSIGN:
+            return assigns_name(n->as.slot_assign.receiver, name) || assigns_name(n->as.slot_assign.value, name);
+        case NODE_CLONE:
+            if (assigns_name(n->as.clone.proto, name)) return 1;
+            for (int i = 0; i < n->as.clone.members.count; i++) {
+                AstNode *m = n->as.clone.members.items[i];
+                if (m && m->type == NODE_SLOT_DEF && assigns_name(m->as.slot_def.value, name)) return 1;
+            }
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+int ast_assigns_name(NodeList *l, const char *name) {
+    for (int i = 0; i < l->count; i++)
+        if (assigns_name(l->items[i], name)) return 1;
+    return 0;
+}
+
 /* --- break / continue in a block passed to a message ---
  * Each break and continue belongs to the innermost loop around it: an
  * inlined whileTrue/whileFalse (a jump), or a block literal passed to a

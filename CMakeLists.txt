@@ -564,6 +564,7 @@ add_test(NAME clay_test_config COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME clay_test_env COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_env.clay)
 add_test(NAME clay_test_markdown COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_markdown.clay)
 add_test(NAME clay_test_overflow COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_overflow.clay)
+add_test(NAME clay_test_counting_loops COMMAND clay_compiler ${CMAKE_CURRENT_SOURCE_DIR}/test/programs/test_counting_loops.clay)
 set_tests_properties(clay_test_base64 clay_test_url clay_test_config clay_test_env clay_test_markdown
     PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                LABELS "bricks")

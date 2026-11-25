@@ -1273,9 +1273,10 @@ static void bc_emit_inline_while(BcCompiler *bc, AstNode *node, int want_value) 
  * `n times { |i| ... }` / `(a..b) each { |i| ... }` (ast_inline_count_kind):
  * the counter runs from first to last in hidden locals (times_count /
  * range_bound check the receiver as the methods do), tested before the
- * first run and after each, so it never steps past last. The parameter is a
- * local of the body, set from the counter each run. A continue jumps to the
- * step. The value: times', the body's last (nil after a break or continue);
+ * first run and after each, so it never steps past last. The parameter is
+ * the counter itself when the body never assigns it and no block made there
+ * captures it (bc_count_in_param); else it is a local of the body, set from
+ * a hidden counter each run. A continue jumps to the step. The value: times', the body's last (nil after a break or continue);
  * each's, the range (nil after a break). */
 static void bc_emit_push_int(BcCompiler *bc, long long v) {
     emit_op_u16(bc, CLAYVM_OP_PUSH_CONST, (uint16_t)add_constant_int(bc, v));
@@ -1284,6 +1285,22 @@ static void bc_emit_push_int(BcCompiler *bc, long long v) {
 static void bc_emit_set_pop(BcCompiler *bc, int slot) {
     emit_op_u16(bc, CLAYVM_OP_SET_LOCAL, (uint16_t)slot);
     emit_op(bc, CLAYVM_OP_POP);
+}
+
+/* Can the counting loop count in its parameter (slot k, named for it)? Not
+ * when a block made in the body captures it: each run needs its own cell.
+ * The prescan says, and every local's capture mark is put back after it, as
+ * the body's own prescan makes them. */
+static int bc_count_in_param(BcCompiler *bc, NodeList *body, int k) {
+    int n = bc->local_count;
+    int *marks = (int *)malloc(sizeof(int) * (size_t)(n > 0 ? n : 1));
+    if (!marks) return 0;
+    for (int i = 0; i < n; i++) marks[i] = bc->locals[i].is_captured;
+    bc_prescan_list(bc, body);
+    int captured = bc->locals[k].is_captured;
+    for (int i = 0; i < n; i++) bc->locals[i].is_captured = marks[i];
+    free(marks);
+    return !captured;
 }
 
 static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) {
@@ -1299,7 +1316,16 @@ static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) 
             (uint16_t)bc_add_const(bc, CLAYVM_NIL_VAL));
         bc_emit_set_pop(bc, res);
     }
-    int k = bc_add_local(bc, "?:k");
+    const char *pname = ast_count_param(node);
+    int k = bc_add_local(bc, pname && !ast_assigns_name(body, pname) ? pname : "?:k");
+    if (k >= 0 && pname && strcmp(bc->locals[k].name, pname) == 0) {
+        if (bc_count_in_param(bc, body, k)) {
+            pname = NULL;               /* the body reads the counter */
+        } else {
+            free(bc->locals[k].name);
+            bc->locals[k].name = strdup("?:k");
+        }
+    }
     int last = bc_add_local(bc, "?:last");
     if (kind == AST_COUNT_TIMES) {
         bc_emit_expr(bc, recv);
@@ -1332,7 +1358,7 @@ static void bc_emit_inline_count(BcCompiler *bc, AstNode *node, int want_value) 
     BcLoop loop = { (int)bc->len, 0, NULL, 0, 0, 1, NULL, 0, 0, times_value ? res : -1 };
     void *outer = bc->inline_loop;
     bc->inline_loop = &loop;
-    bc_emit_inline_body_p(bc, body, times_value, ast_count_param(node), k);
+    bc_emit_inline_body_p(bc, body, times_value, pname, k);
     bc->inline_loop = outer;
     if (times_value) bc_emit_set_pop(bc, res);
     for (int i = 0; i < loop.ccount; i++) patch_jump(bc, loop.conts[i]);
