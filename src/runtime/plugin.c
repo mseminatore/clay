@@ -726,11 +726,12 @@ void clay_plugin_shutdown(void) {
     g_plugin_libs = NULL;
     g_plugin_lib_count = g_plugin_lib_cap = 0;
 
+    /* The prototypes are immortal and live until exit; the table stays (with
+     * its count reset) so they remain reachable for leak checkers */
     for (int i = 0; i < g_plugin_global_count; i++) {
         free((void *)g_plugin_globals[i].name);
+        g_plugin_globals[i].name = NULL;
     }
-    free(g_plugin_globals);
-    g_plugin_globals = NULL;
-    g_plugin_global_count = g_plugin_global_cap = 0;
+    g_plugin_global_count = 0;
     g_last_registered = NULL;
 }

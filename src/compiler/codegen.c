@@ -2021,10 +2021,10 @@ static void emit_fn_assign(CodeGen *cg, AstNode *stmt, int is_method) {
     int own = is_owned_temp(cg, val);
     if (has_slot_flag(cg, name) && !is_known_slot(cg, name)) {
         emit_flagged_write(cg, name, val, own);
-    } else if (is_known_slot(cg, name) && (!is_method || !is_fn_local(cg, name))) {
+    } else if (is_known_slot(cg, name) && !is_fn_local(cg, name)) {
         /* Known slot from the enclosing clone → write to the method's self
          * (even if a top-level variable has the same name; a parameter or
-         * local of the method still wins) */
+         * local of the method still wins, in a block too, as in the VM) */
         emit_retains(cg, val, 1 - own);
         emit_indent(cg);
         fprintf(cg->out, "clay_set_slot(%s, \"%s\", %s);\n", method_self_expr(cg), name, val);

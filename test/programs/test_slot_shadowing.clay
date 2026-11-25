@@ -87,4 +87,22 @@ W = U clone { tag = "slot" }
 check value("shadowing slot after caching", readTag value(W), "slot")
 check value("other clones keep the method", readTag value(u), "method")
 
+// A parameter or local named like a declared slot: assigning it in a block
+// sets the variable, not the slot (native code used to set the slot)
+Pth = Object clone {
+    path = "slot"
+    inl(path) { (true) ifTrue { path = "param" }; [path, self path] }
+    blk(path) { [1] each { |x| path = "param" }; [path, self path] }
+    deep(path) { [1] each { |x| [2] each { |y| path = path + "!" } }; [path, self path] }
+    stored(path) { b = { path = "param" }; b value; [path, self path] }
+    bparam() { [1] each { |path| path = "bp" }; self path }
+    noLocal() { [1] each { |x| path = "fromblock" }; self path }
+}
+check value("param set in an inlined ifTrue", Pth clone inl("arg"), ["param", "slot"])
+check value("param set in a block", Pth clone blk("arg"), ["param", "slot"])
+check value("param set in a nested block", Pth clone deep("arg"), ["arg!", "slot"])
+check value("param set in a stored block", Pth clone stored("arg"), ["param", "slot"])
+check value("block param named like a slot", Pth clone bparam, "slot")
+check value("no local: the block sets the slot", Pth clone noLocal, "fromblock")
+
 "PASS: slot shadowing" println
