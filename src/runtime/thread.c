@@ -148,6 +148,8 @@ static ClayValue thread_spawn(ClayObject *self, int argc, ClayValue *argv) {
 
     future->as.plugin.data = fd;
     future->as.plugin.free_fn = future_data_free;
+    future->as.plugin.size = 0;
+    future->as.plugin.owned = 0;
 
     /* Spawn the worker thread (no cycle collection while it runs) */
     CLAY_ATOMIC_INC(&clay_gc_threads_running);

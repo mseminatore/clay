@@ -148,6 +148,98 @@ static ClayPluginValue acc_mean(ClayPluginObject self, int argc, ClayPluginValue
     return api->make_float(a && a->count ? (float)(a->total / (double)a->count) : 0.0f);
 }
 
+/* API version 6: a type with data_size -- Clay allocates (and frees) the
+ * struct; free_fn releases only what the struct points to */
+typedef struct { char *label; long hits; } Box;
+
+static int g_box_freed = 0;   /* how many free_fn calls ran (StatsBox freed) */
+
+static void box_free(void *data) {
+    Box *b = (Box *)data;
+    free(b->label);
+    g_box_freed++;
+}
+
+static ClayPluginValue box_new(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    ClayPluginObject obj = api->clone(self);
+    Box *b = (Box *)api->get_data(obj);          /* zeroed, owned by Clay */
+    const char *s = argc > 0 ? api->to_string(argv[0]) : "";
+    b->label = (char *)malloc(strlen(s) + 1);
+    strcpy(b->label, s);
+    return (ClayPluginValue)obj;
+}
+
+static ClayPluginValue box_hit(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(argc); CLAY_UNUSED(argv);
+    Box *b = (Box *)api->get_data(self);
+    if (!b) { api->raise("use StatsBox new", "RuntimeError"); return CLAY_NIL; }
+    b->hits++;
+    return (ClayPluginValue)self;
+}
+
+static ClayPluginValue box_info(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(argc); CLAY_UNUSED(argv);
+    Box *b = (Box *)api->get_data(self);
+    if (!b) return CLAY_NIL;
+    ClayPluginValue out = api->array_new();
+    ClayPluginValue l = api->make_string(b->label ? b->label : "");
+    api->array_push(out, l);
+    api->release(l);
+    api->array_push(out, api->make_int(b->hits));
+    return out;
+}
+
+static ClayPluginValue box_freed(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self); CLAY_UNUSED(argc); CLAY_UNUSED(argv);
+    return api->make_int(g_box_freed);
+}
+
+/* StatsNative guarded(recv, sel): try_send with a buffer to clean up either
+ * way; [true, result] or [false, the error's message] */
+static int g_guard_freed = 0;
+static ClayPluginValue stats_guarded(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self); CLAY_UNUSED(argc);
+    char *scratch = (char *)malloc(64);
+    ClayPluginValue r;
+    int ok = api->try_send(argv[0], api->to_string(argv[1]), 0, NULL, &r);
+    free(scratch);
+    g_guard_freed++;
+    if (!ok) {
+        if (!api->is_error(r)) api->raise_value(r);   /* break / return: let it go on */
+        ClayPluginValue msg = api->send(r, "message", 0, NULL);
+        api->release(r);
+        r = msg;
+    }
+    ClayPluginValue out = api->array_new();
+    api->array_push(out, api->make_bool(ok));
+    api->array_push(out, r);
+    api->release(r);
+    return out;
+}
+
+/* StatsNative rethrow(block): run block value, clean up, raise again */
+static ClayPluginValue stats_rethrow(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self); CLAY_UNUSED(argc);
+    char *scratch = (char *)malloc(64);
+    ClayPluginValue r;
+    int ok = api->try_send(argv[0], "value", 0, NULL, &r);
+    free(scratch);
+    g_guard_freed++;
+    if (!ok) api->raise_value(r);
+    return r;
+}
+
+static ClayPluginValue stats_guard_freed(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self); CLAY_UNUSED(argc); CLAY_UNUSED(argv);
+    return api->make_int(g_guard_freed);
+}
+
+/* StatsNative toInt(v): api->to_int on any value */
+static ClayPluginValue stats_to_int(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(self); CLAY_UNUSED(argc);
+    return api->make_int(api->to_int(argv[0]));
+}
+
 static ClayPluginValue stats_version(ClayPluginObject self, int argc, ClayPluginValue *argv) {
     (void)self; (void)argc; (void)argv;
     return api->make_int(api->api_version);
@@ -166,7 +258,12 @@ static ClayPluginValue stats_extra(ClayPluginObject self, int argc, ClayPluginVa
 static ClayPluginMethod stats_methods[] = {
     { "os", stats_os }, { "extra", stats_extra }, { "sum", stats_sum }, { "scale", stats_scale }, { "apiVersion", stats_version },
     { "reverseBytes", stats_reverse_bytes }, { "byteCount", stats_byte_count }, { "counting", stats_counting },
-    { "summary", stats_summary }, { "dictKeys", stats_dict_keys }, { "dictLookup", stats_dict_lookup }, { NULL, NULL }
+    { "summary", stats_summary }, { "dictKeys", stats_dict_keys }, { "dictLookup", stats_dict_lookup },
+    { "guarded", stats_guarded }, { "rethrow", stats_rethrow }, { "guardFreed", stats_guard_freed },
+    { "toInt", stats_to_int }, { NULL, NULL }
+};
+static ClayPluginMethod box_methods[] = {
+    { "new", box_new }, { "hit", box_hit }, { "info", box_info }, { "freed", box_freed }, { NULL, NULL }
 };
 static ClayPluginMethod acc_methods[] = {
     { "new", acc_new }, { "add", acc_add }, { "mean", acc_mean }, { NULL, NULL }
@@ -176,6 +273,9 @@ CLAY_PLUGIN_EXPORT void stats_plugin_init(const ClayPluginAPI *clay_api) {
     api = clay_api;
     ClayPluginType t1 = { "StatsNative", stats_methods, NULL, 0 };
     api->register_type(&t1);
+    /* written before data_size worked: its own struct, set right after clone */
     ClayPluginType t2 = { "StatsAcc", acc_methods, acc_free, sizeof(Acc) };
     api->register_type(&t2);
+    ClayPluginType t3 = { "StatsBox", box_methods, box_free, sizeof(Box) };
+    api->register_type(&t3);
 }

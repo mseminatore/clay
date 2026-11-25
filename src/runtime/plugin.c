@@ -135,9 +135,15 @@ static ClayPluginObject api_register_type(const ClayPluginType *def) {
 
     /* Store free_fn and data_size on the prototype for use by clones */
     if (def->free_fn || def->data_size > 0) {
+        if (def->data_size > UINT32_MAX) {
+            fprintf(stderr, "clay: plugin type %s: data_size too large\n", def->name);
+            exit(1);
+        }
         proto->type = CLAY_TYPE_PLUGIN;
         proto->as.plugin.data = NULL;
         proto->as.plugin.free_fn = def->free_fn;
+        proto->as.plugin.size = (uint32_t)def->data_size;
+        proto->as.plugin.owned = 0;
     }
 
     /* Register as a global */
@@ -174,8 +180,14 @@ static ClayPluginValue api_make_nil(void) {
     return (ClayPluginValue)CLAY_NIL;
 }
 
+/* An Integer's value, a Float truncated toward zero (OverflowError when it
+ * is out of range or NaN), 0 for anything else -- like to_float */
 static intptr_t api_to_int(ClayPluginValue v) {
-    return clay_to_int((ClayValue)v);
+    ClayValue cv = (ClayValue)v;
+    if (CLAY_IS_INT(cv)) return clay_to_int(cv);
+    if (CLAY_IS_TAGGED_FLOAT(cv)) return clay_float_to_int(clay_float_untag(cv));
+    if (CLAY_IS_TYPE(cv, CLAY_TYPE_FLOAT)) return clay_float_to_int(CLAY_OBJ(cv)->as.number_float.value);
+    return 0;
 }
 
 static float api_to_float(ClayPluginValue v) {
@@ -210,9 +222,18 @@ static ClayPluginObject api_clone(ClayPluginObject proto) {
     ClayObject *p = (ClayObject *)proto;
     ClayObject *obj = clay_clone(p);
 
-    /* For plugin types, allocate native data if prototype specifies data_size */
-    if (p->type == CLAY_TYPE_PLUGIN && p->as.plugin.free_fn) {
-        obj->as.plugin.free_fn = p->as.plugin.free_fn;
+    /* A type registered with a data_size: the clone gets its own zeroed
+     * buffer, which Clay frees (after free_fn) with the object. Clones made
+     * by Clay's `clone` message don't get one: get_data is NULL there. */
+    if (obj->type == CLAY_TYPE_PLUGIN && obj->as.plugin.size > 0) {
+        void *buf = calloc(1, obj->as.plugin.size);
+        if (!buf) {
+            clay_release(obj);
+            clay_raise(CLAY_VAL(clay_error_new("out of memory", "RuntimeError")));
+            return NULL;
+        }
+        obj->as.plugin.data = buf;
+        obj->as.plugin.owned = 1;
     }
 
     return (ClayPluginObject)obj;
@@ -227,6 +248,18 @@ static ClayPluginValue api_send(ClayPluginValue recv, const char *sel,
 
 static void api_set_data(ClayPluginObject obj, void *data) {
     ClayObject *o = (ClayObject *)obj;
+    if (o->type != CLAY_TYPE_PLUGIN) {
+        /* a plain object becomes a plugin object: no cleanup, no buffer
+         * (its union held something else until now) */
+        o->as.plugin.free_fn = NULL;
+        o->as.plugin.size = 0;
+        o->as.plugin.owned = 0;
+    } else if (o->as.plugin.owned && o->as.plugin.data != data) {
+        /* replacing Clay's data_size buffer (a plugin written before
+         * data_size worked sets its own struct right after clone) */
+        free(o->as.plugin.data);
+        o->as.plugin.owned = 0;
+    }
     o->type = CLAY_TYPE_PLUGIN;
     o->as.plugin.data = data;
 }
@@ -371,6 +404,37 @@ static int api_dict_next(ClayPluginValue d, size_t *pos, const char **key, ClayP
     return 1;
 }
 
+/* --- version 6 --- */
+
+/* Send a message, catching what it raises: 1 and the result, or 0 and the
+ * raised value (both new references) */
+static int api_try_send(ClayPluginValue recv, const char *sel, int argc,
+                        ClayPluginValue *argv, ClayPluginValue *out) {
+    ClayTryFrame tf;
+    if (clay_try_push(&tf) == 0) {
+        ClayValue r = clay_send_owned((ClayValue)recv, sel, argc, (ClayValue *)argv);
+        clay_try_pop();
+        if (out) *out = (ClayPluginValue)r;
+        else clay_release_val(r);
+        return 1;
+    }
+    ClayValue err = clay_error_stack.current_error;
+    if (out) *out = (ClayPluginValue)err;
+    else clay_release_val(err);
+    return 0;
+}
+
+/* Raise a value again (an error, or what try_send caught); takes v's reference */
+static void api_raise_value(ClayPluginValue v) {
+    clay_raise((ClayValue)v);
+}
+
+/* An error, as opposed to a break / continue / non-local return in flight */
+static int api_is_error(ClayPluginValue v) {
+    ClayValue cv = (ClayValue)v;
+    return CLAY_IS_OBJ(cv) && !clay_is_control_signal(cv);
+}
+
 /* The global API vtable — single instance */
 static const ClayPluginAPI g_plugin_api = {
     .register_type    = api_register_type,
@@ -414,6 +478,9 @@ static const ClayPluginAPI g_plugin_api = {
     .dict_has         = api_dict_has,
     .dict_size        = api_dict_size,
     .dict_next        = api_dict_next,
+    .try_send         = api_try_send,
+    .raise_value      = api_raise_value,
+    .is_error         = api_is_error,
 };
 
 /* ------------------------------------------------------------------ */
