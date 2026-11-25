@@ -38,20 +38,38 @@ typedef void *lib_handle_t;
 /*  Plugin global registry                                             */
 /* ------------------------------------------------------------------ */
 
-#define MAX_PLUGIN_GLOBALS 64
+/* The registries below grow as needed (no fixed limit) */
+static void *grow_array(void *items, int *cap, int need, size_t elem) {
+    if (need <= *cap) return items;
+    int n = *cap ? *cap * 2 : 16;
+    while (n < need) n *= 2;
+    void *p = realloc(items, (size_t)n * elem);
+    if (!p) {
+        fprintf(stderr, "clay: out of memory registering a plugin\n");
+        exit(1);
+    }
+    *cap = n;
+    return p;
+}
 
-static struct {
+typedef struct {
     const char  *name;
     ClayObject  *proto;
-} g_plugin_globals[MAX_PLUGIN_GLOBALS];
-static int g_plugin_global_count = 0;
+} PluginGlobal;
+static PluginGlobal *g_plugin_globals = NULL;
+static int g_plugin_global_count = 0, g_plugin_global_cap = 0;
 
 /* Loaded plugin handles for cleanup, and the prototype each one registered
  * last (returned by `System plugin(name)`, including on repeat loads) */
-#define MAX_PLUGIN_HANDLES 32
-static lib_handle_t g_plugin_handles[MAX_PLUGIN_HANDLES];
-static ClayObject *g_plugin_handle_proto[MAX_PLUGIN_HANDLES];
-static int g_plugin_handle_count = 0;
+typedef struct {
+    lib_handle_t handle;
+    ClayObject  *proto;
+} PluginLib;
+static PluginLib *g_plugin_libs = NULL;
+static int g_plugin_lib_count = 0, g_plugin_lib_cap = 0;
+
+/* The prototype register_type made last: what `System plugin` returns */
+static ClayObject *g_last_registered = NULL;
 
 /* Library suffixes to try, most specific first. CMake builds MODULE libraries
  * as .so on macOS, so accept both there. */
@@ -67,8 +85,8 @@ static const char *const g_plugin_exts[] = {
 };
 
 /* Init functions of plugins linked in statically (native bricks) */
-static ClayPluginInitFunc g_static_inits[MAX_PLUGIN_HANDLES];
-static int g_static_init_count = 0;
+static ClayPluginInitFunc *g_static_inits = NULL;
+static int g_static_init_count = 0, g_static_init_cap = 0;
 
 /* Directory holding the clay executable's plugins/ folder ("" = unknown) */
 static char g_exe_dir[512] = "";
@@ -104,7 +122,8 @@ ClayObject *clay_plugin_global_object(int idx) {
 }
 
 static void register_plugin_global(const char *name, ClayObject *proto) {
-    if (g_plugin_global_count >= MAX_PLUGIN_GLOBALS) return;
+    g_plugin_globals = grow_array(g_plugin_globals, &g_plugin_global_cap,
+                                  g_plugin_global_count + 1, sizeof(PluginGlobal));
     g_plugin_globals[g_plugin_global_count].name = strdup(name);
     g_plugin_globals[g_plugin_global_count].proto = proto;
     g_plugin_global_count++;
@@ -148,6 +167,7 @@ static ClayPluginObject api_register_type(const ClayPluginType *def) {
 
     /* Register as a global */
     register_plugin_global(def->name, proto);
+    g_last_registered = proto;
 
     return (ClayPluginObject)proto;
 }
@@ -497,10 +517,10 @@ static int load_plugin_lib_ex(const char *path, ClayObject **proto_out) {
 
     /* Already loaded (dlopen/LoadLibrary return the same handle): drop the
      * extra reference and don't re-run init, which would re-register types */
-    for (int i = 0; i < g_plugin_handle_count; i++) {
-        if (g_plugin_handles[i] == handle) {
+    for (int i = 0; i < g_plugin_lib_count; i++) {
+        if (g_plugin_libs[i].handle == handle) {
             LIB_CLOSE(handle);
-            if (proto_out) *proto_out = g_plugin_handle_proto[i];
+            if (proto_out) *proto_out = g_plugin_libs[i].proto;
             return 1;
         }
     }
@@ -524,16 +544,16 @@ static int load_plugin_lib_ex(const char *path, ClayObject **proto_out) {
     }
 
     /* Call plugin init — this registers types and methods */
-    int before = g_plugin_global_count;
+    g_last_registered = NULL;
     init_fn(&g_plugin_api);
-    ClayObject *proto = g_plugin_global_count > before
-        ? g_plugin_globals[g_plugin_global_count - 1].proto : NULL;
+    ClayObject *proto = g_last_registered;
 
     /* Store handle for cleanup */
-    if (g_plugin_handle_count < MAX_PLUGIN_HANDLES) {
-        g_plugin_handle_proto[g_plugin_handle_count] = proto;
-        g_plugin_handles[g_plugin_handle_count++] = handle;
-    }
+    g_plugin_libs = grow_array(g_plugin_libs, &g_plugin_lib_cap,
+                               g_plugin_lib_count + 1, sizeof(PluginLib));
+    g_plugin_libs[g_plugin_lib_count].handle = handle;
+    g_plugin_libs[g_plugin_lib_count].proto = proto;
+    g_plugin_lib_count++;
     if (proto_out) *proto_out = proto;
     return 1;
 }
@@ -552,7 +572,9 @@ int clay_plugin_load_file(const char *path) {
 void clay_plugin_register_static(ClayPluginInitFunc init_fn) {
     for (int i = 0; i < g_static_init_count; i++)
         if (g_static_inits[i] == init_fn) return;
-    if (g_static_init_count < MAX_PLUGIN_HANDLES) g_static_inits[g_static_init_count++] = init_fn;
+    g_static_inits = grow_array(g_static_inits, &g_static_init_cap,
+                                g_static_init_count + 1, sizeof(ClayPluginInitFunc));
+    g_static_inits[g_static_init_count++] = init_fn;
     init_fn(&g_plugin_api);
 }
 
@@ -696,14 +718,19 @@ void clay_plugin_auto_load(const char *exe_path) {
 
 /* Cleanup all loaded plugins */
 void clay_plugin_shutdown(void) {
-    for (int i = 0; i < g_plugin_handle_count; i++) {
-        if (g_plugin_handles[i])
-            LIB_CLOSE(g_plugin_handles[i]);
+    for (int i = 0; i < g_plugin_lib_count; i++) {
+        if (g_plugin_libs[i].handle)
+            LIB_CLOSE(g_plugin_libs[i].handle);
     }
-    g_plugin_handle_count = 0;
+    free(g_plugin_libs);
+    g_plugin_libs = NULL;
+    g_plugin_lib_count = g_plugin_lib_cap = 0;
 
     for (int i = 0; i < g_plugin_global_count; i++) {
         free((void *)g_plugin_globals[i].name);
     }
-    g_plugin_global_count = 0;
+    free(g_plugin_globals);
+    g_plugin_globals = NULL;
+    g_plugin_global_count = g_plugin_global_cap = 0;
+    g_last_registered = NULL;
 }

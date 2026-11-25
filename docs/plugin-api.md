@@ -368,10 +368,8 @@ data, and from then on `free_fn` owns what you attached.
 - A native brick's plugin is built and loaded when the brick is imported, and linked into the
   executable by `clay --compile`.
 - Loading a plugin a second time does nothing: its init function runs once.
-- `System pluginGlobals` lists the names of the prototypes plugins have registered.
-- A program can load at most 32 plugin libraries, and plugins can register at most 64 globals.
-  A prototype registered past that limit still works through the value `register_type` returns,
-  but has no global name.
+- `System pluginGlobals` lists the names of the prototypes plugins have registered. There is
+  no limit on how many libraries a program loads or how many prototypes they register.
 - Plugins stay loaded until the program ends.
 
 ### Threads
@@ -393,7 +391,7 @@ goes. A plugin built for an older version keeps working in a newer Clay.
 | 3 | | `write_output` |
 | 4 | | `make_bytes`, `to_bytes` |
 | 5 | 0.3.5 | dicts |
-| 6 | 0.3.13 | `try_send`, `raise_value`, `is_error`; `ClayPluginType.data_size` allocates native data; `to_int` on a Float truncates it (before, it gave a meaningless number) |
+| 6 | 0.3.13 | `try_send`, `raise_value`, `is_error`; `ClayPluginType.data_size` allocates native data; `to_int` on a Float truncates it (before, it gave a meaningless number). From this release there is no limit on plugins loaded (32 before) or prototypes registered (64 before, in all). |
 
 To use a newer function and still load into an older Clay, check first:
 

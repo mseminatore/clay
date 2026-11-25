@@ -4,6 +4,7 @@
 #include "clay_plugin.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <stats_extra.h>
 
 #ifndef STATS_OS
@@ -240,6 +241,13 @@ static ClayPluginValue stats_to_int(ClayPluginObject self, int argc, ClayPluginV
     return api->make_int(api->to_int(argv[0]));
 }
 
+/* StatsMany<i> index -> i: many registered types (there used to be room for 64) */
+static ClayPluginValue many_index(ClayPluginObject self, int argc, ClayPluginValue *argv) {
+    CLAY_UNUSED(argc); CLAY_UNUSED(argv);
+    return api->get_slot(self, "_index");
+}
+static ClayPluginMethod many_methods[] = { { "index", many_index }, { NULL, NULL } };
+
 static ClayPluginValue stats_version(ClayPluginObject self, int argc, ClayPluginValue *argv) {
     (void)self; (void)argc; (void)argv;
     return api->make_int(api->api_version);
@@ -278,4 +286,11 @@ CLAY_PLUGIN_EXPORT void stats_plugin_init(const ClayPluginAPI *clay_api) {
     api->register_type(&t2);
     ClayPluginType t3 = { "StatsBox", box_methods, box_free, sizeof(Box) };
     api->register_type(&t3);
+    for (int i = 0; i < 70; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "StatsMany%d", i);
+        ClayPluginType t = { name, many_methods, NULL, 0 };
+        ClayPluginObject proto = api->register_type(&t);
+        api->set_slot(proto, "_index", api->make_int(i));
+    }
 }

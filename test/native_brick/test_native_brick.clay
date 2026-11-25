@@ -68,6 +68,11 @@ check value("a non-local return passes through try_send", NonLocal run, 5)
 check value("a break passes through (not is_error)", StatsNative guarded({ break }, "value"), nil)
 check value("cleanup ran for both", StatsNative guardFreed, g0 + 3)
 
+// no fixed limit on registered types (there was room for 64 in all)
+check value("the 1st of many registered types", StatsMany0 index, 0)
+check value("the 70th, past the old limit", StatsMany69 index, 69)
+check value("pluginGlobals lists them all", ((System pluginGlobals) filter { |n| n startsWith("StatsMany") }) size, 70)
+
 // type: a plugin object is named after its prototype, or the wrapper cloned from it
 check value("plugin prototype type", StatsAcc type, "StatsAcc")
 check value("plugin object type", Stats accumulator type, "StatsAcc")
