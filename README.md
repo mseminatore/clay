@@ -56,7 +56,13 @@ server, ORM, templates, …)
 
 ## Installing Clay
 
-Download the right platform archive from the
+On macOS and Linux, install with [Homebrew](https://brew.sh) (`brew upgrade` updates it):
+
+```sh
+brew install mseminatore/clay/clay
+```
+
+Or download the right platform archive from the
 [releases page](https://github.com/mseminatore/clay/releases) (Linux x86_64 and arm64, macOS
 arm64 and x86_64, Windows x86_64), unpack it anywhere, and add its `bin` folder to your `PATH`:
 

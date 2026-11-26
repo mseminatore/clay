@@ -1,0 +1,42 @@
+name: Homebrew
+
+# Points the tap's formula (github.com/mseminatore/homebrew-clay) at a release
+# once it is published: release.yml creates releases as drafts, and a draft's
+# archives can't be downloaded by brew until then.
+#
+# Needs the secret HOMEBREW_TAP_TOKEN: a fine-grained token with
+# Contents: read and write on mseminatore/homebrew-clay.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to point the formula at (e.g. v0.3.14)"
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the tap
+        uses: actions/checkout@v4
+        with:
+          repository: mseminatore/homebrew-clay
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update the formula
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -O "$RUNNER_TEMP/SHA256SUMS"
+          bin/bump "${TAG#v}" "$RUNNER_TEMP/SHA256SUMS"
+
+      - name: Push
+        run: |
+          git diff --quiet && { echo "formula already at $TAG"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "clay ${TAG#v}"
+          git push

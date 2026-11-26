@@ -5,6 +5,10 @@ ready, continue with the [language tour](language-tour.md).
 
 ## Installing
 
+On macOS and Linux the simplest way is [Homebrew](https://brew.sh): `brew install mseminatore/clay/clay`
+installs the release archive for your platform, and `brew upgrade` updates it. `clay --compile` and
+native bricks still need a C compiler (see below).
+
 Each [release](https://github.com/mseminatore/clay/releases) has an archive per platform:
 `clay-<version>-linux-x86_64.tar.gz`, `-linux-arm64.tar.gz`, `-macos-arm64.tar.gz`, `-macos-x86_64.tar.gz` and
 `-windows-x86_64.zip`, plus `SHA256SUMS` to check the download against. Unpack the archive anywhere
