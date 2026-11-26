@@ -960,6 +960,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         Parser parser;
         parser_init(&parser, input, "<repl>");
         AstNode *program = parser_parse(&parser);
+        parser_free_imports(&parser);   /* only needed while parsing */
 
         if (!program || parser.had_error) {
             fprintf(stderr, "%s%sclay: parse error%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
@@ -1112,6 +1113,7 @@ static int dump_bytecode(const char *filename) {
     Parser parser;
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
+    parser_free_imports(&parser);   /* only needed while parsing */
     if (!program || parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
         return 1;
@@ -1207,6 +1209,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     Parser parser;
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
+    parser_free_imports(&parser);   /* only needed while parsing */
 
     if (!program || parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
@@ -1443,6 +1446,7 @@ static int clay_main(int argc, char *argv[]) {
         Parser parser;
         parser_init(&parser, source, source_file);
         AstNode *program = parser_parse(&parser);
+        parser_free_imports(&parser);   /* only needed while parsing */
         if (parser.had_error) {
             fprintf(stderr, "clay: compilation failed due to parse errors\n");
             if (program) ast_free(program);
@@ -1480,6 +1484,7 @@ static int clay_main(int argc, char *argv[]) {
     Parser parser;
     parser_init(&parser, source, source_file);
     AstNode *program = parser_parse(&parser);
+    parser_free_imports(&parser);   /* only needed while parsing */
 
     if (parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");

@@ -1168,6 +1168,7 @@ int dap_run(const char *filename) {
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
     parser_error_hook = NULL;
+    parser_free_imports(&parser);
 
     if (!program || parser.had_error) {
         dap_send_output("stderr", "clay: compilation failed due to parse errors\n");
