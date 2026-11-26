@@ -884,11 +884,13 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
     clay_plugin_auto_load(g_exe_path);
     repl_enable_color();
 
-    clayvm_vm_t vm;
+    /* static: the trampolines (g_bc) and Thread workers (g_main_bc) point at
+     * these, and what the compiler owns lives as long as the program */
+    static clayvm_vm_t vm;
     clayvm_vm_init(&vm);
     if (trace_mode) vm.trace_enabled = 1;
 
-    BcCompiler bc;
+    static BcCompiler bc;
     bc_compiler_init(&bc, &vm);
     bc.source_file = "<repl>";
     clay_source_file = "<repl>";
@@ -958,6 +960,7 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         Parser parser;
         parser_init(&parser, input, "<repl>");
         AstNode *program = parser_parse(&parser);
+        parser_free_imports(&parser);   /* only needed while parsing */
 
         if (!program || parser.had_error) {
             fprintf(stderr, "%s%sclay: parse error%s\n", C(C_BOLD), C(C_RED), C(C_RESET));
@@ -1062,7 +1065,8 @@ static int run_vm_repl(int trace_mode, int step_mode, int mem_stats) {
         printf("  Objects freed:     %ld\n", clay_dealloc_count);
         printf("  Still live:        %ld\n", clay_alloc_count - clay_dealloc_count);
     }
-    clayvm_vm_free(&vm);
+    /* no clayvm_vm_free: the VM's globals and constants (and the compiler's
+     * tables) live until exit, and freeing half of them only orphans the rest */
     return 0;
 }
 
@@ -1109,6 +1113,7 @@ static int dump_bytecode(const char *filename) {
     Parser parser;
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
+    parser_free_imports(&parser);   /* only needed while parsing */
     if (!program || parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
         return 1;
@@ -1175,11 +1180,13 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     clay_plugin_auto_load(g_exe_path);
     repl_enable_color();
 
-    clayvm_vm_t vm;
+    /* static: the trampolines (g_bc) and Thread workers (g_main_bc) point at
+     * these, and what the compiler owns lives as long as the program */
+    static clayvm_vm_t vm;
     clayvm_vm_init(&vm);
     if (trace_mode) vm.trace_enabled = 1;
 
-    BcCompiler bc;
+    static BcCompiler bc;
     bc_compiler_init(&bc, &vm);
     bc.source_file = filename;
     clay_source_file = filename;
@@ -1202,6 +1209,7 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
     Parser parser;
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
+    parser_free_imports(&parser);   /* only needed while parsing */
 
     if (!program || parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");
@@ -1271,7 +1279,8 @@ static int run_vm_file(const char *filename, int trace_mode, int step_mode) {
 
     ast_free(program);
     free(source);
-    clayvm_vm_free(&vm);
+    /* no clayvm_vm_free: the VM's globals and constants (and the compiler's
+     * tables) live until exit, and freeing half of them only orphans the rest */
     return exit_code;
 }
 
@@ -1437,6 +1446,7 @@ static int clay_main(int argc, char *argv[]) {
         Parser parser;
         parser_init(&parser, source, source_file);
         AstNode *program = parser_parse(&parser);
+        parser_free_imports(&parser);   /* only needed while parsing */
         if (parser.had_error) {
             fprintf(stderr, "clay: compilation failed due to parse errors\n");
             if (program) ast_free(program);
@@ -1474,6 +1484,7 @@ static int clay_main(int argc, char *argv[]) {
     Parser parser;
     parser_init(&parser, source, source_file);
     AstNode *program = parser_parse(&parser);
+    parser_free_imports(&parser);   /* only needed while parsing */
 
     if (parser.had_error) {
         fprintf(stderr, "clay: compilation failed due to parse errors\n");

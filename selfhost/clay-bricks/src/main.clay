@@ -1429,7 +1429,7 @@ BrickScaffold = Object clone {
             "",
             "CLAY_PLUGIN_EXPORT void @PLUGIN@_plugin_init(const ClayPluginAPI *clay_api) {",
             "    api = clay_api;",
-            "    ClayPluginType def = { \"@CAMEL@Core\", methods, counter_free, sizeof(void *) };",
+            "    ClayPluginType def = { \"@CAMEL@Core\", methods, counter_free, 0 };",
             "    api->register_type(&def);",
             "}"
         ] join("\n") + "\n"

@@ -223,6 +223,9 @@ struct ClayObject {
         struct {
             void *data;
             void (*free_fn)(void *data);
+            uint32_t size;    /* ClayPluginType.data_size, inherited by clones */
+            uint8_t  owned;   /* 1 = data is Clay's zeroed buffer of size bytes,
+                               * which clay_dealloc frees after free_fn */
         } plugin;
 
         struct {

@@ -5,7 +5,7 @@ check = { |what, got, want|
     (got == want) ifFalse { raise("FAIL: " + what + ": " + got toString + " != " + want toString) }
 }
 
-check value("plugin API version", StatsNative apiVersion, 5)
+check value("plugin API version", StatsNative apiVersion, 6)
 check value("cflags for this platform only", StatsNative os, ((System platform) == "macos") ifTrue { 1 } ifFalse { ((System platform) == "linux") ifTrue { 2 } ifFalse { 3 } })
 check value("-I@/ is a directory in the brick", StatsNative extra, 7)
 check value("sum", Stats sum([1, 2, 3.5]), 6.5)
@@ -43,6 +43,35 @@ check value("dict_set writes the caller's Dict", d get("seen"), true)
 check value("a missing key", StatsNative dictLookup(d, "zz"), [4, false, nil])
 check value("a non-Dict", StatsNative dictLookup([1], "a"), [0, false, nil])
 check value("dictKeys refuses a non-Dict", (try { StatsNative dictKeys(5) } catch { |e| e type }), "ArgumentError")
+
+check value("to_int: integers, floats truncated, others 0", [StatsNative toInt(-7), StatsNative toInt(2.9), StatsNative toInt(-2.9), StatsNative toInt("12"), StatsNative toInt(nil)], [-7, 2, -2, 0, 0])
+check value("to_int: a float out of range", (try { StatsNative toInt(1e30) } catch { |e| e type }), "OverflowError")
+// API version 6: data_size buffers
+bx = StatsBox new("box")
+bx hit hit
+check value("data_size: a zeroed buffer per clone", bx info, ["box", 2])
+check value("data_size: separate buffers", StatsBox new("other") info, ["other", 0])
+freedBefore = StatsBox freed
+bx = nil
+check value("data_size: free_fn runs, then Clay frees the buffer", StatsBox freed, freedBefore + 1)
+check value("data_size: Clay's clone has no buffer", (try { (StatsBox clone) hit } catch { |e| e message }), "use StatsBox new")
+check value("data_size: an older plugin's set_data replaces the buffer", (StatsAcc new add(2, 4)) mean, 3)
+// API version 6: try_send / raise_value / is_error
+check value("try_send: a result", StatsNative guarded([1, 2, 3], "size"), [true, 3])
+check value("try_send: an error", StatsNative guarded(5, "noSuchThing") first, false)
+check value("try_send: a raised error's message", StatsNative guarded({ raise("boom") }, "value"), [false, "boom"])
+g0 = StatsNative guardFreed
+check value("raise_value: the error goes on", (try { StatsNative rethrow({ raise("again") }) } catch { |e| e message }), "again")
+check value("raise_value: after cleanup", StatsNative guardFreed, g0 + 1)
+NonLocal = Object clone { run() { StatsNative rethrow({ return 5 }); 99 } }
+check value("a non-local return passes through try_send", NonLocal run, 5)
+check value("a break passes through (not is_error)", StatsNative guarded({ break }, "value"), nil)
+check value("cleanup ran for both", StatsNative guardFreed, g0 + 3)
+
+// no fixed limit on registered types (there was room for 64 in all)
+check value("the 1st of many registered types", StatsMany0 index, 0)
+check value("the 70th, past the old limit", StatsMany69 index, 69)
+check value("pluginGlobals lists them all", ((System pluginGlobals) filter { |n| n startsWith("StatsMany") }) size, 70)
 
 // type: a plugin object is named after its prototype, or the wrapper cloned from it
 check value("plugin prototype type", StatsAcc type, "StatsAcc")

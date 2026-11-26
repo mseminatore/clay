@@ -86,6 +86,24 @@ static int already_imported(Parser *p, const char *path) {
     return 0;
 }
 
+/* An imported file's source text and resolved path: its tokens and AST nodes
+ * point into them, so they are kept (reachable) for the life of the process */
+typedef struct ImportBuffer {
+    char *source;
+    char *path;
+    struct ImportBuffer *next;
+} ImportBuffer;
+static ImportBuffer *g_import_buffers = NULL;
+
+static void keep_import_buffers(char *source, char *path) {
+    ImportBuffer *b = (ImportBuffer *)malloc(sizeof(ImportBuffer));
+    if (!b) return;   /* still usable; only unreachable */
+    b->source = source;
+    b->path = path;
+    b->next = g_import_buffers;
+    g_import_buffers = b;
+}
+
 static void mark_imported(Parser *p, const char *path) {
     ImportEntry *e = (ImportEntry *)malloc(sizeof(ImportEntry));
     e->path = strdup(path);
@@ -1404,9 +1422,8 @@ static AstNode *parse_import_file(Parser *parent, const char *import_path) {
     /* Update parent's import list with any new imports from the child */
     parent->imported = import_parser.imported;
 
-    /* Note: source and resolved are leaked intentionally —
-     * they're needed while the AST references them.
-     * A real compiler would use an arena allocator. */
+    /* source and resolved are needed while the AST references them */
+    keep_import_buffers(source, resolved);
     return program;
 }
 
@@ -1471,16 +1488,17 @@ AstNode *parser_parse(Parser *p) {
                             }
                         }
 
+                        free(imported->as.program.stmts.items);   /* the nodes moved */
                         imported->as.program.stmts.items = NULL;
                         imported->as.program.stmts.count = 0;
                         ast_free(imported);
-                        stmt->as.import.alias = NULL; /* prevent double free */
                     } else {
                         /* Normal import: splice statements directly */
                         for (int i = 0; i < imported->as.program.stmts.count; i++) {
                             nodelist_push(&program->as.program.stmts,
                                           imported->as.program.stmts.items[i]);
                         }
+                        free(imported->as.program.stmts.items);   /* the nodes moved */
                         imported->as.program.stmts.items = NULL;
                         imported->as.program.stmts.count = 0;
                         ast_free(imported);

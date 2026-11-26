@@ -1403,8 +1403,9 @@ CodeGen = Object clone {
         ((self hasSlotFlag(nm)) && (self isKnownSlot(nm)) == false) ifTrue {
             self flaggedWrite(nm, v, o)
         } ifFalse {
-            // a known slot beats a top-level variable; a parameter or local wins
-            ((self isKnownSlot(nm)) && (isMethod == false || (self isFnLocal(nm)) == false)) ifTrue {
+            // a known slot beats a top-level variable; a parameter or local wins,
+            // in a block too
+            ((self isKnownSlot(nm)) && (self isFnLocal(nm)) == false) ifTrue {
                 self retains(v, 1 - o)
                 self line("clay_set_slot(" + (self methodSelfExpr) + ", \"" + nm + "\", " + v + ");")
             } ifFalse {

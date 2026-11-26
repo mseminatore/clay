@@ -241,9 +241,12 @@ ClayObject *clay_clone(ClayObject *proto) {
                 clay_retain(CLAY_OBJ(v));
         }
     } else if (proto && proto->type == CLAY_TYPE_PLUGIN) {
-        /* Inherit free_fn from prototype; data starts NULL */
+        /* Inherit free_fn and data_size from prototype; data starts NULL
+         * (api->clone gives a plugin's own clones their buffer) */
         obj->as.plugin.data = NULL;
         obj->as.plugin.free_fn = proto->as.plugin.free_fn;
+        obj->as.plugin.size = proto->as.plugin.size;
+        obj->as.plugin.owned = 0;
     } else if (proto && proto->type == CLAY_TYPE_VEC3) {
         obj->as.vec3.x = proto->as.vec3.x;
         obj->as.vec3.y = proto->as.vec3.y;

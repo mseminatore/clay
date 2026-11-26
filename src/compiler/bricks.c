@@ -1603,7 +1603,7 @@ static const char TPL_NATIVE_C[] =
     "\n"
     "CLAY_PLUGIN_EXPORT void @PLUGIN@_plugin_init(const ClayPluginAPI *clay_api) {\n"
     "    api = clay_api;\n"
-    "    ClayPluginType def = { \"@CAMEL@Core\", methods, counter_free, sizeof(void *) };\n"
+    "    ClayPluginType def = { \"@CAMEL@Core\", methods, counter_free, 0 };\n"
     "    api->register_type(&def);\n"
     "}\n";
 

@@ -1145,10 +1145,11 @@ int dap_run(const char *filename) {
     clay_source_file = g_dap.source_file;
 
     /* Set up VM */
-    clayvm_vm_t vm;
+    /* static: g_dap and the trampolines point at these until exit */
+    static clayvm_vm_t vm;
     clayvm_vm_init(&vm);
 
-    BcCompiler bc;
+    static BcCompiler bc;
     bc_compiler_init(&bc, &vm);
     bc.source_file = filename;
 
@@ -1167,6 +1168,7 @@ int dap_run(const char *filename) {
     parser_init(&parser, source, filename);
     AstNode *program = parser_parse(&parser);
     parser_error_hook = NULL;
+    parser_free_imports(&parser);
 
     if (!program || parser.had_error) {
         dap_send_output("stderr", "clay: compilation failed due to parse errors\n");
@@ -1311,7 +1313,7 @@ int dap_run(const char *filename) {
     clay_output_fn = NULL;
     ast_free(program);
     free(source);
-    clayvm_vm_free(&vm);
+    /* no clayvm_vm_free: the VM's globals and constants live until exit */
 
     for (int i = 0; i < g_dap.source_count; i++) {
         free(g_dap.sources[i].file);

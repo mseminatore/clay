@@ -162,6 +162,9 @@ static void clay_dealloc(ClayObject *obj) {
         case CLAY_TYPE_PLUGIN:
             if (obj->as.plugin.data && obj->as.plugin.free_fn)
                 obj->as.plugin.free_fn(obj->as.plugin.data);
+            if (obj->as.plugin.owned) free(obj->as.plugin.data);
+            obj->as.plugin.data = NULL;
+            obj->as.plugin.owned = 0;
             break;
         case CLAY_TYPE_COND: {
             ClayValue v = obj->as.cond.value;

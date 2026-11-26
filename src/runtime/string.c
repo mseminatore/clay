@@ -210,14 +210,15 @@ static ClayValue string_slice(ClayObject *self, int argc, ClayValue *argv) {
 }
 
 static ClayValue string_split(ClayObject *self, int argc, ClayValue *argv) {
-    ClayObject *arr = clay_array_new();
-    /* No argument splits on spaces; anything else must be a String */
+    /* No argument splits on spaces; anything else must be a String (checked
+     * before the result exists: a raise would leak it) */
     const char *delim = " ";
     size_t delim_len = 1;
     if (argc > 0) {
         delim = clay_arg_string(argc, argv, 0, "String split");
         delim_len = CLAY_OBJ(argv[0])->as.string.length;     /* may hold NUL bytes */
     }
+    ClayObject *arr = clay_array_new();
     if (delim_len == 0) {
         /* Split into individual characters */
         for (size_t i = 0; i < self->as.string.length; i++) {

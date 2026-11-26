@@ -43,10 +43,18 @@
  * cloned from (ClayPluginType.name, or the variable a Clay wrapper assigns it
  * to, as in `Image = ImageCore clone { ... }`).
  *
- * Ownership: make_* and the returned values of send/array_new/from_floats/
- * dict_new are new references. Return one from a method, or release it.
- * Arguments and array_get/dict_get/dict_next results are borrowed: retain
- * them to keep them.
+ * Ownership: make_* and the returned values of send/try_send/array_new/
+ * from_floats/dict_new/make_bytes are new references. Return one from a
+ * method, or release it. Arguments and get_slot/array_get/dict_get/dict_next
+ * results are borrowed: retain them to keep them.
+ *
+ * Errors: raise, and any error inside send, to_floats or another call into
+ * Clay, unwinds with longjmp straight past the plugin's C frames, so the code
+ * after the call doesn't run. Don't hold memory or a lock across such a call
+ * that only that code would release; use try_send (version 6) to get control
+ * back first.
+ *
+ * Full reference: docs/plugin-api.md.
  */
 #ifndef CLAY_PLUGIN_H
 #define CLAY_PLUGIN_H
@@ -88,8 +96,11 @@ typedef struct {
 typedef struct {
     const char        *name;       /* Prototype name ("Canvas", "MyMath") */
     ClayPluginMethod  *methods;    /* NULL-terminated method array */
-    void (*free_fn)(void *data);   /* Optional: cleanup for native data */
-    size_t data_size;              /* Optional: bytes for per-instance native data */
+    void (*free_fn)(void *data);   /* Optional: runs on an object's native data when it is freed */
+    size_t data_size;              /* Optional (works from API version 6): api->clone gives
+                                    * each clone a zeroed buffer of this many bytes as its
+                                    * native data. Clay frees the buffer after free_fn, so
+                                    * free_fn must only release what the buffer points to. */
 } ClayPluginType;
 
 /* Plugin API vtable — passed to clay_plugin_init */
@@ -196,9 +207,26 @@ typedef struct ClayPluginAPI {
     size_t          (*dict_size)(ClayPluginValue d);
     int             (*dict_next)(ClayPluginValue d, size_t *pos,
                                  const char **key, ClayPluginValue *v);
+
+    /* ---- version 6 ---- */
+
+    /* Errors without losing control. try_send sends like send, but catches
+     * what the method raises: it returns 1 and sets *out to the result, or
+     * returns 0 and sets *out to the raised value (both new references).
+     * After a 0, clean up, then either raise_value(*out) to let it go on
+     * (it takes the reference) or release it to swallow the error. Swallow
+     * only what is_error says is an error: break, continue and non-local
+     * return travel the same way (a block passed along that runs `return`),
+     * and swallowing one stops it halfway. */
+    int             (*try_send)(ClayPluginValue recv, const char *sel, int argc,
+                                ClayPluginValue *argv, ClayPluginValue *out);
+    void            (*raise_value)(ClayPluginValue v);   /* does not return */
+    int             (*is_error)(ClayPluginValue v);
+
+    /* Also new in version 6: ClayPluginType.data_size allocates native data. */
 } ClayPluginAPI;
 
-#define CLAY_PLUGIN_API_VERSION 5
+#define CLAY_PLUGIN_API_VERSION 6
 
 /* Plugin entry point signature */
 typedef void (*ClayPluginInitFunc)(const ClayPluginAPI *api);

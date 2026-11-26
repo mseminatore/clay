@@ -18,6 +18,8 @@ native executables.
 5. **[Native compilation, FFI and plugins](native-and-plugins.md)** —
    `clay --compile`, the generated C, the architecture, calling C through FFI,
    and writing plugins.
+   - **[Plugin API reference](plugin-api.md)** — every function in
+     `clay_plugin.h`, ownership, errors, native data and API versions.
 6. **[Debugging and editor support](debugging.md)** — tracing, the stepper,
    VS Code debugging, and the VS Code extension.
 7. **[Known limitations](limitations.md)** — rough edges in this release and

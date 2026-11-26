@@ -138,74 +138,13 @@ automatically at startup, so its prototypes are available without the call
 (loading the same plugin twice is harmless). The CMake build compiles the
 examples in [`examples/plugins/`](../examples/plugins/) into `build/plugins/`.
 
-### Plugin API version 2
+### Writing plugins
 
-`api->api_version` says which functions the table has; fields are only ever
-added at the end. Version 2 adds what wrapping a C library needs:
-
-- `retain` / `release`: keep a Clay value beyond the call (e.g. inside native
-  data). `make_*`, `send`, `array_new` and `from_floats` return new references;
-  arguments and `array_get` results are borrowed.
-- Arrays: `is_array`, `array_new`, `array_size`, `array_get`, `array_push`.
-- Numbers in bulk: `to_floats(arr, out, max)` flattens an Array (of rows) of
-  numbers into a `float` buffer and returns the count (call it with `max` 0 to
-  size the buffer); `from_floats(data, n, cols)` makes an Array of numbers, or of
-  rows of `cols` numbers. Data crosses into C in one call, not value by value.
-
-### Plugin API version 3
-
-Version 3 adds `write_output(text)`: it writes where Clay's own output goes, which
-is stdout, or the Debug Console when Clay runs as a debug adapter (`--dap`).
-Use it for output the user should see (progress, logs) instead of `printf` or
-`fputs(stdout)`, because in a debug session C's stdout is the protocol channel
-and such text is lost. Check `api->api_version >= 3` before using it.
-
-### Plugin API version 4
-
-Version 4 adds binary data. A Clay String is a sequence of bytes of known length and can hold
-NUL bytes, but `make_string` and `to_string` work with C strings and stop at the first NUL. Use
-
-- `make_bytes(data, len)` to make a String of exactly `len` bytes, and
-- `to_bytes(v, &len)` to read a String's bytes and its length (it returns `NULL`, with `len` 0,
-  if `v` is not a String; the pointer is valid while `v` is alive)
-
-for anything that isn't text: socket data, files, images, compressed data. Check
-`api->api_version >= 4` first.
-
-### Plugin API version 5
-
-Version 5 (Clay 0.3.5) adds Dicts, whose keys are strings and keep the order
-they were added in:
-
-- `dict_new()` makes an empty Dict (a new reference);
-- `dict_set(d, key, v)` stores `v` under `key`, retaining `v` and copying the key;
-- `dict_get(d, key)` returns the value, borrowed, or nil if the key is missing;
-  `dict_has(d, key)` tells a missing key from one that holds nil;
-- `dict_size(d)` counts the entries, and `dict_next(d, &pos, &key, &v)` walks
-  them: start with `pos` 0; each call sets `key` and `v` (borrowed) and returns
-  1, or returns 0 after the last entry;
-- `is_dict(v)` checks a value first; the others ignore a value that isn't a Dict.
-
-```c
-ClayPluginValue info = api->dict_new();
-api->dict_set(info, "width", api->make_int(w));
-ClayPluginValue fmt = api->make_string("png");
-api->dict_set(info, "format", fmt);
-api->release(fmt);        /* dict_set retained it */
-return info;              /* Clay sees {"width": ..., "format": "png"} */
-```
-
-Check `api->api_version >= 5` first.
-
-A C struct per object: register the type with a `free_fn`, `clone` the
-prototype in a constructor method, `set_data` the struct on the clone, and
-`get_data` it in the other methods; `free_fn` runs when the object is freed.
-
-`CLAY_NIL` is nil (a method's "no result", and the return after `api->raise`,
-which doesn't return), and `CLAY_UNUSED(x)` marks a parameter a method ignores.
-`type` on a plugin object is its prototype's name: the `ClayPluginType` name, or
-the name of a Clay wrapper cloned from it (`Image = ImageCore clone { ... }`
-makes `Image open(path) type` say `Image`).
+The [Plugin API reference](plugin-api.md) covers the whole API: every function in
+`ClayPluginAPI`, which values a plugin owns and which it borrows, how errors unwind through C
+(and `try_send`, to clean up first), wrapping a C struct as an object's native data
+(`set_data`, or a `data_size` buffer), how loading works, and what each API version added.
+`api->api_version` says which functions a Clay provides; fields are only ever added.
 
 ## Native bricks
 
