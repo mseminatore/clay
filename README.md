@@ -33,7 +33,8 @@ evens map { |n| n * n } println              // [4, 16, 36, 64, 100]
 5 times { |i| i println }                    // 0\n 1\n 2\n 3\n 4\n
 (1..5) each { |i| i println }                // 1\n 2\n 3\n 4\n 5\n
 
-i = 0 { i < 5 } whileTrue {                  // 0\n 1\n 2\n 3\n 4\n
+i = 0
+{ i < 5 } whileTrue {                        // 0\n 1\n 2\n 3\n 4\n
   i println; 
   i += 1
 }
