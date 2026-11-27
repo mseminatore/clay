@@ -59,7 +59,7 @@ server, ORM, templates, …)
 On macOS and Linux, install with [Homebrew](https://brew.sh) (`brew upgrade` updates it):
 
 ```sh
-brew install mseminatore/clay/clay
+brew install mseminatore/clay/clay-lang
 ```
 
 Or download the right platform archive from the
